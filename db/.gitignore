@@ -1,0 +1,22 @@
+# Database connection strings and secrets
+*.env
+*.key
+*.pem
+
+# MySQL dumps
+*.sql.gz
+*.sql.bak
+backup/
+
+# MongoDB dumps
+mongodb_backup/
+dump/
+
+# Test databases (created during testing)
+*_test_*
+
+# Temporary files
+*.tmp
+*.log
+.DS_Store
+
