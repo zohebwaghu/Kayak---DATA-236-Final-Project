@@ -1,0 +1,218 @@
+{
+  "listings": [
+    {
+      "listingId": "flight-001",
+      "listingType": "flight",
+      "price": 280.0,
+      "avg_30d_price": 350.0,
+      "availability": 3,
+      "rating": 4.5,
+      "departure": "SFO",
+      "arrival": "MIA",
+      "date": "2025-11-15",
+      "airline": "United",
+      "duration": 360,
+      "stops": 0,
+      "has_promotion": false
+    },
+    {
+      "listingId": "flight-002",
+      "listingType": "flight",
+      "price": 450.0,
+      "avg_30d_price": 480.0,
+      "availability": 50,
+      "rating": 4.2,
+      "departure": "SFO",
+      "arrival": "NYC",
+      "date": "2025-11-20",
+      "airline": "Delta",
+      "duration": 330,
+      "stops": 0,
+      "has_promotion": false
+    },
+    {
+      "listingId": "flight-003",
+      "listingType": "flight",
+      "price": 120.0,
+      "avg_30d_price": 180.0,
+      "availability": 5,
+      "rating": 4.6,
+      "departure": "LAX",
+      "arrival": "LAS",
+      "date": "2025-11-10",
+      "airline": "Southwest",
+      "duration": 75,
+      "stops": 0,
+      "has_promotion": true
+    },
+    {
+      "listingId": "hotel-001",
+      "listingType": "hotel",
+      "hotelName": "Grand Hyatt Miami",
+      "price": 150.0,
+      "avg_30d_price": 200.0,
+      "availability": 2,
+      "rating": 4.8,
+      "city": "Miami",
+      "starRating": 4.5,
+      "amenities": ["wifi", "pool", "breakfast", "gym", "spa"],
+      "policies": {
+        "cancellation": "refundable",
+        "pets": true,
+        "check_in": "15:00",
+        "check_out": "11:00"
+      },
+      "location": {
+        "near_transit": true,
+        "city_center": true,
+        "near_airport": false
+      },
+      "has_promotion": false
+    },
+    {
+      "listingId": "hotel-002",
+      "listingType": "hotel",
+      "hotelName": "Budget Inn Miami",
+      "price": 80.0,
+      "avg_30d_price": 85.0,
+      "availability": 10,
+      "rating": 3.8,
+      "city": "Miami",
+      "starRating": 2.5,
+      "amenities": ["wifi"],
+      "policies": {
+        "cancellation": "non-refundable",
+        "pets": false,
+        "check_in": "14:00",
+        "check_out": "10:00"
+      },
+      "location": {
+        "near_transit": false,
+        "city_center": false,
+        "near_airport": true
+      },
+      "has_promotion": false
+    },
+    {
+      "listingId": "hotel-003",
+      "listingType": "hotel",
+      "hotelName": "Beachfront Resort Miami",
+      "price": 200.0,
+      "avg_30d_price": 250.0,
+      "availability": 1,
+      "rating": 4.9,
+      "city": "Miami",
+      "starRating": 5.0,
+      "amenities": ["wifi", "pool", "breakfast", "gym", "spa", "beach"],
+      "policies": {
+        "cancellation": "refundable",
+        "pets": true,
+        "check_in": "16:00",
+        "check_out": "12:00"
+      },
+      "location": {
+        "near_transit": true,
+        "city_center": false,
+        "near_airport": false
+      },
+      "has_promotion": true
+    },
+    {
+      "listingId": "hotel-004",
+      "listingType": "hotel",
+      "hotelName": "Times Square Hotel NYC",
+      "price": 300.0,
+      "avg_30d_price": 350.0,
+      "availability": 8,
+      "rating": 4.3,
+      "city": "NYC",
+      "starRating": 4.0,
+      "amenities": ["wifi", "gym"],
+      "policies": {
+        "cancellation": "refundable",
+        "pets": false,
+        "check_in": "15:00",
+        "check_out": "11:00"
+      },
+      "location": {
+        "near_transit": true,
+        "city_center": true,
+        "near_airport": false
+      },
+      "has_promotion": false
+    },
+    {
+      "listingId": "hotel-005",
+      "listingType": "hotel",
+      "hotelName": "Vegas Strip Casino Hotel",
+      "price": 100.0,
+      "avg_30d_price": 150.0,
+      "availability": 15,
+      "rating": 4.4,
+      "city": "LAS",
+      "starRating": 4.0,
+      "amenities": ["wifi", "pool", "casino", "restaurant"],
+      "policies": {
+        "cancellation": "non-refundable",
+        "pets": false,
+        "check_in": "16:00",
+        "check_out": "10:00"
+      },
+      "location": {
+        "near_transit": true,
+        "city_center": true,
+        "near_airport": false
+      },
+      "has_promotion": true
+    }
+  ],
+  "test_scenarios": {
+    "high_deal_score": {
+      "listingId": "flight-003",
+      "expected_deal_score": 85,
+      "expected_is_deal": true,
+      "expected_tags": ["deal", "limited_availability", "high_rating", "promotion"]
+    },
+    "low_deal_score": {
+      "listingId": "hotel-002",
+      "expected_deal_score": 0,
+      "expected_is_deal": false,
+      "expected_tags": []
+    },
+    "perfect_bundle": {
+      "flightId": "flight-001",
+      "hotelId": "hotel-001",
+      "expected_fit_score": 0.95
+    }
+  },
+  "user_queries": [
+    {
+      "query": "Find me a cheap flight from SFO to Miami",
+      "expected_intent": {
+        "origin": "SFO",
+        "destination": "Miami",
+        "budget_preference": "cheap",
+        "constraints": []
+      }
+    },
+    {
+      "query": "Weekend trip to Miami under $800, need pet-friendly hotel with wifi",
+      "expected_intent": {
+        "origin": "flexible",
+        "destination": "Miami",
+        "budget": 800,
+        "trip_type": "weekend",
+        "constraints": ["pet-friendly", "wifi"]
+      }
+    },
+    {
+      "query": "Business trip to NYC next week, need hotel near city center",
+      "expected_intent": {
+        "origin": "flexible",
+        "destination": "NYC",
+        "trip_type": "business",
+        "constraints": ["near-city-center"]
+      }
+    }
+  ]
+}
