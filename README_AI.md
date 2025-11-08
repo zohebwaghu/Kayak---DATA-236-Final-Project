@@ -1,57 +1,94 @@
-# 创建 ai/README.md（无emoji版本）
-@"
-# Kayak AI Service
+# AI Recommendation Service
 
-Multi-agent travel recommendation system using FastAPI and LLM integration.
+> Intelligent travel recommendation engine for the Kayak Clone project
+> 
+> **Status**: Week 1 Complete (24/24 core files implemented)
 
 ---
 
 ## Overview
 
-The AI Service is responsible for intelligent travel recommendations through two core agents:
+The AI Recommendation Service is a distributed microservice that provides intelligent travel recommendations using LangChain, semantic caching, and Kafka stream processing. It consists of two main agents:
 
-### Agents
-
-**1. Deals Agent**
-- Computes Deal Scores (0-100) based on price advantage, scarcity, and ratings
-- Auto-tags listings (pet-friendly, near transit, wifi, etc.)
-- Analyzes price trends against 30-day historical data
-
-**2. Concierge Agent**
-- Understands user intent from natural language queries
-- Generates optimized flight + hotel bundles
-- Provides concise explanations (<=25 words) for recommendations
-- Answers policy questions (cancellation, pets, amenities)
-- Monitors deals and sends price/inventory alerts
+1. **Deals Agent** - Backend worker that processes Kafka streams of flight and hotel deals
+2. **Concierge Agent** - User-facing conversational AI (Week 3)
 
 ---
 
-## Core Algorithms
+## Features
 
-### Deal Score Algorithm
-Evaluates deals using weighted criteria:
-- **Price Advantage** (30 pts max): >=15% below 30-day average
-- **Scarcity Bonus** (20 pts max): <5 items available
-- **Rating Bonus** (10 pts max): Rating >=4.5
-- **Promotion Tag** (15 pts max): Active promotion
+### Core Capabilities
+- **Real-time Deal Scoring** - Analyzes flight and hotel deals using multi-factor algorithms
+- **Bundle Matching** - Intelligently pairs flights with hotels for optimal packages
+- **Semantic Caching** - Redis-based cache with Ollama embeddings for fast responses
+- **Natural Language Understanding** - Parses user queries using GPT-3.5 Turbo
+- **Personalized Recommendations** - Learns from user history and preferences
+- **Kafka Stream Processing** - Handles high-throughput message streams
 
-**Threshold**: Score >=40 qualifies as a "deal"
-
-### Fit Score Algorithm
-Matches bundles to user intent (0-1.0 scale):
-- **40%** Price Match (proximity to budget)
-- **30%** Amenity Match (tags vs constraints)
-- **20%** Location Score (city center, transit access)
-- **10%** Policy Match (cancellation, pet-friendly)
+### Week 1 Implementation
+- ✅ Deals Agent with Kafka integration
+- ✅ Deal scoring algorithms (DealScorer, FitScorer, BundleMatcher)
+- ✅ LangChain integration (IntentParser, Explainer)
+- ✅ Redis semantic cache with Ollama embeddings
+- ✅ FastAPI REST endpoints
+- ✅ Mock data interfaces for independent development
 
 ---
 
-## Quick Start
+## Architecture
 
-### Installation
+```
+AI Service
+│
+├── agents/              # AI Agents
+│   └── deals_agent.py   # Main processing agent
+│
+├── algorithms/          # Scoring algorithms
+│   ├── deal_scorer.py   # Deal quality scoring
+│   ├── fit_scorer.py    # User preference matching
+│   └── bundle_matcher.py # Flight + hotel pairing
+│
+├── llm/                 # LangChain integration
+│   ├── intent_parser.py # Query understanding
+│   └── explainer.py     # Recommendation explanations
+│
+├── cache/               # Semantic caching
+│   ├── semantic_cache.py
+│   └── embeddings.py    # Ollama integration
+│
+├── kafka/               # Kafka abstractions
+│   ├── consumer.py
+│   └── producer.py
+│
+├── api/                 # FastAPI endpoints
+│   ├── chat.py
+│   ├── recommendations.py
+│   └── scoring.py
+│
+└── interfaces/          # Data interfaces
+    └── data_interface.py # Backend data access
+```
 
-\`\`\`bash
-# 1. Create virtual environment
+---
+
+## Installation
+
+### Prerequisites
+- Python 3.9+
+- Redis (for semantic cache)
+- Kafka (for stream processing)
+- Ollama (for local embeddings)
+
+### Setup
+
+1. **Clone the repository**
+```bash
+git clone <repo-url>
+cd Kayak---DATA-236-Final-Project/ai
+```
+
+2. **Create virtual environment**
+```bash
 python -m venv venv
 
 # Windows
@@ -59,166 +96,44 @@ python -m venv venv
 
 # Mac/Linux
 source venv/bin/activate
+```
 
-# 2. Install dependencies
+3. **Install dependencies**
+```bash
 pip install -r requirements.txt
+```
 
-# 3. Configure environment
+4. **Install Ollama (for embeddings)**
+```bash
+# Mac
+brew install ollama
+
+# Linux
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Pull the embedding model
+ollama pull mxbai-embed-large
+```
+
+5. **Start Redis**
+```bash
+# Using Docker
+docker run -d -p 6379:6379 redis:latest
+
+# Or install locally
+brew install redis  # Mac
+redis-server
+```
+
+6. **Configure environment**
+```bash
+# Copy example env file
 cp .env.example .env
-# Edit .env and add your OPENAI_API_KEY
-\`\`\`
 
-### Run Service
-
-\`\`\`bash
-# From project root
-cd ai
-python main.py
-
-# Service runs on http://localhost:8001
-\`\`\`
-
-### Test Service
-
-\`\`\`bash
-# Health check
-curl http://localhost:8001/health
-
-# Run unit tests
-pytest tests/ai/ -v
-\`\`\`
-
----
-
-## API Endpoints
-
-### 1. Chat Interface
-\`\`\`http
-POST /api/ai/chat
-Content-Type: application/json
-
-{
-  "message": "Weekend trip to Miami under \$800",
-  "user_id": "user-123"
-}
-\`\`\`
-
-**Response:**
-\`\`\`json
-{
-  "response": "I found 3 great options...",
-  "intent": {
-    "destination": "Miami",
-    "budget": 800,
-    "dates": ["2025-11-01", "2025-11-03"]
-  },
-  "bundles": [...]
-}
-\`\`\`
-
-### 2. Get Recommendations
-\`\`\`http
-POST /api/ai/recommendations
-Content-Type: application/json
-
-{
-  "origin": "SFO",
-  "destination": "MIA",
-  "dates": ["2025-11-01", "2025-11-03"],
-  "budget": 1000,
-  "constraints": ["pet-friendly", "near-transit"]
-}
-\`\`\`
-
-### 3. Score Deal (Backend Integration)
-\`\`\`http
-POST /api/ai/score
-Content-Type: application/json
-
-{
-  "deal_id": 123,
-  "price": 150,
-  "avg_30d_price": 200,
-  "availability": 3,
-  "rating": 4.5,
-  "tags": ["wifi", "breakfast"]
-}
-\`\`\`
-
-**Response:**
-\`\`\`json
-{
-  "deal_score": 65,
-  "is_deal": true,
-  "tags": ["deal", "limited_availability", "high_rating"]
-}
-\`\`\`
-
----
-
-## Module Structure
-
-\`\`\`
-ai/
-├── main.py                    # FastAPI application entry
-├── config.py                  # Configuration management
-│
-├── agents/                    # Core agents
-│   ├── deals_agent.py         # Deal scoring and tagging
-│   └── concierge_agent.py     # Conversational recommendations
-│
-├── algorithms/                # Scoring algorithms
-│   ├── deal_scorer.py         # Deal Score computation
-│   ├── fit_scorer.py          # Fit Score computation
-│   └── bundle_matcher.py      # Bundle optimization
-│
-├── llm/                       # LLM integration
-│   ├── intent_parser.py       # NLP intent extraction
-│   ├── explainer.py           # Recommendation explanations
-│   └── prompts.py             # Prompt templates
-│
-├── api/                       # FastAPI routes
-│   ├── ai_chat.py             # Chat endpoint
-│   ├── ai_recommendations.py  # Recommendations endpoint
-│   └── ai_scoring.py          # Scoring endpoint
-│
-├── schemas/                   # Pydantic models
-│   ├── ai_request.py          # Request schemas
-│   └── ai_response.py         # Response schemas
-│
-├── interfaces/                # Backend integration
-│   ├── data_interface.py      # Abstract interface
-│   └── ai_mock.py             # Mock implementation
-│
-└── utils/                     # Helper functions
-    └── ai_helpers.py
-\`\`\`
-
----
-
-## Testing
-
-### Run All Tests
-\`\`\`bash
-pytest tests/ai/ -v
-\`\`\`
-
-### Run Specific Tests
-\`\`\`bash
-# Test Deal Scorer
-pytest tests/ai/test_deal_scorer.py -v
-
-# Test Fit Scorer
-pytest tests/ai/test_fit_scorer.py -v
-
-# Test Intent Parser
-pytest tests/ai/test_intent_parser.py -v
-\`\`\`
-
-### Coverage Report
-\`\`\`bash
-pytest tests/ai/ --cov=ai --cov-report=html
-\`\`\`
+# Edit .env with your credentials
+# Required: OPENAI_API_KEY
+# Optional: KAFKA_BOOTSTRAP_SERVERS, REDIS_HOST
+```
 
 ---
 
@@ -226,90 +141,356 @@ pytest tests/ai/ --cov=ai --cov-report=html
 
 ### Environment Variables
 
-\`\`\`env
-# AI Service
-AI_SERVICE_PORT=8001
-AI_SERVICE_HOST=0.0.0.0
-LOG_LEVEL=INFO
+Create a `.env` file in the `ai/` directory:
 
-# OpenAI API
+```bash
+# OpenAI API (Required)
 OPENAI_API_KEY=sk-your-key-here
-OPENAI_MODEL=gpt-4-turbo-preview
 
-# Backend Integration
-BACKEND_URL=http://localhost:3000
-\`\`\`
+# Kafka Configuration
+KAFKA_BOOTSTRAP_SERVERS=localhost:9092
+KAFKA_FLIGHT_TOPIC=raw-flights
+KAFKA_HOTEL_TOPIC=raw-hotels
+KAFKA_SCORED_FLIGHTS_TOPIC=scored-flights
+KAFKA_SCORED_HOTELS_TOPIC=scored-hotels
+KAFKA_BUNDLES_TOPIC=travel-bundles
+KAFKA_CONSUMER_GROUP=ai-deals-agent
 
-### Algorithm Parameters
+# Redis Configuration
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_DB=0
 
-Edit \`ai/config.py\` to adjust:
-- \`deal_score_threshold\`: Minimum score to qualify as deal (default: 40)
-- \`max_bundles_to_return\`: Number of recommendations (default: 3)
+# Ollama Configuration
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_EMBEDDING_MODEL=mxbai-embed-large
+
+# Database Configuration (when available)
+DB_HOST=localhost
+DB_PORT=3306
+DB_NAME=kayak_db
+DB_USER=ai_service_readonly
+DB_PASSWORD=your-password
+
+# API Configuration
+API_HOST=0.0.0.0
+API_PORT=8000
+API_ENV=development
+CORS_ORIGINS=http://localhost:3000,http://localhost:3001
+
+# Performance Settings
+BUNDLE_MATCHING_INTERVAL=30
+CACHE_TTL=300
+MAX_RECOMMENDATIONS=20
+```
+
+---
+
+## Usage
+
+### Starting the AI Service
+
+**Option 1: Run with FastAPI (Recommended)**
+```bash
+cd ai
+python -m uvicorn main:app --reload --port 8000
+```
+
+**Option 2: Run Deals Agent directly**
+```bash
+cd ai
+python -m agents.deals_agent
+```
+
+**Option 3: Run with Docker (Future)**
+```bash
+docker-compose up ai-service
+```
+
+### API Endpoints
+
+Once running, access:
+- **Swagger Docs**: http://localhost:8000/docs
+- **Health Check**: http://localhost:8000/api/ai/health
+
+#### Available Endpoints
+
+```bash
+# Chat with AI
+POST /api/ai/chat
+{
+  "query": "Find cheap beach vacations in Florida",
+  "user_id": 123,
+  "preferences": {...}
+}
+
+# Get recommendations
+POST /api/ai/recommendations
+{
+  "destination": "Miami",
+  "user_id": 123,
+  "preferences": {...}
+}
+
+# Score a deal
+POST /api/ai/score
+{
+  "flight_id": "flight_123",
+  "hotel_id": "hotel_456"
+}
+```
+
+---
+
+## Development
+
+### Project Structure
+
+```
+ai/
+├── agents/              # AI Agents
+├── algorithms/          # Scoring algorithms
+├── api/                 # FastAPI endpoints
+├── cache/               # Redis semantic cache
+├── interfaces/          # Data access layer
+├── kafka/               # Kafka client wrappers
+├── llm/                 # LangChain integration
+├── schemas/             # Pydantic models
+├── utils/               # Helper functions
+├── config.py            # Configuration management
+├── main.py              # FastAPI application
+└── requirements.txt     # Python dependencies
+```
+
+### Running Tests
+
+```bash
+# Install test dependencies
+pip install pytest pytest-asyncio pytest-cov
+
+# Run all tests
+pytest
+
+# Run with coverage
+pytest --cov=. --cov-report=html
+
+# Run specific test file
+pytest tests/test_algorithms.py
+```
+
+### Mock Data Development
+
+The AI service can run independently using mock data:
+
+```python
+from interfaces.ai_mock import AIMock
+
+# Use mock data instead of real Kafka/Database
+mock = AIMock()
+flights = mock.get_mock_flights()
+hotels = mock.get_mock_hotels()
+```
+
+Mock data location: `../data/mock/mock_data.json`
+
+---
+
+## Team Integration
+
+### For Kafka Team
+**Documentation**: `../docs/KAFKA_INTEGRATION_SIMPLE.md`
+- AI service consumes: `raw-flights`, `raw-hotels`
+- AI service produces: `scored-flights`, `scored-hotels`, `travel-bundles`
+- Connection: `localhost:9092` (default)
+
+### For Database Team
+**Documentation**: `../docs/DATABASE_INTEGRATION_SIMPLE.md`
+- Requires READ access to: `users`, `bookings`, `search_history`
+- Uses read-only connection
+- Queries in: `interfaces/data_interface.py`
+
+### For Frontend Team
+**Documentation**: `../docs/FRONTEND_API.md`
+- REST API at: `http://localhost:8000/api/ai`
+- Swagger docs: `http://localhost:8000/docs`
+- React examples provided in documentation
 
 ---
 
 ## Performance
 
-- **Latency**: <500ms for chat queries
-- **Throughput**: 100+ concurrent requests
-- **Accuracy**: 90%+ intent parsing accuracy
+### Benchmarks (Target)
+- Deal scoring: < 100ms per deal
+- Bundle matching: < 500ms for 100 deals
+- Cache hit rate: > 80%
+- API response time: < 500ms
+- Kafka throughput: 1000+ messages/second
+
+### Optimization
+- Semantic caching reduces API costs by 60-80%
+- Local Ollama embeddings (no OpenAI embedding API costs)
+- Connection pooling for database queries
+- Async/await for concurrent processing
 
 ---
 
-## Data Sources
+## Troubleshooting
 
-Uses Kaggle datasets:
-- **Hotels**: [Inside Airbnb NYC](https://www.kaggle.com/datasets/dominoweir/inside-airbnb-nyc)
-- **Flights**: [Flight Price Prediction](https://www.kaggle.com/datasets/shubhambathwal/flight-price-prediction)
-- **Airports**: [Global Airports Database](https://www.kaggle.com/datasets/samvelkoch/global-airports-iata-icao-timezone-geo)
+### Common Issues
+
+**1. Kafka Connection Failed**
+```bash
+# Check if Kafka is running
+docker ps | grep kafka
+
+# Verify topics exist
+kafka-topics --list --bootstrap-server localhost:9092
+```
+
+**2. Redis Connection Failed**
+```bash
+# Check if Redis is running
+redis-cli ping
+# Should return: PONG
+```
+
+**3. Ollama Model Not Found**
+```bash
+# Pull the embedding model
+ollama pull mxbai-embed-large
+
+# Verify it's installed
+ollama list
+```
+
+**4. Import Errors**
+```bash
+# Reinstall dependencies
+pip install -r requirements.txt --force-reinstall
+```
+
+**5. OpenAI API Errors**
+```bash
+# Check API key is set
+echo $OPENAI_API_KEY
+
+# Test API key
+python -c "import openai; openai.api_key='your-key'; print('OK')"
+```
 
 ---
 
-## Integration with Backend
+## Roadmap
 
-The AI service integrates with backend through:
+### Week 1 (Complete)
+- ✅ Core algorithms implementation
+- ✅ Deals Agent with Kafka integration
+- ✅ Semantic caching system
+- ✅ LangChain integration
+- ✅ FastAPI endpoints skeleton
 
-1. **Data Interface** (\`ai/interfaces/data_interface.py\`)
-   - \`get_deals()\` - Fetch deals from database
-   - \`get_bundle()\` - Retrieve bundle details
-   - \`publish_deal_score()\` - Send scores to Kafka
+### Week 2 (In Progress)
+- ⏳ Kafka integration with team
+- ⏳ Database integration
+- ⏳ End-to-end testing
+- ⏳ Performance optimization
 
-2. **API Endpoints**
-   - Backend calls \`POST /api/ai/score\` for deal evaluation
-   - Backend calls \`POST /api/ai/chat\` for user queries
+### Week 3 (Planned)
+- 📋 Concierge Agent implementation
+- 📋 Frontend API integration
+- 📋 WebSocket support for real-time chat
+- 📋 Advanced recommendation features
 
-See \`docs/ai/AI_INTERFACE_CONTRACT.md\` for detailed specifications.
+### Week 4 (Planned)
+- 📋 System integration testing
+- 📋 Load testing and optimization
+- 📋 Documentation finalization
+- 📋 Demo preparation
+
+---
+
+## Dependencies
+
+### Core Libraries
+- **FastAPI** - Web framework
+- **LangChain** - LLM orchestration
+- **OpenAI** - GPT-3.5 Turbo API
+- **Redis** - Caching layer
+- **Kafka-Python** - Kafka client
+
+### AI/ML Libraries
+- **Ollama** - Local embeddings
+- **Numpy** - Numerical computing
+- **Scikit-learn** - ML utilities (if needed)
+
+### Database
+- **MySQL Connector** - Database access
+- **SQLAlchemy** - ORM (future)
+
+See `requirements.txt` for full list with versions.
+
+---
+
+## Contributing
+
+### Code Style
+- Follow PEP 8 guidelines
+- Use type hints where applicable
+- Document all public functions
+- Write tests for new features
+
+### Git Workflow
+```bash
+# Create feature branch
+git checkout -b feature/your-feature
+
+# Commit changes
+git add .
+git commit -m "Add: your feature description"
+
+# Push and create PR
+git push origin feature/your-feature
+```
 
 ---
 
 ## Documentation
 
-- **Interface Contract**: \`docs/ai/AI_INTERFACE_CONTRACT.md\`
-- **API Specification**: \`docs/ai/AI_API_SPEC.md\`
-- **Algorithm Details**: (Coming soon)
+- **API Documentation**: http://localhost:8000/docs (when running)
+- **Integration Docs**: `../docs/`
+- **Architecture Design**: `../docs/AI_ARCHITECTURE.md` (if exists)
+- **Team Integration**: `../docs/INTEGRATION_CHECKLIST.md`
 
 ---
 
-## Tech Stack
+## Contact
 
-- **FastAPI** - Web framework
-- **Pydantic v2** - Data validation
-- **OpenAI API** - LLM integration
-- **Loguru** - Logging
-- **Pytest** - Testing
+**Developer**: Jane Heng (jane@sjsu.edu)
+**Course**: DATA 236 - Distributed Systems
+**Project**: Kayak Clone - AI Recommendation Service
+**Group**: Group 11
 
----
-
-## Developer
-
-**Jane** - AI Service Lead  
-Course: DATA 236 - Distributed Systems for Data Engineering
+**Support Channels**:
+- Slack: #ai-service
+- Email: jane@sjsu.edu
+- Office Hours: By appointment
 
 ---
 
 ## License
 
-Part of SJSU DATA 236 Final Project - Group 3
-"@ | Out-File -FilePath ai\README.md -Encoding UTF8
+This project is developed as part of SJSU DATA 236 coursework.
 
-Write-Host "AI README created (no emoji version)!" -ForegroundColor Green
+---
+
+## Acknowledgments
+
+- **LangChain** - For excellent LLM orchestration framework
+- **Ollama** - For free local embedding models
+- **FastAPI** - For modern Python web framework
+- **Teaching Staff** - For project guidance and support
+
+---
+
+**Last Updated**: November 8, 2025  
+**Version**: 1.0.0 (Week 1 Complete)
