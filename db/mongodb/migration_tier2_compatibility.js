@@ -5,6 +5,9 @@ const dbSearch = db.getSiblingDB('kayak_search');
 const dbAnalytics = db.getSiblingDB('kayak_analytics');
 const dbDoc = db.getSiblingDB('kayak_doc');
 
+// Create search collections in kayak_doc (Tier 2 requirement)
+print('=== Creating search collections in kayak_doc (Tier 2 requirement) ===\n');
+
 print('=== Creating Tier 2 Compatible MongoDB Collections ===\n');
 
 // ============================================================================
@@ -140,8 +143,19 @@ dbAnalytics.logs.createIndex({ user_id: 1, ts: -1 });
 dbAnalytics.deal_events.createIndex({ key: 1, ts: -1 });
 dbAnalytics.deal_events.createIndex({ event_type: 1, ts: -1 });
 
+// Also create simple collections in kayak_doc for Tier 2 compatibility
+dbDoc.createCollection('hotels');
+dbDoc.createCollection('flights');
+dbDoc.createCollection('cars');
+
+// Add basic indexes as per Tier 2 requirements
+dbDoc.hotels.createIndex({ city: 1, star_rating: -1, price: 1 });
+dbDoc.flights.createIndex({ origin: 1, destination: 1, departure_time: 1 });
+dbDoc.cars.createIndex({ location: 1, car_type: 1, price_per_day: 1 });
+
 print('\n=== MongoDB Migration Complete ===');
 print('Created databases: kayak_search, kayak_analytics');
 print('Created collections: hotels, flights, cars (in kayak_search)');
+print('Created collections: hotels, flights, cars (in kayak_doc for Tier 2)');
 print('Created indexes for all search collections');
 

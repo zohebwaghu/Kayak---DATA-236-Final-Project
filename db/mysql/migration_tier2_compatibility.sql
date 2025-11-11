@@ -19,10 +19,11 @@ UPDATE `users` SET `role` = 'user' WHERE `role` IS NULL;
 -- ISSUE 2: Add missing columns to bookings table
 -- ============================================================================
 
--- Add listingId and guests columns to bookings
+-- Add listingId and num_guests columns to bookings (Tier 2 requirement)
+-- Note: If columns already exist, these will fail gracefully
 ALTER TABLE `bookings`
   ADD COLUMN `listing_id` VARCHAR(50) NULL AFTER `booking_type`,
-  ADD COLUMN `guests` INT UNSIGNED NULL DEFAULT 1 AFTER `end_date`;
+  ADD COLUMN `num_guests` INT UNSIGNED DEFAULT 1 AFTER `end_date`;
 
 -- Create index for listing lookups
 CREATE INDEX `ix_bookings_listing` ON `bookings` (`booking_type`, `listing_id`);
@@ -79,7 +80,7 @@ SELECT
   `listing_id` AS `listingId`,
   `start_date` AS `startDate`,
   `end_date` AS `endDate`,
-  `guests`,
+  `num_guests` AS `numGuests`, -- Updated to match Tier 2 requirement
   `total_amount` AS `totalPrice`,
   `status`,
   `created_at_utc` AS `createdAt`,

@@ -44,7 +44,7 @@ CREATE TABLE `users` (
   `zip_code` VARCHAR(10) NOT NULL,
   `phone_number` VARCHAR(20) NOT NULL,
   `email` VARCHAR(256) NOT NULL,
-  `password_hash` VARCHAR(255) NULL, -- For authentication (Tier 2 compatibility)
+  `password_hash` VARCHAR(255) NOT NULL DEFAULT '', -- For authentication (Tier 2 compatibility)
   `role` ENUM('user', 'admin') NOT NULL DEFAULT 'user', -- For authorization (Tier 2 compatibility)
   `profile_image_url` VARCHAR(512) NULL,
   `created_at_utc` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -208,7 +208,7 @@ CREATE TABLE `bookings` (
   `status` ENUM('created','confirmed','cancelled','refunded') NOT NULL DEFAULT 'created',
   `start_date` DATE NULL,
   `end_date` DATE NULL,
-  `guests` INT UNSIGNED NULL DEFAULT 1, -- For Tier 2 compatibility
+  `num_guests` INT UNSIGNED DEFAULT 1, -- For Tier 2 compatibility (renamed from 'guests')
   `currency` CHAR(3) NOT NULL DEFAULT 'USD',
   `subtotal_amount` DECIMAL(12,2) NOT NULL,
   `tax_amount` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
