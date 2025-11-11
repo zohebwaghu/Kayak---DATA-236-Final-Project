@@ -32,6 +32,7 @@ INSERT INTO `us_states` (`state_code`,`state_name`) VALUES
 ('WV','West Virginia'),('WI','Wisconsin'),('WY','Wyoming');
 
 -- Users
+-- Note: password_hash and role added for Tier 2 middleware compatibility
 CREATE TABLE `users` (
   `user_id` CHAR(11) NOT NULL, -- SSN pattern ###-##-####
   `first_name` VARCHAR(64) NOT NULL,
@@ -43,11 +44,14 @@ CREATE TABLE `users` (
   `zip_code` VARCHAR(10) NOT NULL,
   `phone_number` VARCHAR(20) NOT NULL,
   `email` VARCHAR(256) NOT NULL,
+  `password_hash` VARCHAR(255) NULL, -- For authentication (Tier 2 compatibility)
+  `role` ENUM('user', 'admin') NOT NULL DEFAULT 'user', -- For authorization (Tier 2 compatibility)
   `profile_image_url` VARCHAR(512) NULL,
   `created_at_utc` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at_utc` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`user_id`),
   UNIQUE KEY `ux_users_email` (`email`),
+  KEY `ix_users_role` (`role`),
   CONSTRAINT `fk_users_state` FOREIGN KEY (`state_code`) REFERENCES `us_states` (`state_code`),
   CONSTRAINT `chk_users_ssn` CHECK (`user_id` REGEXP '^[0-9]{3}-[0-9]{2}-[0-9]{4}$'),
   CONSTRAINT `chk_users_zip` CHECK (`zip_code` REGEXP '^[0-9]{5}(-[0-9]{4})?$')
@@ -195,13 +199,16 @@ CREATE TABLE `cars` (
 -- Bookings (polymorphic across flight/hotel/car)
 -- Note: Not partitioned due to MySQL limitation (FKs + partitioning not supported together)
 -- Use date-based indexes for time-range queries and consider application-level archiving
+-- Note: listing_id and guests added for Tier 2 middleware compatibility
 CREATE TABLE `bookings` (
   `booking_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `user_id` CHAR(11) NOT NULL,
   `booking_type` ENUM('flight','hotel','car') NOT NULL,
+  `listing_id` VARCHAR(50) NULL, -- For Tier 2 compatibility (references flight_id, hotel_id, or car_id)
   `status` ENUM('created','confirmed','cancelled','refunded') NOT NULL DEFAULT 'created',
   `start_date` DATE NULL,
   `end_date` DATE NULL,
+  `guests` INT UNSIGNED NULL DEFAULT 1, -- For Tier 2 compatibility
   `currency` CHAR(3) NOT NULL DEFAULT 'USD',
   `subtotal_amount` DECIMAL(12,2) NOT NULL,
   `tax_amount` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
@@ -212,6 +219,7 @@ CREATE TABLE `bookings` (
   KEY `ix_bookings_user_time` (`user_id`,`created_at_utc`),
   KEY `ix_bookings_type_time` (`booking_type`,`created_at_utc`),
   KEY `ix_bookings_created_date` (`created_at_utc`),
+  KEY `ix_bookings_listing` (`booking_type`, `listing_id`),
   CONSTRAINT `fk_bookings_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`user_id`) ON DELETE RESTRICT,
   CONSTRAINT `chk_dates_order` CHECK (`end_date` IS NULL OR `start_date` IS NULL OR `end_date` >= `start_date`)
 );
@@ -277,6 +285,21 @@ CREATE TABLE `car_availability` (
 -- For flights: booking_items.item_id -> flights.flight_id
 -- For hotels: booking_items.item_id -> hotel_room_types.room_type_id (with dates in booking)
 -- For cars: booking_items.item_id -> cars.car_id
+
+-- Unified inventory table for Tier 2 middleware compatibility
+-- This provides a single interface for inventory management across all listing types
+CREATE TABLE `inventory` (
+  `inventory_id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `listing_type` ENUM('hotel', 'flight', 'car') NOT NULL,
+  `listing_id` VARCHAR(50) NOT NULL,
+  `available_count` INT UNSIGNED NOT NULL DEFAULT 0,
+  `price_per_unit` DECIMAL(10,2) NOT NULL,
+  `updated_at_utc` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`inventory_id`),
+  UNIQUE KEY `ux_inventory_listing` (`listing_type`, `listing_id`),
+  KEY `ix_inventory_type` (`listing_type`),
+  KEY `ix_inventory_available` (`available_count`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- Practical search indexes
 -- Note: Functional index on JSON requires MySQL 8.0.13+. For compatibility, consider a generated column instead.
