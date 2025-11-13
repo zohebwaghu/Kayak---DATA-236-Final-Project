@@ -12,7 +12,7 @@ This project implements a 3-tier distributed system simulating Kayak's travel me
 
 ## Database Schema (Tier 3)
 
-**Status**: ✅ Complete
+**Status**: Complete
 
 The database layer includes:
 - **MySQL**: Relational schema for OLTP operations (users, bookings, billing, listings)
