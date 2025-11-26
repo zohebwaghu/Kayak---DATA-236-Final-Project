@@ -3,15 +3,17 @@ AI Agents Module
 
 This module contains the intelligent agents that power the recommendation system:
 - DealsAgent: Backend worker that processes Kafka streams and scores deals
-- ConciergeAgent: User-facing agent that handles natural language queries (Week 2)
+- ConciergeAgent: User-facing conversational AI assistant
 """
 
 from .deals_agent import DealsAgent, get_deals_agent
+from .concierge_agent import ConciergeAgent, get_concierge_agent
 
 __all__ = [
     "DealsAgent",
     "get_deals_agent",
+    "ConciergeAgent",
+    "get_concierge_agent",
 ]
 
-# Version info
-__version__ = "1.0.0"
+__version__ = "2.0.0"

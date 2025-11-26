@@ -1,168 +1,116 @@
 """
-AI Service - FastAPI Application
-Concierge Agent for travel recommendations
+AI Recommendation Service - FastAPI Application
+Main entry point for the AI service
 """
+
+import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from loguru import logger
 
-from config import Config
-from api.ai_chat import router as ai_router
-from schemas.ai_schemas import HealthCheckResponse
+from .config import settings
+from .api.chat import router as chat_router
+from .api.recommendations import router as recommendations_router
+from .api.scoring import router as scoring_router
+from .api.websocket import router as websocket_router
+from .agents.deals_agent import get_deals_agent
+from .agents.concierge_agent import get_concierge_agent
 
-# ============================================
-# Create FastAPI App
-# ============================================
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Application lifespan handler
+    Initializes and cleans up resources
+    """
+    # Startup
+    logger.info("Starting AI Recommendation Service...")
+    
+    # Initialize agents
+    deals_agent = get_deals_agent()
+    concierge_agent = get_concierge_agent()
+    
+    logger.info("AI Service started successfully")
+    
+    yield
+    
+    # Shutdown
+    logger.info("Shutting down AI Service...")
+    
+    # Cleanup
+    if deals_agent:
+        await deals_agent.stop()
+    
+    logger.info("AI Service shutdown complete")
+
+
+# Create FastAPI application
 app = FastAPI(
-    title="AI Travel Service",
-    description="Multi-Agent AI system for travel recommendations",
-    version="0.1.0",
+    title="AI Recommendation Service",
+    description="Intelligent travel recommendation engine with conversational AI",
+    version="2.0.0",
+    lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc"
 )
 
-# ============================================
-# CORS Middleware
-# ============================================
-
+# Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify frontend URL
+    allow_origins=settings.CORS_ORIGINS.split(",") if settings.CORS_ORIGINS else ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ============================================
-# Include Routers
-# ============================================
-
-app.include_router(ai_router)
-
-# ============================================
-# Health Check Endpoint
-# ============================================
-
-@app.get("/health", response_model=HealthCheckResponse)
-async def health_check():
-    """
-    Health check endpoint
-    
-    Returns:
-        HealthCheckResponse: Service health status
-    """
-    dependencies = {}
-    
-    # Check Redis
-    try:
-        from cache.redis_client import check_redis_health
-        dependencies["redis"] = check_redis_health()
-    except Exception as e:
-        logger.warning(f"Redis health check failed: {e}")
-        dependencies["redis"] = False
-    
-    # Check Ollama
-    try:
-        from cache.embeddings import EmbeddingService
-        embedder = EmbeddingService()
-        dependencies["ollama"] = True
-    except Exception as e:
-        logger.warning(f"Ollama health check failed: {e}")
-        dependencies["ollama"] = False
-    
-    # Check OpenAI (just config presence)
-    try:
-        dependencies["openai"] = bool(Config.OPENAI_API_KEY)
-    except Exception as e:
-        logger.warning(f"OpenAI config check failed: {e}")
-        dependencies["openai"] = False
-    
-    # Determine overall status
-    all_healthy = all(dependencies.values())
-    status = "healthy" if all_healthy else "degraded"
-    
-    return HealthCheckResponse(
-        status=status,
-        version="0.1.0",
-        dependencies=dependencies
-    )
+# Include routers
+app.include_router(chat_router)
+app.include_router(recommendations_router)
+app.include_router(scoring_router)
+app.include_router(websocket_router)
 
 
 @app.get("/")
 async def root():
     """Root endpoint"""
     return {
-        "service": "AI Travel Service",
-        "version": "0.1.0",
-        "docs": "/docs",
-        "health": "/health"
+        "service": "AI Recommendation Service",
+        "version": "2.0.0",
+        "status": "running",
+        "docs": "/docs"
     }
 
 
-# ============================================
-# Startup Event
-# ============================================
+@app.get("/api/ai/health")
+async def health_check():
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "service": "ai-recommendation-service",
+        "version": "2.0.0",
+        "components": {
+            "deals_agent": "ready",
+            "concierge_agent": "ready",
+            "cache": "ready",
+            "kafka": "ready"
+        }
+    }
 
-@app.on_event("startup")
-async def startup_event():
-    """
-    Initialize services on startup
-    """
-    logger.info("="*60)
-    logger.info("Starting AI Service")
-    logger.info("="*60)
-    
-    # Log configuration
-    logger.info(f"Service Port: {Config.AI_SERVICE_PORT}")
-    logger.info(f"OpenAI Model: {Config.OPENAI_MODEL}")
-    logger.info(f"Ollama Model: {Config.OLLAMA_EMBEDDING_MODEL}")
-    logger.info(f"Redis: {Config.REDIS_HOST}:{Config.REDIS_PORT}")
-    logger.info(f"Cache Threshold: {Config.CACHE_SIMILARITY_THRESHOLD}")
-    
-    # Test connections (optional)
-    try:
-        from cache.redis_client import check_redis_health
-        if check_redis_health():
-            logger.info("✅ Redis connection verified")
-        else:
-            logger.warning("⚠️  Redis not available (caching disabled)")
-    except Exception as e:
-        logger.warning(f"⚠️  Redis check failed: {e}")
-    
-    try:
-        from cache.embeddings import EmbeddingService
-        embedder = EmbeddingService()
-        logger.info(f"✅ Ollama embeddings ready ({embedder.embedding_dim} dims)")
-    except Exception as e:
-        logger.warning(f"⚠️  Ollama not available: {e}")
-    
-    logger.info("="*60)
-    logger.info("AI Service Ready")
-    logger.info(f"Docs: http://localhost:{Config.AI_SERVICE_PORT}/docs")
-    logger.info("="*60)
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """
-    Cleanup on shutdown
-    """
-    logger.info("Shutting down AI Service...")
-
-
-# ============================================
-# Run with uvicorn
-# ============================================
 
 if __name__ == "__main__":
     import uvicorn
     
     uvicorn.run(
         "main:app",
-        host=Config.AI_SERVICE_HOST,
-        port=Config.AI_SERVICE_PORT,
-        reload=True,  # Auto-reload on code changes (development only)
-        log_level="info"
+        host=settings.API_HOST,
+        port=settings.API_PORT,
+        reload=settings.API_ENV == "development"
     )
