@@ -1,0 +1,128 @@
+/* Wrapper so navbar can be sticky later if needed */
+.kayak-navbar-wrapper {
+  position: sticky;
+  top: 0;
+  z-index: 1030;
+}
+
+/* Main navbar styling with Kayak-ish look */
+.kayak-navbar {
+  background-color: #ffffff;
+  border-bottom: 1px solid #e5e7eb;
+  min-height: 64px;
+}
+
+/* Brand button on the left */
+.kayak-logo-btn {
+  border: none;
+  background: transparent;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.kayak-logo-text {
+  font-weight: 800;
+  font-size: 1.4rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #ff690f; /* Kayak orange */
+}
+
+/* Sign in button on the right (logged out) */
+.kayak-signin-btn {
+  display: inline-flex;
+  align-items: center;
+  column-gap: 4px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid #d9d9d9;
+  background-color: #ffffff;
+  color: #1a1a1a;
+  font-weight: 500;
+  font-size: 0.95rem;
+}
+
+.kayak-signin-btn:hover,
+.kayak-signin-btn:focus {
+  background-color: #f2f3f4;
+  border-color: #c4c4c4;
+  color: #1a1a1a;
+}
+
+.kayak-signin-icon {
+  font-size: 1rem;
+}
+
+/* User menu (logged in state) */
+.kayak-user-menu {
+  position: relative;
+}
+
+/* Avatar circle with first letter */
+.kayak-avatar-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid #d9d9d9;
+  background-color: #f2f3f4;
+  color: #1a1a1a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 0.95rem;
+  padding: 0;
+}
+
+.kayak-avatar-btn:hover,
+.kayak-avatar-btn:focus {
+  background-color: #e5e7eb;
+  border-color: #c4c4c4;
+}
+
+.kayak-avatar-initial {
+  text-transform: uppercase;
+}
+
+/* Dropdown menu under avatar */
+.kayak-user-dropdown {
+  position: absolute;
+  right: 0;
+  margin-top: 8px;
+  min-width: 190px;
+  background-color: #ffffff;
+  border-radius: 12px;
+  border: 1px solid #d9d9d9;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.18);
+  padding: 4px 0;
+}
+
+/* Dropdown items */
+.kayak-user-dropdown .dropdown-item {
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 8px 14px;
+  font-size: 0.9rem;
+  color: #1a1a1a;
+  cursor: pointer;
+}
+
+.kayak-user-dropdown .dropdown-item:hover,
+.kayak-user-dropdown .dropdown-item:focus {
+  background-color: #f2f3f4;
+}
+
+.dropdown-item-danger {
+  color: #b91c1c;
+}
+
+/* Divider inside dropdown */
+.kayak-user-dropdown .dropdown-divider {
+  height: 1px;
+  margin: 4px 0;
+  background-color: #e5e7eb;
+}
