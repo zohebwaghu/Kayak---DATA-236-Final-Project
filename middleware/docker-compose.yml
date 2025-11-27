@@ -209,6 +209,53 @@ services:
       - kayak-network
     restart: unless-stopped
 
+# ==================== AI SERVICE ====================
+
+  ai-service:
+    build:
+      context: ../ai
+      dockerfile: Dockerfile
+    container_name: kayak-ai-service
+    ports:
+      - "8000:8000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=gpt-3.5-turbo
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9093
+      - KAFKA_CONSUMER_GROUP=ai-deals-agent
+      - KAFKA_DEALS_RAW_TOPIC=raw_supplier_feeds
+      - KAFKA_DEALS_NORMALIZED_TOPIC=deals.normalized
+      - KAFKA_DEALS_SCORED_TOPIC=deals.scored
+      - KAFKA_DEALS_TAGGED_TOPIC=deals.tagged
+      - KAFKA_DEAL_EVENTS_TOPIC=deal.events
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=root
+      - DB_PASSWORD=password
+      - DB_NAME_USERS=kayak_users
+      - DB_NAME_BOOKINGS=kayak_bookings
+      - MONGO_URI=mongodb://mongodb:27017
+      - MONGO_DB=kayak_doc
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - API_ENV=production
+      - CORS_ORIGINS=http://localhost:3000,http://localhost:3001
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+    networks:
+      - kayak-network
+    restart: unless-stopped
+
 # ==================== NETWORKS ====================
 
 networks:
