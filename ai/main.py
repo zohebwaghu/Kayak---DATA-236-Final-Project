@@ -1,12 +1,15 @@
 """
 AI Recommendation Service - FastAPI Application
-Full Integration Version - Fixed imports to match actual module structure
+LLM Provider:
+- If OPENAI_API_KEY is set: use OpenAI
+- If no OPENAI_API_KEY: use Ollama (llama3.2)
 """
 
 import os
 import sys
 import logging
-import asyncio
+import json
+import httpx
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Optional, Dict, List, Any
@@ -97,7 +100,15 @@ API_HOST = os.getenv("API_HOST", "0.0.0.0")
 API_PORT = int(os.getenv("API_PORT", "8000"))
 API_ENV = os.getenv("API_ENV", "development")
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:3001")
+
+# LLM Settings
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
+
+# Determine LLM provider
+USE_OPENAI = bool(OPENAI_API_KEY)
 
 # Database settings
 DB_HOST = os.getenv("DB_HOST", "localhost")
@@ -110,6 +121,24 @@ DB_NAME_BOOKINGS = os.getenv("DB_NAME_BOOKINGS", "kayak_bookings")
 # Redis settings
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+
+
+# ============================================
+# LLM Clients
+# ============================================
+
+# OpenAI client (if key available)
+openai_client = None
+if USE_OPENAI:
+    try:
+        from openai import OpenAI
+        openai_client = OpenAI(api_key=OPENAI_API_KEY)
+        logger.info(f"✓ LLM Provider: OpenAI ({OPENAI_MODEL})")
+    except ImportError:
+        logger.error("OpenAI library not installed. Run: pip install openai")
+        USE_OPENAI = False
+else:
+    logger.info(f"✓ LLM Provider: Ollama ({OLLAMA_MODEL})")
 
 
 # ============================================
@@ -225,7 +254,6 @@ async def get_user_preferences(user_id: str) -> Dict:
         cursor.close()
         conn.close()
         
-        # Infer preferences
         preferences = {"budget": "medium", "preferred_types": []}
         for b in bookings:
             preferences["preferred_types"].append(b["listingType"])
@@ -260,13 +288,11 @@ class ConversationStore:
         }
         self.conversations[session_id].append(message)
         
-        # Also store in Redis if available
         if self.redis:
             try:
-                import json
                 key = f"chat:{session_id}"
                 self.redis.rpush(key, json.dumps(message))
-                self.redis.expire(key, 86400)  # 24 hours
+                self.redis.expire(key, 86400)
             except Exception as e:
                 logger.error(f"Redis store failed: {e}")
     
@@ -286,27 +312,120 @@ conversation_store = ConversationStore()
 
 
 # ============================================
+# LLM Functions
+# ============================================
+
+SYSTEM_PROMPT = """You are a helpful travel assistant for a Kayak-like travel booking platform. 
+You help users find flights, hotels, and travel bundles. 
+Be concise and helpful. When users ask about travel, suggest relevant options.
+If they mention a destination, provide flight and hotel recommendations.
+Always be friendly and professional."""
+
+
+async def call_openai(query: str, history: List[Dict] = None) -> str:
+    """Call OpenAI API"""
+    if not openai_client:
+        return "OpenAI client not available"
+    
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    
+    # Add history
+    if history:
+        for msg in history[-6:]:  # Last 6 messages
+            messages.append({"role": msg["role"], "content": msg["content"]})
+    
+    messages.append({"role": "user", "content": query})
+    
+    try:
+        response = openai_client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=messages,
+            max_tokens=500,
+            temperature=0.7
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        logger.error(f"OpenAI API error: {e}")
+        return f"Sorry, I encountered an error: {str(e)}"
+
+
+async def call_ollama(query: str, history: List[Dict] = None) -> str:
+    """Call Ollama API (local)"""
+    
+    # Build prompt with history
+    prompt = f"{SYSTEM_PROMPT}\n\n"
+    
+    if history:
+        for msg in history[-6:]:
+            role = "User" if msg["role"] == "user" else "Assistant"
+            prompt += f"{role}: {msg['content']}\n"
+    
+    prompt += f"User: {query}\nAssistant:"
+    
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                f"{OLLAMA_BASE_URL}/api/generate",
+                json={
+                    "model": OLLAMA_MODEL,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.7,
+                        "num_predict": 500
+                    }
+                }
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                return result.get("response", "No response from Ollama")
+            else:
+                logger.error(f"Ollama error: {response.status_code}")
+                return f"Ollama error: {response.status_code}"
+                
+    except httpx.ConnectError:
+        logger.error("Cannot connect to Ollama. Make sure Ollama is running.")
+        return "Cannot connect to Ollama. Please ensure Ollama is running (ollama serve)."
+    except Exception as e:
+        logger.error(f"Ollama API error: {e}")
+        return f"Ollama error: {str(e)}"
+
+
+async def get_llm_response(query: str, history: List[Dict] = None) -> str:
+    """Get LLM response from OpenAI or Ollama"""
+    if USE_OPENAI:
+        return await call_openai(query, history)
+    else:
+        return await call_ollama(query, history)
+
+
+# ============================================
 # AI Response Generator
 # ============================================
 
-async def generate_ai_response(query: str, user_id: str, preferences: Dict = None) -> Dict:
-    """Generate AI response based on query"""
+async def generate_ai_response(query: str, user_id: str, session_id: str = None, preferences: Dict = None) -> Dict:
+    """Generate AI response using LLM and add recommendations"""
     
-    query_lower = query.lower()
+    # Get conversation history
+    history = []
+    if session_id:
+        history = conversation_store.get_history(session_id)
+    
+    # Get LLM response
+    llm_response = await get_llm_response(query, history)
+    
+    # Generate recommendations based on keywords
     recommendations = []
+    query_lower = query.lower()
     
-    # Flight queries
     if any(word in query_lower for word in ["flight", "fly", "plane", "airport"]):
-        response = "I found some great flight options for you! Here are the top deals based on price and convenience."
-        
         flights = [
             {"type": "flight", "id": "FLT001", "origin": "SFO", "destination": "MIA", 
              "price": 299, "avg_price": 400, "availability": 3, "rating": 4.5},
             {"type": "flight", "id": "FLT002", "origin": "SFO", "destination": "MIA", 
              "price": 249, "avg_price": 350, "availability": 8, "rating": 4.2},
         ]
-        
-        # Score flights if scorer available
         for flight in flights:
             if DEAL_SCORER_AVAILABLE:
                 try:
@@ -320,24 +439,16 @@ async def generate_ai_response(query: str, user_id: str, preferences: Dict = Non
                     flight["is_deal"] = score.is_deal
                     flight["quality"] = get_deal_quality(score.total_score)
                 except Exception as e:
-                    logger.error(f"Scoring failed: {e}")
                     flight["score"] = 70
-            else:
-                flight["score"] = 70
-            
             recommendations.append(flight)
     
-    # Hotel queries
     elif any(word in query_lower for word in ["hotel", "stay", "room", "accommodation"]):
-        response = "Here are some excellent hotel options! I've selected these based on ratings and value."
-        
         hotels = [
             {"type": "hotel", "id": "HTL001", "name": "Miami Beach Resort", "location": "Miami Beach",
              "price": 189, "avg_price": 250, "availability": 2, "rating": 4.8},
             {"type": "hotel", "id": "HTL002", "name": "Downtown Miami Hotel", "location": "Downtown",
              "price": 129, "avg_price": 160, "availability": 10, "rating": 4.3},
         ]
-        
         for hotel in hotels:
             if DEAL_SCORER_AVAILABLE:
                 try:
@@ -349,17 +460,11 @@ async def generate_ai_response(query: str, user_id: str, preferences: Dict = Non
                     )
                     hotel["score"] = score.total_score
                     hotel["is_deal"] = score.is_deal
-                    hotel["quality"] = get_deal_quality(score.total_score)
                 except Exception as e:
                     hotel["score"] = 75
-            else:
-                hotel["score"] = 75
-            
             recommendations.append(hotel)
     
-    # Bundle queries
     elif any(word in query_lower for word in ["bundle", "package", "together", "combo"]):
-        response = "Great idea to bundle flight + hotel! Here's a package that saves you money."
         recommendations = [
             {
                 "type": "bundle",
@@ -367,42 +472,14 @@ async def generate_ai_response(query: str, user_id: str, preferences: Dict = Non
                 "flight": {"id": "FLT001", "origin": "SFO", "destination": "MIA", "price": 299},
                 "hotel": {"id": "HTL001", "name": "Miami Beach Resort", "price": 189, "nights": 3},
                 "total_price": 856,
-                "original_price": 956,
                 "savings": 100,
                 "score": 88,
                 "is_deal": True
             }
         ]
     
-    # Budget queries
-    elif any(word in query_lower for word in ["cheap", "budget", "affordable", "low cost"]):
-        response = "Looking for budget-friendly options? Here are the best value deals!"
-        recommendations = [
-            {"type": "flight", "id": "FLT003", "origin": "SFO", "destination": "LAX", 
-             "price": 79, "score": 72, "quality": "Good Deal"},
-            {"type": "hotel", "id": "HTL003", "name": "Budget Inn", "location": "Los Angeles",
-             "price": 69, "score": 68, "quality": "Good Deal"},
-        ]
-    
-    # Help queries
-    elif any(word in query_lower for word in ["help", "what can you", "how do"]):
-        response = """I can help you with:
-• Finding flights - "Find flights to Miami"
-• Searching hotels - "Hotels in New York"  
-• Getting bundles - "Flight and hotel package to LA"
-• Budget options - "Cheap flights to Chicago"
-• Scoring deals - "Is this a good deal?"
-
-Just tell me where you want to go!"""
-        recommendations = []
-    
-    # Default
-    else:
-        response = f"I'd be happy to help plan your trip! You asked: '{query}'. Could you tell me more about your destination or what you're looking for?"
-        recommendations = []
-    
     return {
-        "response": response,
+        "response": llm_response,
         "recommendations": recommendations
     }
 
@@ -443,7 +520,12 @@ async def lifespan(app: FastAPI):
     logger.info("Starting AI Recommendation Service")
     logger.info("=" * 50)
     logger.info(f"Environment: {API_ENV}")
-    logger.info(f"OpenAI Key: {'✓ configured' if OPENAI_API_KEY else '✗ not set'}")
+    logger.info(f"LLM Provider: {'OpenAI' if USE_OPENAI else 'Ollama'}")
+    if USE_OPENAI:
+        logger.info(f"  Model: {OPENAI_MODEL}")
+    else:
+        logger.info(f"  Model: {OLLAMA_MODEL}")
+        logger.info(f"  URL: {OLLAMA_BASE_URL}")
     
     # Test connections
     components = {
@@ -453,6 +535,7 @@ async def lifespan(app: FastAPI):
         "bundle_matcher": BUNDLE_MATCHER_AVAILABLE,
         "mysql": MYSQL_AVAILABLE,
         "redis": REDIS_AVAILABLE,
+        "llm": True,  # Either OpenAI or Ollama
     }
     
     ready = sum(1 for v in components.values() if v)
@@ -471,7 +554,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="AI Recommendation Service",
-    description="Intelligent travel recommendation engine with deal scoring and real-time chat",
+    description="Intelligent travel recommendation engine with deal scoring and real-time chat. Supports OpenAI and Ollama.",
     version="3.0.0",
     lifespan=lifespan,
     docs_url="/docs",
@@ -500,6 +583,7 @@ async def root():
         "service": "AI Recommendation Service",
         "version": "3.0.0",
         "status": "running",
+        "llm_provider": "OpenAI" if USE_OPENAI else "Ollama",
         "docs": "/docs",
         "endpoints": [
             "/api/ai/health",
@@ -535,10 +619,25 @@ async def health_check():
             except:
                 redis_status = "error"
     
+    # Test LLM
+    llm_status = "unavailable"
+    if USE_OPENAI:
+        llm_status = "openai"
+    else:
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                response = await client.get(f"{OLLAMA_BASE_URL}/api/tags")
+                if response.status_code == 200:
+                    llm_status = "ollama"
+        except:
+            llm_status = "ollama (not responding)"
+    
     return {
         "status": "healthy",
         "service": "ai-recommendation-service",
         "version": "3.0.0",
+        "llm_provider": "OpenAI" if USE_OPENAI else "Ollama",
+        "llm_model": OPENAI_MODEL if USE_OPENAI else OLLAMA_MODEL,
         "components": {
             "config": "ready" if CONFIG_AVAILABLE else "unavailable",
             "deal_scorer": "ready" if DEAL_SCORER_AVAILABLE else "unavailable",
@@ -546,7 +645,7 @@ async def health_check():
             "bundle_matcher": "ready" if BUNDLE_MATCHER_AVAILABLE else "unavailable",
             "mysql": mysql_status,
             "redis": redis_status,
-            "openai": "configured" if OPENAI_API_KEY else "not configured"
+            "llm": llm_status
         },
         "timestamp": datetime.now().isoformat()
     }
@@ -565,7 +664,7 @@ async def chat(request: ChatRequest):
     conversation_store.add_message(session_id, "user", request.query)
     
     # Generate response
-    result = await generate_ai_response(request.query, request.user_id, preferences)
+    result = await generate_ai_response(request.query, request.user_id, session_id, preferences)
     
     # Store AI response
     conversation_store.add_message(session_id, "assistant", result["response"])
@@ -586,7 +685,7 @@ async def get_recommendations(request: RecommendationRequest):
     preferences = request.preferences or await get_user_preferences(request.user_id)
     
     query = f"Find flights and hotels to {request.destination or 'popular destinations'}"
-    result = await generate_ai_response(query, request.user_id, preferences)
+    result = await generate_ai_response(query, request.user_id, preferences=preferences)
     
     return {
         "recommendations": result.get("recommendations", [])[:request.limit],
@@ -653,7 +752,7 @@ async def create_bundle(request: BundleRequest):
             flight_price = flight.get("price", 0)
             hotel_price = hotel.get("price", 0) * hotel.get("nights", 3)
             total = flight_price + hotel_price
-            savings = total * 0.1  # 10% bundle discount
+            savings = total * 0.1
             
             bundle = {
                 "id": f"BND_{flight.get('id')}_{hotel.get('id')}",
@@ -665,7 +764,6 @@ async def create_bundle(request: BundleRequest):
                 "score": 80
             }
             
-            # Score bundle if available
             if DEAL_SCORER_AVAILABLE:
                 try:
                     score = calculate_deal_score(
@@ -681,7 +779,6 @@ async def create_bundle(request: BundleRequest):
             
             bundles.append(bundle)
     
-    # Sort by score
     bundles.sort(key=lambda x: x.get("score", 0), reverse=True)
     
     return {
@@ -734,10 +831,9 @@ async def websocket_chat(websocket: WebSocket, user_id: str = "anonymous"):
     
     await manager.connect(websocket, session_id)
     
-    # Welcome message
     await manager.send_message(session_id, {
         "type": "connected",
-        "content": "Connected to AI Travel Concierge! How can I help you plan your trip?",
+        "content": f"Connected to AI Travel Concierge! (Using {'OpenAI' if USE_OPENAI else 'Ollama'})",
         "session_id": session_id,
         "timestamp": datetime.now().isoformat()
     })
@@ -750,18 +846,15 @@ async def websocket_chat(websocket: WebSocket, user_id: str = "anonymous"):
             content = data.get("content", "")
             
             if msg_type == "message" and content:
-                # Typing indicator
                 await manager.send_message(session_id, {
                     "type": "typing",
                     "timestamp": datetime.now().isoformat()
                 })
                 
-                # Store and generate response
                 conversation_store.add_message(session_id, "user", content)
-                result = await generate_ai_response(content, user_id)
+                result = await generate_ai_response(content, user_id, session_id)
                 conversation_store.add_message(session_id, "assistant", result["response"])
                 
-                # Send response
                 await manager.send_message(session_id, {
                     "type": "response",
                     "content": result["response"],
