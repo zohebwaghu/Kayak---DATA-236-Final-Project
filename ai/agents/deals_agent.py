@@ -1,646 +1,563 @@
 """
-Deals Agent - Backend Worker Agent
-Processes Kafka streams of flight and hotel deals
-Performs scoring, tagging, and republishing
+Deals Agent - Backend Worker for Processing Kafka Streams
+Adapted for middleware Kafka topics and message formats
 """
 
 import asyncio
-import json
 import logging
 from typing import Dict, List, Optional, Any
-from datetime import datetime, timedelta
+from datetime import datetime
+import json
 
 from ..config import settings
-from ..interfaces.data_interface import DataInterface
+from ..kafka.consumer import KafkaConsumerWrapper
+from ..kafka.producer import KafkaProducerWrapper
 from ..algorithms.deal_scorer import DealScorer
 from ..algorithms.fit_scorer import FitScorer
 from ..algorithms.bundle_matcher import BundleMatcher
-from ..llm.intent_parser import IntentParser
-from ..llm.explainer import BundleExplainer
 from ..cache.semantic_cache import SemanticCache
-from ..kafka.consumer import KafkaConsumerWrapper
-from ..kafka.producer import KafkaProducerWrapper
+from ..interfaces.data_interface import get_data_interface
 
 logger = logging.getLogger(__name__)
 
 
 class DealsAgent:
     """
-    Deals Agent - Backend processing agent for travel deals
+    Deals Agent - Processes deal streams from Kafka
     
     Responsibilities:
-    1. Consume raw deals from Kafka (flights, hotels)
-    2. Normalize and validate deal data
-    3. Score deals using DealScorer
-    4. Match flight + hotel bundles
-    5. Tag deals with metadata
-    6. Publish scored deals back to Kafka
-    7. Cache results for performance
+    1. Consume deals from deals.normalized topic
+    2. Score deals using DealScorer algorithm
+    3. Match flights with hotels to create bundles
+    4. Publish scored deals to deals.scored topic
+    5. Publish tagged deals to deals.tagged topic
+    6. Publish events to deal.events topic
+    
+    Message Formats (aligned with middleware kafka.js):
+    
+    Input (deals.normalized):
+    {
+        "key": "flight_123",
+        "kind": "flight" | "hotel" | "car",
+        "price": 250.00,
+        "currency": "USD",
+        "ts": "2025-11-08T10:30:00Z",
+        "attrs": { ... deal-specific attributes ... }
+    }
+    
+    Output (deals.scored):
+    {
+        "key": "flight_123",
+        "score": 78,
+        "reason": "Good price for nonstop flight",
+        "ts": "2025-11-08T10:31:00Z",
+        "attrs": { ... original attrs ... }
+    }
+    
+    Output (deals.tagged):
+    {
+        "key": "flight_123",
+        "tags": ["excellent_deal", "nonstop", "business"],
+        "ts": "2025-11-08T10:31:00Z",
+        "attrs": { ... original attrs ... }
+    }
     """
     
-    def __init__(
-        self,
-        data_interface: Optional[DataInterface] = None,
-        semantic_cache: Optional[SemanticCache] = None
-    ):
-        """
-        Initialize Deals Agent
+    def __init__(self):
+        """Initialize Deals Agent"""
+        # Kafka consumers and producers
+        self.consumer: Optional[KafkaConsumerWrapper] = None
+        self.producer: Optional[KafkaProducerWrapper] = None
         
-        Args:
-            data_interface: Interface to backend data (flights, hotels, bookings)
-            semantic_cache: Redis-based semantic cache
-        """
-        self.data_interface = data_interface or DataInterface()
-        self.cache = semantic_cache or SemanticCache()
-        
-        # Initialize scoring algorithms
+        # Processing components
         self.deal_scorer = DealScorer()
         self.fit_scorer = FitScorer()
         self.bundle_matcher = BundleMatcher()
+        self.cache = SemanticCache()
+        self.data_interface = get_data_interface()
         
-        # Initialize LLM components
-        self.intent_parser = IntentParser()
-        self.explainer = BundleExplainer()
-        
-        # Kafka consumers and producers
-        self.flight_consumer: Optional[KafkaConsumerWrapper] = None
-        self.hotel_consumer: Optional[KafkaConsumerWrapper] = None
-        self.producer: Optional[KafkaProducerWrapper] = None
-        
-        # In-memory storage for processed deals (temporary)
+        # In-memory storage for processed deals
         self.processed_flights: Dict[str, Dict] = {}
         self.processed_hotels: Dict[str, Dict] = {}
-        self.bundles: List[Dict] = []
+        self.processed_cars: Dict[str, Dict] = {}
+        self.bundles: Dict[str, Dict] = {}
+        
+        # State
+        self._running = False
+        self._tasks: List[asyncio.Task] = []
         
         logger.info("DealsAgent initialized")
     
     async def start(self):
-        """
-        Start the Deals Agent
-        Initialize Kafka consumers and producers
-        Begin processing streams
-        """
-        try:
-            # Initialize Kafka components
-            self.flight_consumer = KafkaConsumerWrapper(
-                topic=settings.KAFKA_FLIGHT_TOPIC,
-                group_id=f"{settings.KAFKA_CONSUMER_GROUP}_flights"
-            )
-            
-            self.hotel_consumer = KafkaConsumerWrapper(
-                topic=settings.KAFKA_HOTEL_TOPIC,
-                group_id=f"{settings.KAFKA_CONSUMER_GROUP}_hotels"
-            )
-            
-            self.producer = KafkaProducerWrapper()
-            
-            # Connect to Kafka
-            await self.flight_consumer.connect()
-            await self.hotel_consumer.connect()
-            await self.producer.connect()
-            
-            logger.info("DealsAgent started - listening to Kafka streams")
-            
-            # Start processing tasks
-            await asyncio.gather(
-                self._process_flight_stream(),
-                self._process_hotel_stream(),
-                self._periodic_bundle_matching()
-            )
-            
-        except Exception as e:
-            logger.error(f"Error starting DealsAgent: {e}")
-            raise
+        """Start the Deals Agent"""
+        if self._running:
+            logger.warning("DealsAgent already running")
+            return
+        
+        logger.info("Starting DealsAgent...")
+        
+        # Initialize Kafka consumer
+        self.consumer = KafkaConsumerWrapper(
+            topics=[
+                settings.KAFKA_DEALS_NORMALIZED_TOPIC,
+                settings.KAFKA_DEALS_RAW_TOPIC
+            ],
+            group_id=settings.KAFKA_CONSUMER_GROUP,
+            bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS
+        )
+        
+        # Initialize Kafka producer
+        self.producer = KafkaProducerWrapper(
+            bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS
+        )
+        
+        await self.consumer.start()
+        await self.producer.start()
+        
+        self._running = True
+        
+        # Start processing tasks
+        self._tasks = [
+            asyncio.create_task(self._process_deals_stream()),
+            asyncio.create_task(self._periodic_bundle_matching())
+        ]
+        
+        logger.info("DealsAgent started successfully")
     
     async def stop(self):
-        """
-        Stop the Deals Agent gracefully
-        Close Kafka connections
-        """
+        """Stop the Deals Agent"""
+        if not self._running:
+            return
+        
+        logger.info("Stopping DealsAgent...")
+        
+        self._running = False
+        
+        # Cancel tasks
+        for task in self._tasks:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        
+        # Close Kafka connections
+        if self.consumer:
+            await self.consumer.stop()
+        if self.producer:
+            await self.producer.stop()
+        
+        logger.info("DealsAgent stopped")
+    
+    async def _process_deals_stream(self):
+        """Process incoming deals from Kafka"""
+        logger.info(f"Starting deals stream processor for topics: {settings.KAFKA_DEALS_NORMALIZED_TOPIC}")
+        
         try:
-            if self.flight_consumer:
-                await self.flight_consumer.close()
-            if self.hotel_consumer:
-                await self.hotel_consumer.close()
-            if self.producer:
-                await self.producer.close()
-            
-            logger.info("DealsAgent stopped")
-            
+            async for message in self.consumer:
+                if not self._running:
+                    break
+                
+                try:
+                    await self._process_deal_message(message)
+                except Exception as e:
+                    logger.error(f"Error processing deal message: {e}")
+                    continue
+        
+        except asyncio.CancelledError:
+            logger.info("Deals stream processor cancelled")
         except Exception as e:
-            logger.error(f"Error stopping DealsAgent: {e}")
+            logger.error(f"Deals stream processor error: {e}")
     
-    async def _process_flight_stream(self):
+    async def _process_deal_message(self, message: Dict):
         """
-        Process incoming flight deals from Kafka
-        """
-        logger.info("Started processing flight stream")
+        Process a single deal message
         
-        async for message in self.flight_consumer.consume():
-            try:
-                flight_data = json.loads(message.value)
-                
-                # Validate and normalize
-                normalized_flight = self._normalize_flight(flight_data)
-                
-                if normalized_flight:
-                    # Score the flight
-                    scored_flight = await self._score_flight(normalized_flight)
-                    
-                    # Store in memory
-                    flight_id = scored_flight["id"]
-                    self.processed_flights[flight_id] = scored_flight
-                    
-                    # Publish scored flight
-                    await self.producer.produce(
-                        topic=settings.KAFKA_SCORED_FLIGHTS_TOPIC,
-                        key=flight_id,
-                        value=json.dumps(scored_flight)
-                    )
-                    
-                    logger.debug(f"Processed flight {flight_id}, score: {scored_flight['score']}")
-                
-            except Exception as e:
-                logger.error(f"Error processing flight message: {e}")
-                continue
+        Args:
+            message: Kafka message with deal data
+        """
+        # Extract deal data (middleware format)
+        key = message.get("key")
+        kind = message.get("kind")  # "flight", "hotel", or "car"
+        price = message.get("price")
+        currency = message.get("currency", "USD")
+        timestamp = message.get("ts") or message.get("timestamp")
+        attrs = message.get("attrs", {})
+        
+        if not key or not kind:
+            logger.warning(f"Invalid deal message: missing key or kind")
+            return
+        
+        # Normalize deal data
+        deal = self._normalize_deal(key, kind, price, currency, timestamp, attrs)
+        
+        # Score the deal
+        score_result = self.deal_scorer.score(deal)
+        deal["score"] = score_result["score"]
+        deal["score_breakdown"] = score_result.get("breakdown", {})
+        
+        # Generate tags
+        tags = self._generate_tags(deal, score_result)
+        deal["tags"] = tags
+        
+        # Generate reason/explanation
+        reason = self._generate_reason(deal, score_result, tags)
+        
+        # Store processed deal
+        if kind == "flight":
+            self.processed_flights[key] = deal
+        elif kind == "hotel":
+            self.processed_hotels[key] = deal
+        elif kind == "car":
+            self.processed_cars[key] = deal
+        
+        # Publish scored deal
+        await self._publish_scored_deal(key, deal, score_result["score"], reason)
+        
+        # Publish tagged deal
+        await self._publish_tagged_deal(key, deal, tags)
+        
+        # Publish event
+        await self._publish_deal_event(key, "deal_scored", deal)
+        
+        logger.debug(f"Processed {kind} deal: {key}, score: {score_result['score']}")
     
-    async def _process_hotel_stream(self):
+    def _normalize_deal(
+        self,
+        key: str,
+        kind: str,
+        price: float,
+        currency: str,
+        timestamp: str,
+        attrs: Dict
+    ) -> Dict:
         """
-        Process incoming hotel deals from Kafka
-        """
-        logger.info("Started processing hotel stream")
+        Normalize deal data to internal format
         
-        async for message in self.hotel_consumer.consume():
-            try:
-                hotel_data = json.loads(message.value)
-                
-                # Validate and normalize
-                normalized_hotel = self._normalize_hotel(hotel_data)
-                
-                if normalized_hotel:
-                    # Score the hotel
-                    scored_hotel = await self._score_hotel(normalized_hotel)
-                    
-                    # Store in memory
-                    hotel_id = scored_hotel["id"]
-                    self.processed_hotels[hotel_id] = scored_hotel
-                    
-                    # Publish scored hotel
-                    await self.producer.produce(
-                        topic=settings.KAFKA_SCORED_HOTELS_TOPIC,
-                        key=hotel_id,
-                        value=json.dumps(scored_hotel)
-                    )
-                    
-                    logger.debug(f"Processed hotel {hotel_id}, score: {scored_hotel['score']}")
-                
-            except Exception as e:
-                logger.error(f"Error processing hotel message: {e}")
-                continue
+        Args:
+            key: Deal identifier
+            kind: Deal type (flight, hotel, car)
+            price: Deal price
+            currency: Price currency
+            timestamp: Deal timestamp
+            attrs: Deal-specific attributes
+        
+        Returns:
+            Normalized deal dict
+        """
+        deal = {
+            "id": key,
+            "kind": kind,
+            "price": float(price) if price else 0,
+            "currency": currency,
+            "timestamp": timestamp or datetime.now().isoformat(),
+            "processed_at": datetime.now().isoformat()
+        }
+        
+        if kind == "flight":
+            deal.update({
+                "origin": attrs.get("origin") or attrs.get("departure_airport") or attrs.get("startingAirport"),
+                "destination": attrs.get("destination") or attrs.get("arrival_airport") or attrs.get("destinationAirport"),
+                "departure_date": attrs.get("departure_date") or attrs.get("travelDate"),
+                "airline": attrs.get("airline") or attrs.get("segmentsAirlineName"),
+                "duration_hours": attrs.get("duration_hours") or attrs.get("duration"),
+                "stops": attrs.get("stops", 0),
+                "cabin_class": attrs.get("cabin_class") or attrs.get("segmentsCabinCode", "economy"),
+                "seats_remaining": attrs.get("seats_remaining") or attrs.get("seatsRemaining"),
+                "distance": attrs.get("distance") or attrs.get("totalTravelDistance")
+            })
+        
+        elif kind == "hotel":
+            deal.update({
+                "name": attrs.get("name"),
+                "location": attrs.get("city") or attrs.get("location"),
+                "star_rating": attrs.get("stars") or attrs.get("star_rating"),
+                "user_rating": attrs.get("rating") or attrs.get("user_rating"),
+                "amenities": attrs.get("amenities", []),
+                "room_type": attrs.get("room_type"),
+                "check_in": attrs.get("check_in"),
+                "check_out": attrs.get("check_out"),
+                "price_per_night": attrs.get("price_per_night") or price
+            })
+        
+        elif kind == "car":
+            deal.update({
+                "provider": attrs.get("provider") or attrs.get("provider_name"),
+                "car_type": attrs.get("car_type"),
+                "pickup_location": attrs.get("pickup_location"),
+                "dropoff_location": attrs.get("dropoff_location"),
+                "pickup_date": attrs.get("pickup_date"),
+                "dropoff_date": attrs.get("dropoff_date")
+            })
+        
+        # Keep original attrs for reference
+        deal["original_attrs"] = attrs
+        
+        return deal
+    
+    def _generate_tags(self, deal: Dict, score_result: Dict) -> List[str]:
+        """
+        Generate tags for a deal based on its attributes and score
+        
+        Args:
+            deal: Normalized deal data
+            score_result: Scoring result
+        
+        Returns:
+            List of tags
+        """
+        tags = []
+        score = score_result.get("score", 0)
+        kind = deal.get("kind")
+        
+        # Score-based tags
+        if score >= 80:
+            tags.append("excellent_deal")
+        elif score >= 60:
+            tags.append("good_deal")
+        
+        # Price-based tags
+        price = deal.get("price", 0)
+        if kind == "flight":
+            if price < 150:
+                tags.append("budget_friendly")
+            elif price > 500:
+                tags.append("premium")
+        elif kind == "hotel":
+            if price < 100:
+                tags.append("budget_friendly")
+            elif price > 300:
+                tags.append("luxury")
+        
+        # Flight-specific tags
+        if kind == "flight":
+            if deal.get("stops", 0) == 0:
+                tags.append("nonstop")
+            
+            cabin = deal.get("cabin_class", "").lower()
+            if "business" in cabin:
+                tags.append("business_class")
+            elif "first" in cabin:
+                tags.append("first_class")
+            
+            seats = deal.get("seats_remaining", 999)
+            if seats and seats < 5:
+                tags.append("limited_seats")
+        
+        # Hotel-specific tags
+        elif kind == "hotel":
+            star_rating = deal.get("star_rating", 0)
+            if star_rating and star_rating >= 4.5:
+                tags.append("highly_rated")
+            
+            amenities = deal.get("amenities", [])
+            if "pool" in amenities:
+                tags.append("has_pool")
+            if "wifi" in amenities or "free_wifi" in amenities:
+                tags.append("free_wifi")
+            if "breakfast" in amenities:
+                tags.append("breakfast_included")
+        
+        return tags
+    
+    def _generate_reason(self, deal: Dict, score_result: Dict, tags: List[str]) -> str:
+        """
+        Generate a human-readable reason for the score
+        
+        Args:
+            deal: Deal data
+            score_result: Scoring result
+            tags: Generated tags
+        
+        Returns:
+            Reason string
+        """
+        reasons = []
+        kind = deal.get("kind")
+        score = score_result.get("score", 0)
+        
+        if score >= 80:
+            reasons.append("Excellent value")
+        elif score >= 60:
+            reasons.append("Good deal")
+        
+        if kind == "flight":
+            if "nonstop" in tags:
+                reasons.append("direct flight")
+            if "limited_seats" in tags:
+                reasons.append("limited availability")
+            if deal.get("airline"):
+                reasons.append(f"on {deal['airline']}")
+        
+        elif kind == "hotel":
+            if deal.get("star_rating") and deal["star_rating"] >= 4:
+                reasons.append(f"{deal['star_rating']}-star property")
+            if "highly_rated" in tags:
+                reasons.append("top-rated by guests")
+            if deal.get("location"):
+                reasons.append(f"in {deal['location']}")
+        
+        return " - ".join(reasons) if reasons else "Standard deal"
+    
+    async def _publish_scored_deal(self, key: str, deal: Dict, score: int, reason: str):
+        """Publish scored deal to deals.scored topic"""
+        message = {
+            "key": key,
+            "score": score,
+            "reason": reason,
+            "ts": datetime.now().isoformat(),
+            "attrs": deal.get("original_attrs", {})
+        }
+        
+        await self.producer.send(
+            topic=settings.KAFKA_DEALS_SCORED_TOPIC,
+            key=key,
+            value=message
+        )
+    
+    async def _publish_tagged_deal(self, key: str, deal: Dict, tags: List[str]):
+        """Publish tagged deal to deals.tagged topic"""
+        message = {
+            "key": key,
+            "tags": tags,
+            "ts": datetime.now().isoformat(),
+            "attrs": deal.get("original_attrs", {})
+        }
+        
+        await self.producer.send(
+            topic=settings.KAFKA_DEALS_TAGGED_TOPIC,
+            key=key,
+            value=message
+        )
+    
+    async def _publish_deal_event(self, key: str, event_type: str, deal: Dict):
+        """Publish deal event to deal.events topic"""
+        message = {
+            "key": key,
+            "event_type": event_type,
+            "ts": datetime.now().isoformat(),
+            "score": deal.get("score"),
+            "tags": deal.get("tags", []),
+            "payload": {
+                "kind": deal.get("kind"),
+                "price": deal.get("price"),
+                "currency": deal.get("currency")
+            }
+        }
+        
+        await self.producer.send(
+            topic=settings.KAFKA_DEAL_EVENTS_TOPIC,
+            key=key,
+            value=message
+        )
     
     async def _periodic_bundle_matching(self):
-        """
-        Periodically match flights and hotels into bundles
-        Runs every N seconds
-        """
-        logger.info("Started periodic bundle matching")
+        """Periodically match flights with hotels to create bundles"""
+        logger.info("Starting periodic bundle matching")
         
-        while True:
-            try:
+        try:
+            while self._running:
                 await asyncio.sleep(settings.BUNDLE_MATCHING_INTERVAL)
                 
-                if self.processed_flights and self.processed_hotels:
-                    # Match bundles
-                    new_bundles = await self._match_bundles()
-                    
-                    # Publish bundles
-                    for bundle in new_bundles:
-                        await self.producer.produce(
-                            topic=settings.KAFKA_BUNDLES_TOPIC,
-                            key=bundle["id"],
-                            value=json.dumps(bundle)
-                        )
-                    
-                    if new_bundles:
-                        logger.info(f"Created {len(new_bundles)} new bundles")
+                if not self._running:
+                    break
                 
-            except Exception as e:
-                logger.error(f"Error in bundle matching: {e}")
-                await asyncio.sleep(5)  # Wait before retrying
+                try:
+                    await self._match_bundles()
+                except Exception as e:
+                    logger.error(f"Error in bundle matching: {e}")
+        
+        except asyncio.CancelledError:
+            logger.info("Bundle matching cancelled")
     
-    def _normalize_flight(self, raw_flight: Dict) -> Optional[Dict]:
-        """
-        Normalize raw flight data to standard format
+    async def _match_bundles(self):
+        """Match flights with hotels to create bundles"""
+        flights = list(self.processed_flights.values())
+        hotels = list(self.processed_hotels.values())
         
-        Args:
-            raw_flight: Raw flight data from Kaggle dataset
+        if not flights or not hotels:
+            return
         
-        Returns:
-            Normalized flight dict or None if invalid
-        """
-        try:
-            # Extract and validate required fields
-            normalized = {
-                "id": raw_flight.get("id") or raw_flight.get("flight_id"),
-                "origin": raw_flight.get("startingAirport", ""),
-                "destination": raw_flight.get("destinationAirport", ""),
-                "departure_date": raw_flight.get("travelDate", ""),
-                "airline": raw_flight.get("segmentsAirlineName", ""),
-                "duration_hours": self._parse_duration(raw_flight.get("totalTravelDistance")),
-                "price": float(raw_flight.get("totalFare", 0)),
-                "stops": raw_flight.get("segmentsCabinCode", "").count("|") + 1,
-                "cabin_class": raw_flight.get("segmentsCabinCode", "coach").split("|")[0].lower(),
-                "seats_available": raw_flight.get("seatsRemaining", 10),
-                "raw_data": raw_flight,
-                "processed_at": datetime.now().isoformat()
-            }
+        # Use bundle matcher
+        bundles = self.bundle_matcher.match(flights, hotels)
+        
+        for bundle in bundles:
+            bundle_id = f"bundle_{bundle['flight']['id']}_{bundle['hotel']['id']}"
+            bundle["id"] = bundle_id
+            bundle["created_at"] = datetime.now().isoformat()
             
-            # Validation
-            if not all([
-                normalized["id"],
-                normalized["origin"],
-                normalized["destination"],
-                normalized["price"] > 0
-            ]):
-                logger.warning(f"Invalid flight data: {raw_flight}")
-                return None
+            self.bundles[bundle_id] = bundle
             
-            return normalized
-            
-        except Exception as e:
-            logger.error(f"Error normalizing flight: {e}")
-            return None
-    
-    def _normalize_hotel(self, raw_hotel: Dict) -> Optional[Dict]:
-        """
-        Normalize raw hotel data to standard format
+            # Publish bundle event
+            await self._publish_deal_event(bundle_id, "bundle_created", {
+                "kind": "bundle",
+                "price": bundle.get("total_price"),
+                "score": bundle.get("combined_score"),
+                "tags": bundle.get("tags", [])
+            })
         
-        Args:
-            raw_hotel: Raw hotel data from Kaggle dataset
-        
-        Returns:
-            Normalized hotel dict or None if invalid
-        """
-        try:
-            # Extract and validate required fields
-            normalized = {
-                "id": raw_hotel.get("id") or raw_hotel.get("hotel_id"),
-                "name": raw_hotel.get("name", ""),
-                "location": raw_hotel.get("city", ""),
-                "star_rating": float(raw_hotel.get("stars", 3)),
-                "price_per_night": float(raw_hotel.get("price", 0)),
-                "amenities": raw_hotel.get("amenities", []),
-                "guest_rating": float(raw_hotel.get("rating", 0)),
-                "availability_start": raw_hotel.get("check_in", ""),
-                "availability_end": raw_hotel.get("check_out", ""),
-                "room_type": raw_hotel.get("room_type", "standard"),
-                "raw_data": raw_hotel,
-                "processed_at": datetime.now().isoformat()
-            }
-            
-            # Validation
-            if not all([
-                normalized["id"],
-                normalized["name"],
-                normalized["location"],
-                normalized["price_per_night"] > 0
-            ]):
-                logger.warning(f"Invalid hotel data: {raw_hotel}")
-                return None
-            
-            return normalized
-            
-        except Exception as e:
-            logger.error(f"Error normalizing hotel: {e}")
-            return None
-    
-    async def _score_flight(self, flight: Dict) -> Dict:
-        """
-        Score a flight deal
-        
-        Args:
-            flight: Normalized flight data
-        
-        Returns:
-            Flight with added score and tags
-        """
-        try:
-            # Calculate deal score
-            score = self.deal_scorer.score_flight(flight)
-            
-            # Add tags
-            tags = self._generate_flight_tags(flight, score)
-            
-            # Add to flight
-            flight["score"] = score
-            flight["tags"] = tags
-            flight["scored_at"] = datetime.now().isoformat()
-            
-            return flight
-            
-        except Exception as e:
-            logger.error(f"Error scoring flight: {e}")
-            flight["score"] = 50.0  # Default neutral score
-            flight["tags"] = []
-            return flight
-    
-    async def _score_hotel(self, hotel: Dict) -> Dict:
-        """
-        Score a hotel deal
-        
-        Args:
-            hotel: Normalized hotel data
-        
-        Returns:
-            Hotel with added score and tags
-        """
-        try:
-            # Calculate deal score
-            score = self.deal_scorer.score_hotel(hotel)
-            
-            # Add tags
-            tags = self._generate_hotel_tags(hotel, score)
-            
-            # Add to hotel
-            hotel["score"] = score
-            hotel["tags"] = tags
-            hotel["scored_at"] = datetime.now().isoformat()
-            
-            return hotel
-            
-        except Exception as e:
-            logger.error(f"Error scoring hotel: {e}")
-            hotel["score"] = 50.0  # Default neutral score
-            hotel["tags"] = []
-            return hotel
-    
-    async def _match_bundles(self) -> List[Dict]:
-        """
-        Match flights and hotels into bundles
-        
-        Returns:
-            List of new bundles
-        """
-        try:
-            # Get lists of flights and hotels
-            flights = list(self.processed_flights.values())
-            hotels = list(self.processed_hotels.values())
-            
-            # Match bundles
-            new_bundles = self.bundle_matcher.match_bundles(flights, hotels)
-            
-            # Add to stored bundles
-            self.bundles.extend(new_bundles)
-            
-            return new_bundles
-            
-        except Exception as e:
-            logger.error(f"Error matching bundles: {e}")
-            return []
-    
-    def _generate_flight_tags(self, flight: Dict, score: float) -> List[str]:
-        """
-        Generate descriptive tags for a flight
-        
-        Args:
-            flight: Flight data
-            score: Deal score
-        
-        Returns:
-            List of tags
-        """
-        tags = []
-        
-        # Deal quality tags
-        if score >= 80:
-            tags.append("excellent_deal")
-        elif score >= 60:
-            tags.append("good_deal")
-        
-        # Flight characteristics
-        if flight["stops"] == 0:
-            tags.append("nonstop")
-        elif flight["stops"] == 1:
-            tags.append("one_stop")
-        else:
-            tags.append("multi_stop")
-        
-        # Cabin class
-        if "first" in flight["cabin_class"].lower():
-            tags.append("first_class")
-        elif "business" in flight["cabin_class"].lower():
-            tags.append("business_class")
-        else:
-            tags.append("economy")
-        
-        # Duration
-        if flight["duration_hours"] < 3:
-            tags.append("short_flight")
-        elif flight["duration_hours"] > 10:
-            tags.append("long_flight")
-        
-        # Availability
-        if flight["seats_available"] < 5:
-            tags.append("limited_seats")
-        
-        return tags
-    
-    def _generate_hotel_tags(self, hotel: Dict, score: float) -> List[str]:
-        """
-        Generate descriptive tags for a hotel
-        
-        Args:
-            hotel: Hotel data
-            score: Deal score
-        
-        Returns:
-            List of tags
-        """
-        tags = []
-        
-        # Deal quality tags
-        if score >= 80:
-            tags.append("excellent_deal")
-        elif score >= 60:
-            tags.append("good_deal")
-        
-        # Star rating
-        if hotel["star_rating"] >= 4.5:
-            tags.append("luxury")
-        elif hotel["star_rating"] >= 3.5:
-            tags.append("upscale")
-        else:
-            tags.append("budget_friendly")
-        
-        # Guest rating
-        if hotel["guest_rating"] >= 4.5:
-            tags.append("highly_rated")
-        elif hotel["guest_rating"] < 3:
-            tags.append("mixed_reviews")
-        
-        # Amenities
-        amenities = [a.lower() for a in hotel.get("amenities", [])]
-        if "pool" in amenities:
-            tags.append("has_pool")
-        if "gym" in amenities or "fitness" in amenities:
-            tags.append("has_gym")
-        if "spa" in amenities:
-            tags.append("has_spa")
-        if "parking" in amenities:
-            tags.append("has_parking")
-        
-        return tags
-    
-    def _parse_duration(self, distance_str: str) -> float:
-        """
-        Parse travel distance/duration string to hours
-        
-        Args:
-            distance_str: Distance string from dataset
-        
-        Returns:
-            Duration in hours (estimated)
-        """
-        try:
-            # Assuming average flight speed of 500 mph
-            # Parse distance and convert to hours
-            if not distance_str:
-                return 2.0  # Default
-            
-            distance = float(distance_str.replace(",", ""))
-            hours = distance / 500.0
-            
-            return round(hours, 1)
-            
-        except:
-            return 2.0  # Default
+        logger.info(f"Created {len(bundles)} new bundles")
     
     async def get_recommendations(
         self,
-        user_query: str,
+        user_query: Optional[str] = None,
         user_preferences: Optional[Dict] = None,
+        user_id: Optional[str] = None,
         limit: int = 10
-    ) -> Dict[str, Any]:
+    ) -> Dict:
         """
-        Get personalized recommendations based on user query
-        This is called by the Concierge Agent or API
+        Get personalized recommendations
         
         Args:
             user_query: Natural language query
-            user_preferences: User preference dict (optional)
-            limit: Max number of recommendations
+            user_preferences: User preference dict
+            user_id: User ID for personalization
+            limit: Max recommendations
         
         Returns:
             Dict with recommendations
         """
-        try:
-            # Check cache first
-            cache_key = f"recommendations:{user_query}"
-            cached_result = await self.cache.get(cache_key)
-            
-            if cached_result:
-                logger.info("Cache hit for recommendations")
-                return cached_result
-            
-            # Parse intent from query
-            intent = await self.intent_parser.parse(user_query)
-            
-            # Get relevant bundles
-            filtered_bundles = self._filter_bundles_by_intent(intent, user_preferences)
-            
-            # Score bundles for fit
-            scored_bundles = []
-            for bundle in filtered_bundles[:limit * 2]:  # Get more, then trim
-                fit_score = self.fit_scorer.score_bundle(
-                    bundle,
-                    user_preferences or {},
-                    intent
-                )
-                bundle_with_fit = {**bundle, "fit_score": fit_score}
-                scored_bundles.append(bundle_with_fit)
-            
-            # Sort by fit score and take top N
-            scored_bundles.sort(key=lambda x: x["fit_score"], reverse=True)
-            top_bundles = scored_bundles[:limit]
-            
-            # Generate explanations
-            recommendations = []
-            for bundle in top_bundles:
-                explanation = await self.explainer.explain(bundle, user_query)
-                recommendations.append({
-                    "bundle": bundle,
-                    "explanation": explanation,
-                    "fit_score": bundle["fit_score"]
-                })
-            
-            result = {
-                "query": user_query,
-                "intent": intent,
-                "recommendations": recommendations,
-                "count": len(recommendations),
-                "generated_at": datetime.now().isoformat()
-            }
-            
-            # Cache result
-            await self.cache.set(cache_key, result)
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"Error getting recommendations: {e}")
-            return {
-                "query": user_query,
-                "recommendations": [],
-                "error": str(e)
-            }
-    
-    def _filter_bundles_by_intent(
-        self,
-        intent: Dict,
-        user_preferences: Optional[Dict]
-    ) -> List[Dict]:
-        """
-        Filter bundles based on parsed intent and preferences
+        # Get user preferences if user_id provided
+        if user_id and not user_preferences:
+            user_data = await self.data_interface.get_user_preferences(user_id)
+            user_preferences = user_data.get("preferences", {}) if user_data else {}
         
-        Args:
-            intent: Parsed intent from query
-            user_preferences: User preferences
+        # Get top deals
+        all_deals = []
         
-        Returns:
-            Filtered list of bundles
-        """
-        filtered = []
+        for deal in self.processed_flights.values():
+            all_deals.append(deal)
         
-        for bundle in self.bundles:
-            # Check destination match
-            if intent.get("destination"):
-                dest = intent["destination"].lower()
-                flight_dest = bundle["flight"]["destination"].lower()
-                hotel_loc = bundle["hotel"]["location"].lower()
-                
-                if dest not in flight_dest and dest not in hotel_loc:
-                    continue
-            
-            # Check date range
-            if intent.get("dates"):
-                # Add date filtering logic here
-                pass
-            
-            # Check budget
-            if user_preferences and user_preferences.get("budget"):
-                total_price = bundle["total_price"]
-                budget_category = user_preferences["budget"]
-                
-                if budget_category == "budget" and total_price > 1000:
-                    continue
-                elif budget_category == "luxury" and total_price < 1000:
-                    continue
-            
-            # Check score threshold
-            if bundle.get("score", 0) >= 40:  # Minimum quality threshold
-                filtered.append(bundle)
+        for deal in self.processed_hotels.values():
+            all_deals.append(deal)
         
-        return filtered
+        # Score deals for user fit
+        if user_preferences:
+            for deal in all_deals:
+                fit_score = self.fit_scorer.score(deal, user_preferences)
+                deal["fit_score"] = fit_score
+        
+        # Sort by combined score
+        all_deals.sort(
+            key=lambda x: (x.get("fit_score", 0) + x.get("score", 0)) / 2,
+            reverse=True
+        )
+        
+        # Get top bundles
+        top_bundles = sorted(
+            self.bundles.values(),
+            key=lambda x: x.get("combined_score", 0),
+            reverse=True
+        )[:limit]
+        
+        return {
+            "recommendations": all_deals[:limit],
+            "bundles": top_bundles,
+            "total_flights": len(self.processed_flights),
+            "total_hotels": len(self.processed_hotels),
+            "total_bundles": len(self.bundles),
+            "generated_at": datetime.now().isoformat()
+        }
 
 
 # Singleton instance
@@ -648,9 +565,7 @@ _deals_agent_instance: Optional[DealsAgent] = None
 
 
 def get_deals_agent() -> DealsAgent:
-    """
-    Get singleton instance of DealsAgent
-    """
+    """Get singleton instance of DealsAgent"""
     global _deals_agent_instance
     if _deals_agent_instance is None:
         _deals_agent_instance = DealsAgent()
