@@ -1,0 +1,87 @@
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+/* Signup page background similar to Kayak hero section */
+.signup-page-bg {
+  background-color: #f3f4f6; /* light gray */
+}
+
+/* Centered card with rounded corners like Kayak’s modal */
+.signup-card {
+  max-width: 960px;
+  width: 100%;
+  border-radius: 24px;
+}
+
+/* Brand accent colors inspired by Kayak */
+.kayak-accent-dot {
+  color: #ff6900; 
+}
+
+.kayak-word {
+  letter-spacing: 0.02em;
+}
+
+/* Primary action button */
+.btn-kayak {
+  background-color: #ff6900;
+  border-color: #ff6900;
+  color: #ffffff;
+  font-weight: 600;
+  border-radius: 999px;
+}
+
+.btn-kayak:hover,
+.btn-kayak:focus {
+  background-color: #e85f00;
+  border-color: #e85f00;
+  color: #ffffff;
+}
+
+/* Login page background similar to signup */
+.login-page-bg {
+  background-color: #f3f4f6;
+}
+
+/* Centered auth card */
+.login-card {
+  max-width: 540px;
+  width: 100%;
+  border-radius: 24px;
+}
+
+/* Optional: small tweak so bottom text is nicely aligned */
+.login-legal-text {
+  text-align: left;
+}
+
+/* (Optional, currently unused but kept for future) outline button style */
+.btn-kayak-outline {
+  border-radius: 999px;
+  border-width: 1.5px;
+  border-color: #d1d5db;
+  background-color: #ffffff;
+  color: #111827;
+  font-weight: 500;
+}
+
+.btn-kayak-outline:hover,
+.btn-kayak-outline:focus {
+  background-color: #f9fafb;
+  border-color: #9ca3af;
+  color: #111827;
+}
+
+
+

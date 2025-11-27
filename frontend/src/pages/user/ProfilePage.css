@@ -1,0 +1,215 @@
+/* src/pages/user/ProfilePage.css */
+
+.profile-page {
+  background-color: #f5f7fa; /* same as home-page */
+  min-height: calc(100vh - 64px); /* leave room for navbar */
+  padding: 24px 16px 40px;
+}
+
+.profile-header-row {
+  max-width: 960px;
+  margin: 0 auto 16px auto;
+}
+
+.profile-title {
+  font-size: 2.1rem;
+  font-weight: 800;
+  color: #151b26;
+  margin-bottom: 4px;
+}
+
+.profile-subtitle {
+  color: #6b7280;
+  font-size: 0.95rem;
+  margin-bottom: 0;
+}
+
+.profile-card {
+  background-color: #ffffff;
+  border-radius: 24px;
+  padding: 20px 22px 18px 22px;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+  border: 1px solid #e5e7eb;
+}
+
+/* Header with avatar & name */
+.profile-card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #e5e7eb;
+  margin-bottom: 16px;
+}
+
+.profile-avatar-circle {
+  width: 46px;
+  height: 46px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #ff6b00, #ff8a34);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 1.2rem;
+  color: #ffffff;
+}
+
+.profile-card-header-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.profile-card-name {
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: #111827;
+}
+
+.profile-card-email {
+  font-size: 0.88rem;
+  color: #6b7280;
+}
+
+/* Sections */
+.profile-section {
+  margin-bottom: 18px;
+}
+
+.profile-section-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #111827;
+  margin-bottom: 8px;
+}
+
+/* Read-only inputs (legacy) */
+.profile-input-readonly {
+  background-color: #f3f4f6;
+  color: #6b7280;
+  cursor: default;
+}
+
+.profile-input-readonly:disabled {
+  background-color: #f3f4f6;
+  color: #6b7280;
+}
+
+/* New read-only value style (view mode) */
+.profile-readonly-value {
+  padding: 0.375rem 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid #e5e7eb;
+  background-color: #f9fafb;
+  font-size: 0.95rem;
+  color: #111827;
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+}
+
+.profile-readonly-muted {
+  color: #9ca3af;
+  font-style: italic;
+}
+
+/* Footer row */
+.profile-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.profile-timestamps {
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+
+.profile-timestamp-line + .profile-timestamp-line {
+  margin-top: 2px;
+}
+
+/* Buttons area on the right in footer */
+.profile-footer-buttons {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* Save button with Kayak-ish gradient */
+.profile-save-btn {
+  border-radius: 999px;
+  padding: 8px 22px;
+  font-weight: 600;
+  border: none;
+  background: linear-gradient(135deg, #ff6b00, #ff8a34);
+  color: #ffffff;
+  box-shadow: 0 10px 20px rgba(255, 107, 0, 0.35);
+}
+
+.profile-save-btn:hover {
+  color: #ffffff;
+  box-shadow: 0 12px 22px rgba(255, 107, 0, 0.45);
+  transform: translateY(-1px);
+}
+
+.profile-save-btn:disabled {
+  opacity: 0.7;
+  box-shadow: none;
+  transform: none;
+}
+
+/* Edit + Cancel buttons */
+.profile-edit-btn {
+  border-radius: 999px;
+  padding: 8px 20px;
+  font-weight: 600;
+  border: 1px solid #e5e7eb;
+  background-color: #ffffff;
+  color: #ff6b00;
+}
+
+.profile-edit-btn:hover {
+  background-color: #fff7f0;
+  border-color: #ff6b00;
+  color: #ff6b00;
+}
+
+.profile-cancel-btn {
+  border-radius: 999px;
+  padding: 8px 18px;
+  font-weight: 500;
+  border: 1px solid #e5e7eb;
+  background-color: #ffffff;
+  color: #4b5563;
+}
+
+.profile-cancel-btn:hover {
+  background-color: #f9fafb;
+  border-color: #d1d5db;
+  color: #111827;
+}
+
+/* Small adjustments for mobile */
+@media (max-width: 576px) {
+  .profile-card {
+    padding: 16px 14px 16px 14px;
+    border-radius: 18px;
+  }
+
+  .profile-title {
+    font-size: 1.8rem;
+  }
+
+  .profile-footer {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .profile-footer-buttons {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}

@@ -13,20 +13,32 @@ CREATE DATABASE IF NOT EXISTS kayak_billing;
 
 USE kayak_users;
 
--- Users table
+-- Users table (UPDATED to snake_case to match user-service/server.js)
 CREATE TABLE IF NOT EXISTS users (
-    userId VARCHAR(11) PRIMARY KEY COMMENT 'SSN format: ###-##-####',
-    firstName VARCHAR(255) NOT NULL,
-    lastName VARCHAR(255) NOT NULL,
-    address JSON COMMENT 'Address object with street, city, state, zipCode',
-    phone VARCHAR(20),
+    user_id VARCHAR(11) PRIMARY KEY COMMENT 'SSN format: ###-##-####',
+    first_name VARCHAR(255) NOT NULL,
+    last_name VARCHAR(255) NOT NULL,
+
+    -- Address split into separate columns (no JSON)
+    address_line1 VARCHAR(255),
+    address_line2 VARCHAR(255),
+    city VARCHAR(255),
+    state_code VARCHAR(2),
+    zip_code VARCHAR(10),
+
+    phone_number VARCHAR(20),
     email VARCHAR(255) UNIQUE NOT NULL,
-    passwordHash VARCHAR(255) NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+
     role ENUM('user', 'admin') DEFAULT 'user',
-    profileImageId VARCHAR(24) COMMENT 'MongoDB ObjectId reference',
-    paymentDetailsToken VARCHAR(255) COMMENT 'Tokenized payment info',
-    createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    profile_image_id VARCHAR(24) COMMENT 'MongoDB ObjectId reference',
+    payment_details_token VARCHAR(255) COMMENT 'Tokenized payment info',
+
+    -- Timestamps in UTC style, matching server.js expectations
+    created_at_utc TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at_utc TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
     INDEX idx_email (email),
     INDEX idx_role (role)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -122,12 +134,29 @@ CREATE TABLE IF NOT EXISTS invoices (
 USE kayak_users;
 
 -- Insert a test admin user (password: Admin123!)
-INSERT INTO users (userId, firstName, lastName, address, phone, email, passwordHash, role)
+INSERT INTO users (
+    user_id,
+    first_name,
+    last_name,
+    address_line1,
+    address_line2,
+    city,
+    state_code,
+    zip_code,
+    phone_number,
+    email,
+    password_hash,
+    role
+)
 VALUES (
     '123-45-6789',
     'Admin',
     'User',
-    JSON_OBJECT('street', '123 Admin St', 'city', 'San Francisco', 'state', 'CA', 'zipCode', '94105'),
+    '123 Admin St',
+    NULL,
+    'San Francisco',
+    'CA',
+    '94105',
     '415-555-0100',
     'admin@kayak.com',
     '$2b$10$rZ3vZqZqQwZqZqZqZqZqZeZqZqZqZqZqZqZqZqZqZqZqZqZqZqZqZ', -- bcrypt hash of 'Admin123!'
@@ -135,12 +164,29 @@ VALUES (
 ) ON DUPLICATE KEY UPDATE email = email;
 
 -- Insert a test regular user (password: User123!)
-INSERT INTO users (userId, firstName, lastName, address, phone, email, passwordHash, role)
+INSERT INTO users (
+    user_id,
+    first_name,
+    last_name,
+    address_line1,
+    address_line2,
+    city,
+    state_code,
+    zip_code,
+    phone_number,
+    email,
+    password_hash,
+    role
+)
 VALUES (
     '987-65-4321',
     'John',
     'Doe',
-    JSON_OBJECT('street', '456 User Ave', 'city', 'New York', 'state', 'NY', 'zipCode', '10001'),
+    '456 User Ave',
+    NULL,
+    'New York',
+    'NY',
+    '10001',
     '212-555-0200',
     'john.doe@example.com',
     '$2b$10$rZ3vZqZqQwZqZqZqZqZqZeZqZqZqZqZqZqZqZqZqZqZqZqZqZqZqZ', -- bcrypt hash of 'User123!'
@@ -194,4 +240,3 @@ COMMIT;
 
 -- Success message
 SELECT 'Database initialization completed successfully!' AS Status;
-

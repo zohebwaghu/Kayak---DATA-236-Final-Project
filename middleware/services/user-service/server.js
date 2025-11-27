@@ -26,7 +26,7 @@ const {
   disconnectKafka,
   TOPICS,
   EVENT_TYPES
-} = require('./shared/kafka');
+} = require('../../shared/kafka');
 
 const {
   validateUserId,
@@ -34,7 +34,7 @@ const {
   validateState,
   validateEmail,
   validatePassword
-} = require('./shared/validators');
+} = require('../../shared/validators');
 
 const {
   createErrorResponse,
@@ -42,7 +42,7 @@ const {
   AuthenticationError,
   NotFoundError,
   ConflictError
-} = require('./shared/errorHandler');
+} = require('../../shared/errorHandler');
 
 const app = express();
 const PORT = process.env.USER_SERVICE_PORT || 3001;
@@ -306,10 +306,12 @@ app.post('/api/v1/auth/login', async (req, res) => {
 // ==================== USER CRUD ENDPOINTS ====================
 
 /**
- * GET /api/v1/users/:userId
+ * GET /:userId
  * Retrieve user profile information
+ *
+ * NOTE: API Gateway rewrites /api/v1/users/:userId -> /:userId for this service.
  */
-app.get('/api/v1/users/:userId', async (req, res) => {
+app.get('/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
 
@@ -365,10 +367,12 @@ app.get('/api/v1/users/:userId', async (req, res) => {
 });
 
 /**
- * PUT /api/v1/users/:userId
+ * PUT /:userId
  * Update user profile information
+ *
+ * NOTE: API Gateway rewrites /api/v1/users/:userId -> /:userId for this service.
  */
-app.put('/api/v1/users/:userId', async (req, res) => {
+app.put('/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
     const updates = req.body;
@@ -509,10 +513,12 @@ app.put('/api/v1/users/:userId', async (req, res) => {
 });
 
 /**
- * DELETE /api/v1/users/:userId
+ * DELETE /:userId
  * Delete user account
+ *
+ * NOTE: API Gateway rewrites /api/v1/users/:userId -> /:userId for this service.
  */
-app.delete('/api/v1/users/:userId', async (req, res) => {
+app.delete('/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
 
@@ -597,4 +603,3 @@ process.on('SIGINT', async () => {
   await pool.end();
   process.exit(0);
 });
-

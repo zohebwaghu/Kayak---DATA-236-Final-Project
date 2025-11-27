@@ -1,21 +1,22 @@
 /**
  * BOOKING SERVICE
- * 
- * Purpose: Manages complex, distributed booking transactions
+ *
+ * Purpose: Manages booking transactions
  * Responsibilities:
  *  - Create, retrieve, and cancel bookings
- *  - Transaction management (atomicity)
  *  - Inventory validation and updates
  *  - Publishing booking events to Kafka
- *  - Rollback handling on failures
- * 
- * Database: MySQL (transactional bookings)
+ *
+ * Databases:
+ *  - Users:    MySQL (kayak_users)
+ *  - Bookings: MySQL (kayak_bookings) → bookings, inventory, stats
  * Message Queue: Kafka (event publishing)
  */
 
 require('dotenv').config();
 const express = require('express');
 const mysql = require('mysql2/promise');
+const { randomUUID } = require('crypto');
 
 const {
   createKafkaClient,
@@ -23,49 +24,89 @@ const {
   publishEvent,
   disconnectKafka,
   TOPICS,
-  EVENT_TYPES
-} = require('./shared/kafka');
+  EVENT_TYPES,
+} = require('../../shared/kafka');
 
 const {
   createErrorResponse,
   ValidationError,
   NotFoundError,
-  ConflictError
-} = require('./shared/errorHandler');
+  ConflictError,
+} = require('../../shared/errorHandler');
 
-const { validateDate } = require('./shared/validators');
+const { validateDate } = require('../../shared/validators');
 
 const app = express();
 const PORT = process.env.BOOKING_SERVICE_PORT || 3004;
 
 app.use(express.json());
 
-// ==================== DATABASE CONNECTION ====================
+// ==================== DATABASE CONNECTIONS ====================
+//
+// Explicitly use TWO DBs:
+//
+//   kayak_users      → users table
+//   kayak_bookings   → bookings + inventory + stats
+//
 
-// Use Tier 3's database structure
-// They created both 'kayak' (main) and 'kayak_bookings' (compatibility)
-const pool = mysql.createPool({
-  host: process.env.MYSQL_HOST || 'localhost',
-  port: process.env.MYSQL_PORT || 3306,
-  user: process.env.MYSQL_USER || 'root',
-  password: process.env.MYSQL_PASSWORD || 'password',
-  database: process.env.MYSQL_DB_BOOKINGS || 'kayak', // Use 'kayak' (Tier 3's main DB) or 'kayak_bookings' (compatibility)
+const MYSQL_HOST = process.env.MYSQL_HOST || 'localhost';
+const MYSQL_PORT = process.env.MYSQL_PORT || 3306;
+const MYSQL_USER = process.env.MYSQL_USER || 'root';
+const MYSQL_PASSWORD = process.env.MYSQL_PASSWORD || 'password';
+
+// ---- IMPORTANT FIX HERE ----
+let USERS_DB = process.env.MYSQL_DB_USERS || 'kayak_users';
+// If any old config sets this to "kayak", force it to the correct DB
+if (USERS_DB === 'kayak') {
+  USERS_DB = 'kayak_users';
+}
+// ----------------------------
+
+const BOOKINGS_DB = process.env.MYSQL_DB_BOOKINGS || 'kayak_bookings';
+
+// Pool for users DB
+const usersPool = mysql.createPool({
+  host: MYSQL_HOST,
+  port: MYSQL_PORT,
+  user: MYSQL_USER,
+  password: MYSQL_PASSWORD,
+  database: USERS_DB,
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
   enableKeepAlive: true,
-  keepAliveInitialDelay: 0
+  keepAliveInitialDelay: 0,
 });
 
-pool.getConnection()
-  .then(connection => {
-    console.log('✅ MySQL database connected');
-    connection.release();
-  })
-  .catch(err => {
+// Pool for bookings DB
+const bookingsPool = mysql.createPool({
+  host: MYSQL_HOST,
+  port: MYSQL_PORT,
+  user: MYSQL_USER,
+  password: MYSQL_PASSWORD,
+  database: BOOKINGS_DB,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 0,
+});
+
+// Test both connections on startup
+(async () => {
+  try {
+    const usersConn = await usersPool.getConnection();
+    console.log(`✅ MySQL users database connected: ${USERS_DB}`);
+    usersConn.release();
+
+    const bookingsConn = await bookingsPool.getConnection();
+    console.log(`✅ MySQL bookings database connected: ${BOOKINGS_DB}`);
+    bookingsConn.release();
+  } catch (err) {
     console.error('❌ MySQL connection failed:', err);
     process.exit(1);
-  });
+  }
+})();
 
 // ==================== KAFKA SETUP ====================
 
@@ -86,7 +127,9 @@ app.get('/health', (req, res) => {
   res.status(200).json({
     status: 'UP',
     service: 'Booking Service',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    usersDb: USERS_DB,
+    bookingsDb: BOOKINGS_DB,
   });
 });
 
@@ -94,8 +137,8 @@ app.get('/health', (req, res) => {
 
 /**
  * POST /api/v1/bookings
- * Create a new booking with transaction management
- * 
+ * Create a new booking with transaction + inventory check
+ *
  * Request Body:
  * {
  *   userId: string (SSN format),
@@ -109,7 +152,7 @@ app.get('/health', (req, res) => {
  * }
  */
 app.post('/api/v1/bookings', async (req, res) => {
-  const connection = await pool.getConnection();
+  const connection = await bookingsPool.getConnection();
 
   try {
     const {
@@ -120,13 +163,22 @@ app.post('/api/v1/bookings', async (req, res) => {
       endDate,
       guests = 1,
       totalPrice,
-      additionalDetails = {}
+      additionalDetails = {},
     } = req.body;
 
     // ===== VALIDATION =====
-    
-    if (!userId || !listingType || !listingId || !startDate || !endDate || !totalPrice) {
-      throw new ValidationError('Missing required fields: userId, listingType, listingId, startDate, endDate, totalPrice');
+
+    if (
+      !userId ||
+      !listingType ||
+      !listingId ||
+      !startDate ||
+      !endDate ||
+      totalPrice == null
+    ) {
+      throw new ValidationError(
+        'Missing required fields: userId, listingType, listingId, startDate, endDate, totalPrice'
+      );
     }
 
     if (!['hotel', 'flight', 'car'].includes(listingType)) {
@@ -139,12 +191,14 @@ app.post('/api/v1/bookings', async (req, res) => {
 
     const start = new Date(startDate);
     const end = new Date(endDate);
-    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
     if (end <= start) {
       throw new ValidationError('End date must be after start date');
     }
 
-    if (start < new Date()) {
+    if (start < today) {
       throw new ValidationError('Start date cannot be in the past');
     }
 
@@ -156,14 +210,15 @@ app.post('/api/v1/bookings', async (req, res) => {
       throw new ValidationError('Total price must be greater than 0');
     }
 
-    // ===== START TRANSACTION =====
-    
+    // ===== START TRANSACTION (bookings DB) =====
+
     await connection.beginTransaction();
     console.log('🔄 Transaction started for new booking');
 
     try {
-      // STEP 1: Check if user exists (use Tier 3's snake_case)
-      const [users] = await connection.execute(
+      // STEP 1: Check if user exists in kayak_users.users
+      // NOTE: users table uses snake_case: user_id
+      const [users] = await usersPool.execute(
         'SELECT user_id FROM users WHERE user_id = ?',
         [userId]
       );
@@ -172,33 +227,60 @@ app.post('/api/v1/bookings', async (req, res) => {
         throw new NotFoundError('User not found');
       }
 
-      // STEP 2: Check availability (using Tier 3's inventory table)
+      // STEP 2: Check inventory in kayak_bookings.inventory
+      //
+      // Your schema:
+      //  - listingType    (enum)
+      //  - listingId      (varchar)
+      //  - availableCount (int)
+      //  - pricePerUnit   (decimal)
+      //
       const [availability] = await connection.execute(
-        `SELECT available_count, price_per_unit 
-         FROM inventory 
-         WHERE listing_type = ? AND listing_id = ? 
+        `SELECT availableCount, pricePerUnit
+         FROM inventory
+         WHERE listingType = ? AND listingId = ?
          FOR UPDATE`,
         [listingType, listingId]
       );
 
       if (availability.length === 0) {
-        throw new NotFoundError(`${listingType} listing not found`);
+        throw new NotFoundError(`${listingType} listing not found in inventory`);
       }
 
-      if (availability[0].available_count < guests) {
-        throw new ConflictError(`Insufficient availability. Available: ${availability[0].available_count}, Requested: ${guests}`);
+      const { availableCount, pricePerUnit } = availability[0];
+
+      if (availableCount < guests) {
+        throw new ConflictError(
+          `Insufficient availability. Available: ${availableCount}, Requested: ${guests}`
+        );
       }
 
-      // STEP 3: Create booking record (Tier 3 uses auto-increment booking_id)
-      // Store additional data in metadata_json column
-      const [insertResult] = await connection.execute(
+      // STEP 3: Create booking record in kayak_bookings.bookings
+      //
+      // Your schema (camelCase):
+      //   bookingId (varchar(50), PK)
+      //   userId
+      //   listingType
+      //   listingId
+      //   startDate (DATE)
+      //   endDate   (DATE)
+      //   guests    (INT)
+      //   totalPrice (DECIMAL)
+      //   status    (enum: pending/confirmed/cancelled)
+      //   additionalDetails (JSON)
+      //   createdAt, updatedAt (TIMESTAMP)
+      //
+      const bookingId = randomUUID();
+
+      await connection.execute(
         `INSERT INTO bookings (
-          user_id, booking_type, listing_id, 
-          start_date, end_date, num_guests, 
-          subtotal_amount, tax_amount, total_amount,
-          status, created_at_utc, updated_at_utc
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 'confirmed', NOW(), NOW())`,
+          bookingId, userId, listingType, listingId,
+          startDate, endDate, guests,
+          totalPrice, status, additionalDetails,
+          createdAt, updatedAt
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, NOW(), NOW())`,
         [
+          bookingId,
           userId,
           listingType,
           listingId,
@@ -206,34 +288,24 @@ app.post('/api/v1/bookings', async (req, res) => {
           endDate,
           guests,
           totalPrice,
-          totalPrice
+          JSON.stringify(additionalDetails || {}),
         ]
       );
 
-      // Get the auto-generated booking_id
-      const bookingId = insertResult.insertId;
-
-      // Store additional details in booking_items metadata if needed
-      // (Tier 3 uses booking_items table for item details)
-
-      // STEP 4: Update inventory (reduce available count using Tier 3's column names)
-      const [updateResult] = await connection.execute(
-        `UPDATE inventory 
-         SET available_count = available_count - ?,
-             updated_at_utc = NOW()
-         WHERE listing_type = ? AND listing_id = ?`,
+      // STEP 4: Update inventory (decrement availableCount)
+      await connection.execute(
+        `UPDATE inventory
+         SET availableCount = availableCount - ?,
+             updatedAt = CURRENT_TIMESTAMP
+         WHERE listingType = ? AND listingId = ?`,
         [guests, listingType, listingId]
       );
 
-      if (updateResult.affectedRows === 0) {
-        throw new Error('Failed to update inventory');
-      }
-
-      // STEP 6: Commit transaction
+      // STEP 5: Commit transaction
       await connection.commit();
       console.log('✅ Transaction committed successfully');
 
-      // STEP 7: Publish event to Kafka (after DB commit)
+      // STEP 6: Publish event to Kafka (after commit)
       if (kafkaProducer) {
         await publishEvent(kafkaProducer, TOPICS.BOOKING_EVENTS, bookingId, {
           eventType: EVENT_TYPES.BOOKING_CREATED,
@@ -244,14 +316,15 @@ app.post('/api/v1/bookings', async (req, res) => {
             listingId,
             startDate,
             endDate,
-            totalPrice
-          }
+            guests,
+            totalPrice,
+          },
         });
       }
 
-      // STEP 8: Return success response
+      // STEP 7: Response
       res.status(201).json({
-        bookingId: bookingId.toString(), // Convert BIGINT to string for API
+        bookingId,
         userId,
         listingType,
         listingId,
@@ -262,23 +335,31 @@ app.post('/api/v1/bookings', async (req, res) => {
         status: 'confirmed',
         additionalDetails,
         createdAt: new Date().toISOString(),
-        message: 'Booking created successfully'
+        message: 'Booking created successfully',
       });
-
     } catch (transactionError) {
-      // ROLLBACK on any error
       await connection.rollback();
       console.error('❌ Transaction rolled back:', transactionError.message);
       throw transactionError;
     }
-
   } catch (error) {
     console.error('Error creating booking:', error);
 
-    if (error instanceof ValidationError || error instanceof NotFoundError || error instanceof ConflictError) {
-      return res.status(error.status).json(
-        createErrorResponse(error.status, error.error, error.message, req.path)
-      );
+    if (
+      error instanceof ValidationError ||
+      error instanceof NotFoundError ||
+      error instanceof ConflictError
+    ) {
+      return res
+        .status(error.status)
+        .json(
+          createErrorResponse(
+            error.status,
+            error.error,
+            error.message,
+            req.path
+          )
+        );
     }
 
     res.status(500).json(
@@ -302,12 +383,12 @@ app.get('/api/v1/bookings/:bookingId', async (req, res) => {
   try {
     const { bookingId } = req.params;
 
-    // Use Tier 3's snake_case column names
-    const [bookings] = await pool.execute(
-      `SELECT booking_id, user_id, booking_type, listing_id, 
-              start_date, end_date, num_guests, total_amount, status, 
-              created_at_utc, updated_at_utc 
-       FROM bookings WHERE booking_id = ?`,
+    const [bookings] = await bookingsPool.execute(
+      `SELECT bookingId, userId, listingType, listingId,
+              startDate, endDate, guests, totalPrice, status,
+              additionalDetails, createdAt, updatedAt
+       FROM bookings
+       WHERE bookingId = ?`,
       [bookingId]
     );
 
@@ -316,34 +397,46 @@ app.get('/api/v1/bookings/:bookingId', async (req, res) => {
     }
 
     const row = bookings[0];
-    // Convert snake_case to camelCase for API response
+
     const booking = {
-      bookingId: row.booking_id.toString(),
-      userId: row.user_id,
-      listingType: row.booking_type,
-      listingId: row.listing_id,
-      startDate: row.start_date,
-      endDate: row.end_date,
-      guests: row.num_guests,
-      totalPrice: parseFloat(row.total_amount),
+      bookingId: row.bookingId,
+      userId: row.userId,
+      listingType: row.listingType,
+      listingId: row.listingId,
+      startDate: row.startDate,
+      endDate: row.endDate,
+      guests: row.guests,
+      totalPrice: parseFloat(row.totalPrice),
       status: row.status,
-      createdAt: row.created_at_utc,
-      updatedAt: row.updated_at_utc
+      additionalDetails: row.additionalDetails,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
     };
 
     res.status(200).json(booking);
-
   } catch (error) {
     console.error('Error fetching booking:', error);
 
     if (error instanceof NotFoundError) {
-      return res.status(error.status).json(
-        createErrorResponse(error.status, error.error, error.message, req.path)
-      );
+      return res
+        .status(error.status)
+        .json(
+          createErrorResponse(
+            error.status,
+            error.error,
+            error.message,
+            req.path
+          )
+        );
     }
 
     res.status(500).json(
-      createErrorResponse(500, 'Internal Server Error', 'Failed to fetch booking', req.path)
+      createErrorResponse(
+        500,
+        'Internal Server Error',
+        'Failed to fetch booking',
+        req.path
+      )
     );
   }
 });
@@ -351,7 +444,7 @@ app.get('/api/v1/bookings/:bookingId', async (req, res) => {
 /**
  * GET /api/v1/users/:userId/bookings
  * Retrieve all bookings for a user with optional filters
- * 
+ *
  * Query Parameters:
  *  - status: pending | confirmed | cancelled
  *  - timeFrame: past | current | future
@@ -362,11 +455,11 @@ app.get('/api/v1/users/:userId/bookings', async (req, res) => {
     const { userId } = req.params;
     const { status, timeFrame, listingType } = req.query;
 
-    // Use Tier 3's snake_case column names
-    let query = `SELECT booking_id, user_id, booking_type, listing_id, 
-                        start_date, end_date, num_guests, total_amount, status,
-                        created_at_utc, updated_at_utc 
-                 FROM bookings WHERE user_id = ?`;
+    let query = `SELECT bookingId, userId, listingType, listingId,
+                        startDate, endDate, guests, totalPrice, status,
+                        additionalDetails, createdAt, updatedAt
+                 FROM bookings
+                 WHERE userId = ?`;
     const params = [userId];
 
     if (status) {
@@ -375,74 +468,76 @@ app.get('/api/v1/users/:userId/bookings', async (req, res) => {
     }
 
     if (listingType) {
-      query += ' AND booking_type = ?';
+      query += ' AND listingType = ?';
       params.push(listingType);
     }
 
     if (timeFrame === 'past') {
-      query += ' AND end_date < CURDATE()';
+      query += ' AND endDate < CURDATE()';
     } else if (timeFrame === 'current') {
-      query += ' AND start_date <= CURDATE() AND end_date >= CURDATE()';
+      query += ' AND startDate <= CURDATE() AND endDate >= CURDATE()';
     } else if (timeFrame === 'future') {
-      query += ' AND start_date > CURDATE()';
+      query += ' AND startDate > CURDATE()';
     }
 
-    query += ' ORDER BY start_date DESC';
+    query += ' ORDER BY startDate DESC';
 
-    const [rows] = await pool.execute(query, params);
+    const [rows] = await bookingsPool.execute(query, params);
 
-    // Convert snake_case to camelCase for API response
-    const bookings = rows.map(row => ({
-      bookingId: row.booking_id.toString(),
-      userId: row.user_id,
-      listingType: row.booking_type,
-      listingId: row.listing_id,
-      startDate: row.start_date,
-      endDate: row.end_date,
-      guests: row.num_guests,
-      totalPrice: parseFloat(row.total_amount),
+    const bookings = rows.map((row) => ({
+      bookingId: row.bookingId,
+      userId: row.userId,
+      listingType: row.listingType,
+      listingId: row.listingId,
+      startDate: row.startDate,
+      endDate: row.endDate,
+      guests: row.guests,
+      totalPrice: parseFloat(row.totalPrice),
       status: row.status,
-      createdAt: row.created_at_utc,
-      updatedAt: row.updated_at_utc
+      additionalDetails: row.additionalDetails,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
     }));
 
     res.status(200).json({
       userId,
       count: bookings.length,
       filters: { status, timeFrame, listingType },
-      bookings
+      bookings,
     });
-
   } catch (error) {
     console.error('Error fetching user bookings:', error);
     res.status(500).json(
-      createErrorResponse(500, 'Internal Server Error', 'Failed to fetch bookings', req.path)
+      createErrorResponse(
+        500,
+        'Internal Server Error',
+        'Failed to fetch bookings',
+        req.path
+      )
     );
   }
 });
 
 /**
  * PUT /api/v1/bookings/:bookingId/cancel
- * Cancel an existing booking with rollback
+ * Cancel an existing booking with inventory rollback
  */
 app.put('/api/v1/bookings/:bookingId/cancel', async (req, res) => {
-  const connection = await pool.getConnection();
+  const connection = await bookingsPool.getConnection();
 
   try {
     const { bookingId } = req.params;
     const { reason = 'User requested cancellation' } = req.body;
 
-    // ===== START TRANSACTION =====
-    
     await connection.beginTransaction();
     console.log('🔄 Transaction started for booking cancellation');
 
     try {
-      // STEP 1: Get booking details (with lock) - Use Tier 3's snake_case
+      // STEP 1: Get booking details (lock row)
       const [bookings] = await connection.execute(
-        `SELECT booking_id, user_id, booking_type, listing_id, num_guests, status 
-         FROM bookings 
-         WHERE booking_id = ? 
+        `SELECT bookingId, userId, listingType, listingId, guests, status
+         FROM bookings
+         WHERE bookingId = ?
          FOR UPDATE`,
         [bookingId]
       );
@@ -457,37 +552,37 @@ app.put('/api/v1/bookings/:bookingId/cancel', async (req, res) => {
         throw new ConflictError('Booking is already cancelled');
       }
 
-      // STEP 2: Update booking status - Use Tier 3's snake_case
+      // STEP 2: Update booking status
       await connection.execute(
-        `UPDATE bookings 
-         SET status = 'cancelled', 
-             updated_at_utc = NOW()
-         WHERE booking_id = ?`,
+        `UPDATE bookings
+         SET status = 'cancelled',
+             updatedAt = CURRENT_TIMESTAMP
+         WHERE bookingId = ?`,
         [bookingId]
       );
 
-      // STEP 3: Restore inventory - Use Tier 3's snake_case
+      // STEP 3: Restore inventory (increment availableCount)
       await connection.execute(
-        `UPDATE inventory 
-         SET available_count = available_count + ?,
-             updated_at_utc = NOW()
-         WHERE listing_type = ? AND listing_id = ?`,
-        [booking.num_guests, booking.booking_type, booking.listing_id]
+        `UPDATE inventory
+         SET availableCount = availableCount + ?,
+             updatedAt = CURRENT_TIMESTAMP
+         WHERE listingType = ? AND listingId = ?`,
+        [booking.guests, booking.listingType, booking.listingId]
       );
 
-      // STEP 4: Commit transaction
+      // STEP 4: Commit
       await connection.commit();
       console.log('✅ Cancellation transaction committed');
 
-      // STEP 5: Publish event to Kafka
+      // STEP 5: Publish event
       if (kafkaProducer) {
         await publishEvent(kafkaProducer, TOPICS.BOOKING_EVENTS, bookingId, {
           eventType: EVENT_TYPES.BOOKING_CANCELLED,
           data: {
             bookingId,
             userId: booking.userId,
-            reason
-          }
+            reason,
+          },
         });
       }
 
@@ -496,26 +591,39 @@ app.put('/api/v1/bookings/:bookingId/cancel', async (req, res) => {
         status: 'cancelled',
         reason,
         cancelledAt: new Date().toISOString(),
-        message: 'Booking cancelled successfully. Refund will be processed.'
+        message: 'Booking cancelled successfully. Refund will be processed.',
       });
-
     } catch (transactionError) {
       await connection.rollback();
-      console.error('❌ Cancellation transaction rolled back:', transactionError.message);
+      console.error(
+        '❌ Cancellation transaction rolled back:',
+        transactionError.message
+      );
       throw transactionError;
     }
-
   } catch (error) {
     console.error('Error cancelling booking:', error);
 
     if (error instanceof NotFoundError || error instanceof ConflictError) {
-      return res.status(error.status).json(
-        createErrorResponse(error.status, error.error, error.message, req.path)
-      );
+      return res
+        .status(error.status)
+        .json(
+          createErrorResponse(
+            error.status,
+            error.error,
+            error.message,
+            req.path
+          )
+        );
     }
 
     res.status(500).json(
-      createErrorResponse(500, 'Internal Server Error', 'Failed to cancel booking', req.path)
+      createErrorResponse(
+        500,
+        'Internal Server Error',
+        'Failed to cancel booking',
+        req.path
+      )
     );
   } finally {
     connection.release();
@@ -525,15 +633,27 @@ app.put('/api/v1/bookings/:bookingId/cancel', async (req, res) => {
 // ==================== ERROR HANDLING ====================
 
 app.use((req, res) => {
-  res.status(404).json(
-    createErrorResponse(404, 'Not Found', `Endpoint ${req.method} ${req.path} not found`, req.path)
-  );
+  res
+    .status(404)
+    .json(
+      createErrorResponse(
+        404,
+        'Not Found',
+        `Endpoint ${req.method} ${req.path} not found`,
+        req.path
+      )
+    );
 });
 
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);
   res.status(500).json(
-    createErrorResponse(500, 'Internal Server Error', 'An unexpected error occurred', req.path)
+    createErrorResponse(
+      500,
+      'Internal Server Error',
+      'An unexpected error occurred',
+      req.path
+    )
   );
 });
 
@@ -544,10 +664,11 @@ app.listen(PORT, () => {
 ╔═══════════════════════════════════════════════════════╗
 ║          📦 BOOKING SERVICE STARTED                   ║
 ╠═══════════════════════════════════════════════════════╣
-║  Port:         ${PORT}                                   ║
-║  Database:     MySQL (${process.env.MYSQL_DB_BOOKINGS || 'kayak_bookings'})      ║
-║  Kafka:        ${kafkaProducer ? '✅ Connected' : '❌ Not Connected'}                       ║
-║  Time:         ${new Date().toISOString()}  ║
+║  Port:         ${PORT}                                ║
+║  Users DB:     MySQL (${USERS_DB})                    ║
+║  Bookings DB:  MySQL (${BOOKINGS_DB})                 ║
+║  Kafka:        ${kafkaProducer ? '✅ Connected' : '❌ Not Connected'}   ║
+║  Time:         ${new Date().toISOString()}           ║
 ╚═══════════════════════════════════════════════════════╝
   `);
 });
@@ -557,14 +678,15 @@ app.listen(PORT, () => {
 process.on('SIGTERM', async () => {
   console.log('SIGTERM received. Shutting down gracefully...');
   await disconnectKafka(kafkaProducer, null);
-  await pool.end();
+  await usersPool.end();
+  await bookingsPool.end();
   process.exit(0);
 });
 
 process.on('SIGINT', async () => {
   console.log('SIGINT received. Shutting down gracefully...');
   await disconnectKafka(kafkaProducer, null);
-  await pool.end();
+  await usersPool.end();
+  await bookingsPool.end();
   process.exit(0);
 });
-

@@ -24,9 +24,9 @@ const {
   subscribeToTopics,
   disconnectKafka,
   TOPICS
-} = require('./shared/kafka');
+} = require('../../shared/kafka');
 
-const { createErrorResponse } = require('./shared/errorHandler');
+const { createErrorResponse } = require('../../shared/errorHandler');
 
 const app = express();
 const PORT = process.env.SEARCH_SERVICE_PORT || 3003;
@@ -176,20 +176,13 @@ app.get('/health', (req, res) => {
 // ==================== SEARCH ENDPOINTS ====================
 
 /**
- * GET /api/v1/search/hotels
- * Search and filter hotel listings
- * 
- * Query Parameters:
- *  - city: string
- *  - minStarRating: number (0-5)
- *  - maxStarRating: number (0-5)
- *  - minPrice: number
- *  - maxPrice: number
- *  - amenities: comma-separated string (e.g., "wifi,pool,parking")
- *  - page: number (default: 1)
- *  - limit: number (default: 20, max: 100)
+ * Hotels search handler
+ *
+ * Mounted at:
+ *  - GET /api/v1/search/hotels
+ *  - GET /hotels
  */
-app.get('/api/v1/search/hotels', async (req, res) => {
+const handleHotelsSearch = async (req, res) => {
   try {
     const {
       city,
@@ -288,25 +281,19 @@ app.get('/api/v1/search/hotels', async (req, res) => {
       createErrorResponse(500, 'Internal Server Error', 'Failed to search hotels', req.path)
     );
   }
-});
+};
+
+app.get('/api/v1/search/hotels', handleHotelsSearch);
+app.get('/hotels', handleHotelsSearch);
 
 /**
- * GET /api/v1/search/flights
- * Search and filter flight listings
- * 
- * Query Parameters:
- *  - origin: IATA code (e.g., "SFO")
- *  - destination: IATA code (e.g., "JFK")
- *  - departureDate: YYYY-MM-DD
- *  - returnDate: YYYY-MM-DD (optional)
- *  - minPrice: number
- *  - maxPrice: number
- *  - airline: string
- *  - maxStops: number (0, 1, 2)
- *  - page: number
- *  - limit: number
+ * Flights search handler
+ *
+ * Mounted at:
+ *  - GET /api/v1/search/flights
+ *  - GET /flights
  */
-app.get('/api/v1/search/flights', async (req, res) => {
+const handleFlightsSearch = async (req, res) => {
   try {
     const {
       origin,
@@ -405,13 +392,19 @@ app.get('/api/v1/search/flights', async (req, res) => {
       createErrorResponse(500, 'Internal Server Error', 'Failed to search flights', req.path)
     );
   }
-});
+};
+
+app.get('/api/v1/search/flights', handleFlightsSearch);
+app.get('/flights', handleFlightsSearch);
 
 /**
- * GET /api/v1/search/cars
- * Search and filter car rental listings
+ * Cars search handler
+ *
+ * Mounted at:
+ *  - GET /api/v1/search/cars
+ *  - GET /cars
  */
-app.get('/api/v1/search/cars', async (req, res) => {
+const handleCarsSearch = async (req, res) => {
   try {
     const {
       location,
@@ -498,7 +491,10 @@ app.get('/api/v1/search/cars', async (req, res) => {
       createErrorResponse(500, 'Internal Server Error', 'Failed to search cars', req.path)
     );
   }
-});
+};
+
+app.get('/api/v1/search/cars', handleCarsSearch);
+app.get('/cars', handleCarsSearch);
 
 // ==================== CACHE MANAGEMENT ENDPOINTS ====================
 
@@ -569,4 +565,3 @@ process.on('SIGINT', async () => {
   await mongoClient.close();
   process.exit(0);
 });
-
