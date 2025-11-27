@@ -10,8 +10,8 @@ from datetime import datetime
 import json
 
 from ..config import settings
-from ..kafka.consumer import KafkaConsumerWrapper
-from ..kafka.producer import KafkaProducerWrapper
+from ..kafka_client.consumer import KafkaConsumerWrapper
+from ..kafka_client.producer import KafkaProducerWrapper
 from ..algorithms.deal_scorer import DealScorer
 from ..algorithms.fit_scorer import FitScorer
 from ..algorithms.bundle_matcher import BundleMatcher
@@ -32,35 +32,6 @@ class DealsAgent:
     4. Publish scored deals to deals.scored topic
     5. Publish tagged deals to deals.tagged topic
     6. Publish events to deal.events topic
-    
-    Message Formats (aligned with middleware kafka.js):
-    
-    Input (deals.normalized):
-    {
-        "key": "flight_123",
-        "kind": "flight" | "hotel" | "car",
-        "price": 250.00,
-        "currency": "USD",
-        "ts": "2025-11-08T10:30:00Z",
-        "attrs": { ... deal-specific attributes ... }
-    }
-    
-    Output (deals.scored):
-    {
-        "key": "flight_123",
-        "score": 78,
-        "reason": "Good price for nonstop flight",
-        "ts": "2025-11-08T10:31:00Z",
-        "attrs": { ... original attrs ... }
-    }
-    
-    Output (deals.tagged):
-    {
-        "key": "flight_123",
-        "tags": ["excellent_deal", "nonstop", "business"],
-        "ts": "2025-11-08T10:31:00Z",
-        "attrs": { ... original attrs ... }
-    }
     """
     
     def __init__(self):
@@ -170,12 +141,7 @@ class DealsAgent:
             logger.error(f"Deals stream processor error: {e}")
     
     async def _process_deal_message(self, message: Dict):
-        """
-        Process a single deal message
-        
-        Args:
-            message: Kafka message with deal data
-        """
+        """Process a single deal message"""
         # Extract deal data (middleware format)
         key = message.get("key")
         kind = message.get("kind")  # "flight", "hotel", or "car"
@@ -231,20 +197,7 @@ class DealsAgent:
         timestamp: str,
         attrs: Dict
     ) -> Dict:
-        """
-        Normalize deal data to internal format
-        
-        Args:
-            key: Deal identifier
-            kind: Deal type (flight, hotel, car)
-            price: Deal price
-            currency: Price currency
-            timestamp: Deal timestamp
-            attrs: Deal-specific attributes
-        
-        Returns:
-            Normalized deal dict
-        """
+        """Normalize deal data to internal format"""
         deal = {
             "id": key,
             "kind": kind,
@@ -296,16 +249,7 @@ class DealsAgent:
         return deal
     
     def _generate_tags(self, deal: Dict, score_result: Dict) -> List[str]:
-        """
-        Generate tags for a deal based on its attributes and score
-        
-        Args:
-            deal: Normalized deal data
-            score_result: Scoring result
-        
-        Returns:
-            List of tags
-        """
+        """Generate tags for a deal based on its attributes and score"""
         tags = []
         score = score_result.get("score", 0)
         kind = deal.get("kind")
@@ -361,17 +305,7 @@ class DealsAgent:
         return tags
     
     def _generate_reason(self, deal: Dict, score_result: Dict, tags: List[str]) -> str:
-        """
-        Generate a human-readable reason for the score
-        
-        Args:
-            deal: Deal data
-            score_result: Scoring result
-            tags: Generated tags
-        
-        Returns:
-            Reason string
-        """
+        """Generate a human-readable reason for the score"""
         reasons = []
         kind = deal.get("kind")
         score = score_result.get("score", 0)
@@ -505,18 +439,7 @@ class DealsAgent:
         user_id: Optional[str] = None,
         limit: int = 10
     ) -> Dict:
-        """
-        Get personalized recommendations
-        
-        Args:
-            user_query: Natural language query
-            user_preferences: User preference dict
-            user_id: User ID for personalization
-            limit: Max recommendations
-        
-        Returns:
-            Dict with recommendations
-        """
+        """Get personalized recommendations"""
         # Get user preferences if user_id provided
         if user_id and not user_preferences:
             user_data = await self.data_interface.get_user_preferences(user_id)
