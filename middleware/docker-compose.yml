@@ -14,7 +14,7 @@ services:
     networks:
       - kayak-network
     healthcheck:
-      test: ["CMD", "zkServer.sh", "status"]
+      test: [ "CMD", "zkServer.sh", "status" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -25,7 +25,7 @@ services:
     depends_on:
       - zookeeper
     ports:
-      - "9092:9092"
+      - "9094:9092"
       - "9093:9093"
     environment:
       KAFKA_BROKER_ID: 1
@@ -38,7 +38,7 @@ services:
     networks:
       - kayak-network
     healthcheck:
-      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      test: [ "CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -56,7 +56,7 @@ services:
     networks:
       - kayak-network
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -77,7 +77,7 @@ services:
     networks:
       - kayak-network
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-ppassword"]
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-ppassword" ]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -92,7 +92,7 @@ services:
     networks:
       - kayak-network
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      test: [ "CMD", "mongosh", "--eval", "db.adminCommand('ping')" ]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -210,7 +210,7 @@ services:
       - kayak-network
     restart: unless-stopped
 
-# ==================== AI SERVICE ====================
+  # ==================== AI SERVICE ====================
 
   ai-service:
     build:
@@ -220,8 +220,10 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_API_KEY=
       - OPENAI_MODEL=gpt-3.5-turbo
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - OLLAMA_EMBEDDING_MODEL=mxbai-embed-large
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9093
       - KAFKA_CONSUMER_GROUP=ai-deals-agent
       - KAFKA_DEALS_RAW_TOPIC=raw_supplier_feeds
