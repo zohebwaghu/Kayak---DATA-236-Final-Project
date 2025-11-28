@@ -219,7 +219,10 @@ def supervisor_node(state: TravelState) -> TravelState:
     elif any(kw in query for kw in quote_keywords):
         intent = "quote"
     elif parsed_intent and hasattr(parsed_intent, 'needs_clarification') and parsed_intent.needs_clarification:
-        intent = "clarification"
+        if prev_recs:
+            intent = "recommendation"
+        else:
+            intent = "clarification"
     
     logger.info(f"[Supervisor] Query: '{query[:50]}...' -> Routing to: {intent}")
     
@@ -420,8 +423,19 @@ def recommendation_agent_node(state: TravelState) -> TravelState:
     search_params = state.get("search_params", {})
     parsed_intent = state.get("parsed_intent")
     
+    # Get previous recommendations from state
+    prev_recs = state.get("previous_recommendations", [])
+    
+    # If we have previous recommendations, use them (for follow-up questions)
+    if prev_recs:
+        output = {
+            "success": True,
+            "bundles": prev_recs,
+            "destination": search_params.get("destination", ""),
+            "origin": search_params.get("origin", "")
+        }
     # Check if clarification needed
-    if parsed_intent and parsed_intent.get("needs_clarification"):
+    elif parsed_intent and parsed_intent.get("needs_clarification"):
         output = {
             "success": False,
             "needs_clarification": True,

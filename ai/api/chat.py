@@ -19,7 +19,7 @@ from loguru import logger
 
 # Import Concierge Agent
 try:
-    from agents.concierge_agent_v2 import concierge_agent, process_chat
+    from agents.langgraph_concierge import langgraph_concierge_agent as concierge_agent, process_chat
     CONCIERGE_AVAILABLE = True
 except ImportError:
     CONCIERGE_AVAILABLE = False

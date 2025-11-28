@@ -253,6 +253,15 @@ app.use('/api/v1/billing', authenticateJWT, (req, res) => {
   proxyToService(req, res, 'Billing Service', serviceUrl);
 });
 
+// ==================== AI SERVICE ROUTES (PUBLIC) ====================
+
+app.use('/api/v1/ai', (req, res) => {
+  const serviceUrl =
+    process.env.AI_SERVICE_URL ||
+    `http://ai-service:${process.env.AI_SERVICE_PORT || 8000}/api/ai`;
+  proxyToService(req, res, 'AI Service', serviceUrl);
+});
+
 // ==================== ADMIN SERVICE ROUTES (ADMIN ONLY) ====================
 
 app.use('/api/v1/admin', authenticateJWT, requireAdmin, (req, res) => {

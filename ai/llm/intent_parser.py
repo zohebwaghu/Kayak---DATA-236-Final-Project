@@ -80,6 +80,13 @@ class IntentParser:
             "tokyo": "NRT", "nrt": "NRT",
             "paris": "CDG", "cdg": "CDG",
             "london": "LHR", "lhr": "LHR",
+            # India cities (from flight dataset)
+            "delhi": "DEL", "del": "DEL", "new delhi": "DEL",
+            "mumbai": "BOM", "bom": "BOM", "bombay": "BOM",
+            "bangalore": "BLR", "blr": "BLR", "bengaluru": "BLR",
+            "kolkata": "CCU", "ccu": "CCU", "calcutta": "CCU",
+            "hyderabad": "HYD", "hyd": "HYD",
+            "chennai": "MAA", "maa": "MAA", "madras": "MAA",
         }
         
         # Destination keywords (for "anywhere warm" type queries)
@@ -199,31 +206,16 @@ class IntentParser:
     
     def _extract_destination(self, query: str) -> Optional[str]:
         """Extract destination airport/city"""
-        # Pattern: "to Miami", "going to NYC"
-        patterns = [
-            r"to\s+(\w+(?:\s+\w+)?)",
-            r"going\s+(?:to\s+)?(\w+(?:\s+\w+)?)",
-            r"visiting\s+(\w+(?:\s+\w+)?)",
-            r"trip\s+to\s+(\w+(?:\s+\w+)?)",
-            r"fly\s+to\s+(\w+(?:\s+\w+)?)",
-            r"in\s+(\w+(?:\s+\w+)?)",
-        ]
-        
-        for pattern in patterns:
-            match = re.search(pattern, query)
-            if match:
-                location = match.group(1).lower().strip()
-                # Skip common words
-                if location in ["the", "a", "an", "anywhere", "somewhere"]:
-                    continue
-                if location in self.airport_codes:
-                    return self.airport_codes[location]
-        
+        # First, directly check if any known city/airport is in the query
+        for name, code in self.airport_codes.items():
+            if name in query:
+                return code
+
         # Check for keyword destinations ("anywhere warm")
         for keyword, destinations in self.destination_keywords.items():
             if keyword in query:
-                return destinations[0]  # Return first match
-        
+                return destinations[0]
+
         return None
     
     def _extract_dates(self, query: str) -> Tuple[Optional[str], Optional[str]]:
