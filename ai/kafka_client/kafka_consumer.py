@@ -11,7 +11,7 @@ from typing import List, Optional, AsyncIterator, Dict, Any
 from kafka import KafkaConsumer
 from kafka.errors import KafkaError
 
-from ..config import settings
+from config import settings
 
 logger = logging.getLogger(__name__)
 

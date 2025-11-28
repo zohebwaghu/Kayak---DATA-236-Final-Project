@@ -12,7 +12,7 @@ from datetime import datetime
 from kafka import KafkaProducer
 from kafka.errors import KafkaError
 
-from ..config import settings
+from config import settings
 
 logger = logging.getLogger(__name__)
 

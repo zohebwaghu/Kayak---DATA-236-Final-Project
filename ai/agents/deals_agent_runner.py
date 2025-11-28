@@ -166,7 +166,7 @@ class DealsAgentRunner:
             try:
                 if self.consumer:
                     # Consume messages
-                    messages = await self.consumer.consume_batch(max_messages=10, timeout_ms=1000)
+                    messages = await self.consumer.consume_batch(max_records=10, timeout_ms=1000)
                     
                     for message in messages:
                         await self._process_message(message)

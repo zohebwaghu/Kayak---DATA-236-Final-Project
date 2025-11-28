@@ -285,4 +285,8 @@ class SessionStore:
 
 
 # Global instance
-session_store = SessionStore()
+from config import settings
+session_store = SessionStore(
+    redis_host=settings.REDIS_HOST,
+    redis_port=settings.REDIS_PORT
+)

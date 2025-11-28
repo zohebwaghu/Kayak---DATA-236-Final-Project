@@ -363,7 +363,11 @@ class WatchStore:
 # Global Instance
 # ============================================
 
-watch_store = WatchStore()
+from config import settings
+watch_store = WatchStore(
+    redis_host=settings.REDIS_HOST,
+    redis_port=settings.REDIS_PORT
+)
 
 
 # ============================================

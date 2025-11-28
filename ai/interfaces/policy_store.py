@@ -461,7 +461,11 @@ class PolicyStore:
 # Global Instance
 # ============================================
 
-policy_store = PolicyStore()
+from config import settings
+policy_store = PolicyStore(
+    redis_host=settings.REDIS_HOST,
+    redis_port=settings.REDIS_PORT
+)
 
 
 # ============================================

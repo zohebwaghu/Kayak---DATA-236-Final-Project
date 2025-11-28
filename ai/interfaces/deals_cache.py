@@ -422,7 +422,11 @@ class DealsCache:
 # Global Instance
 # ============================================
 
-deals_cache = DealsCache()
+from config import settings
+deals_cache = DealsCache(
+    redis_host=settings.REDIS_HOST,
+    redis_port=settings.REDIS_PORT
+)
 
 
 # ============================================
