@@ -244,7 +244,7 @@ const handleHotelsSearch = async (req, res) => {
     const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
     const skip = (pageNum - 1) * limitNum;
 
-    const [hotels, total] = await Promise.all([
+    const [hotelsRaw, total] = await Promise.all([
       db.collection('hotels')
         .find(query)
         .skip(skip)
@@ -252,6 +252,38 @@ const handleHotelsSearch = async (req, res) => {
         .toArray(),
       db.collection('hotels').countDocuments(query)
     ]);
+
+    // ===== DERIVE FLAT PRICE FIELD FOR FRONTEND =====
+    // We keep the original docs, but add:
+    //   - pricePerNight  (used by PaymentPage / cards)
+    //   - price          (fallback for generic components)
+    const hotels = hotelsRaw.map((hotel) => {
+      const doc = { ...hotel };
+      let derivedPrice = doc.pricePerNight;
+
+      if (derivedPrice == null) {
+        if (Array.isArray(doc.roomTypes) && doc.roomTypes.length > 0) {
+          const prices = doc.roomTypes
+            .map((rt) =>
+              rt && typeof rt.price === 'number' ? rt.price : null
+            )
+            .filter((p) => typeof p === 'number');
+
+          if (prices.length > 0) {
+            derivedPrice = Math.min(...prices); // use the lowest room price as base
+          }
+        }
+      }
+
+      if (typeof derivedPrice === 'number') {
+        doc.pricePerNight = derivedPrice;
+        if (doc.price == null) {
+          doc.price = derivedPrice;
+        }
+      }
+
+      return doc;
+    });
 
     const result = {
       data: hotels,

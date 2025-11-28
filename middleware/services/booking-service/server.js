@@ -519,6 +519,79 @@ app.get('/api/v1/users/:userId/bookings', async (req, res) => {
 });
 
 /**
+ * GET /api/v1/bookings/user/:userId
+ * Convenience endpoint to match frontend/gateway pattern.
+ * Internally uses the same query logic as /api/v1/users/:userId/bookings
+ */
+app.get('/api/v1/bookings/user/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { status, timeFrame, listingType } = req.query;
+
+    let query = `SELECT bookingId, userId, listingType, listingId,
+                        startDate, endDate, guests, totalPrice, status,
+                        additionalDetails, createdAt, updatedAt
+                 FROM bookings
+                 WHERE userId = ?`;
+    const params = [userId];
+
+    if (status) {
+      query += ' AND status = ?';
+      params.push(status);
+    }
+
+    if (listingType) {
+      query += ' AND listingType = ?';
+      params.push(listingType);
+    }
+
+    if (timeFrame === 'past') {
+      query += ' AND endDate < CURDATE()';
+    } else if (timeFrame === 'current') {
+      query += ' AND startDate <= CURDATE() AND endDate >= CURDATE()';
+    } else if (timeFrame === 'future') {
+      query += ' AND startDate > CURDATE()';
+    }
+
+    query += ' ORDER BY startDate DESC';
+
+    const [rows] = await bookingsPool.execute(query, params);
+
+    const bookings = rows.map((row) => ({
+      bookingId: row.bookingId,
+      userId: row.userId,
+      listingType: row.listingType,
+      listingId: row.listingId,
+      startDate: row.startDate,
+      endDate: row.endDate,
+      guests: row.guests,
+      totalPrice: parseFloat(row.totalPrice),
+      status: row.status,
+      additionalDetails: row.additionalDetails,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    }));
+
+    res.status(200).json({
+      userId,
+      count: bookings.length,
+      filters: { status, timeFrame, listingType },
+      bookings,
+    });
+  } catch (error) {
+    console.error('Error fetching user bookings (bookings/user route):', error);
+    res.status(500).json(
+      createErrorResponse(
+        500,
+        'Internal Server Error',
+        'Failed to fetch bookings',
+        req.path
+      )
+    );
+  }
+});
+
+/**
  * PUT /api/v1/bookings/:bookingId/cancel
  * Cancel an existing booking with inventory rollback
  */
