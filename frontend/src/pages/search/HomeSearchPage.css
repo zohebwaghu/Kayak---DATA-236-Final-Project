@@ -1,0 +1,523 @@
+/* src/pages/search/HomeSearchPage.css */
+
+.home-page {
+  padding: 24px 32px 40px;
+  background-color: #f5f7fa;
+  min-height: calc(100vh - 64px); /* leave room for navbar */
+  box-sizing: border-box;
+  overflow-x: hidden; /* prevent tiny horizontal scroll / overflow on zoom */
+}
+
+/* Shared inner container so hero + results stay aligned */
+.home-page-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+/* Hero wrapper */
+.home-hero {
+  display: flex;
+  background-color: #f2f4f7;
+  border-radius: 24px;
+  padding: 32px 32px 28px 32px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Left side */
+.home-hero-left {
+  flex: 1;
+  width: 100%;
+}
+
+.home-hero-title {
+  font-size: 2.4rem;
+  font-weight: 800;
+  margin-bottom: 24px;
+  color: #151b26;
+}
+
+/* Tabs row */
+.home-tabs-row {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+
+/* Kayak-style square tabs */
+.home-tab {
+  width: 96px;
+  height: 96px;
+  border-radius: 20px;
+  background-color: #ffffff;
+  border: 1px solid #e5e7eb;
+  display: flex;
+  flex-direction: column; /* icon on top, label below */
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
+  transition:
+    background-color 0.15s ease,
+    box-shadow 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    transform 0.1s ease;
+}
+
+/* icon inside tab */
+.home-tab-icon {
+  font-size: 1.4rem;
+  margin-bottom: 4px;
+  color: #111827;
+}
+
+.home-tab-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #111827;
+}
+
+.home-tab--active {
+  background: linear-gradient(135deg, #ff6b00, #ff8a34);
+  border-color: transparent;
+  box-shadow: 0 10px 24px rgba(255, 107, 0, 0.45);
+  transform: translateY(-1px);
+}
+
+.home-tab--active .home-tab-label,
+.home-tab--active .home-tab-icon {
+  color: #ffffff;
+}
+
+/* Search panel */
+.home-search-panel {
+  margin-top: 8px;
+  width: 100%;
+}
+
+/* 🔹 Results section wrapper – below the hero card */
+.home-results-section {
+  margin-top: 16px; /* space between hero and results */
+}
+
+/* --- COMMON search panel styles (flights / hotels / cars / ai) --- */
+
+.flights-search-panel,
+.hotels-search-panel,
+.cars-search-panel,
+.ai-panel {
+  background-color: #ffffff;
+  border-radius: 18px;
+  padding: 16px 18px 18px 18px;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* --- Flights search panel specific --- */
+
+/* put all fields + Search in one row when there's space,
+   but allow wrapping instead of overflow */
+.flights-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.flights-field {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 180px; /* helps keep shape on larger screens */
+}
+
+.flights-label {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #6b7280;
+}
+
+.flights-input,
+.flights-select {
+  border-radius: 999px;
+  border: 1px solid #d0d4de;
+  padding: 8px 14px;
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.flights-input:focus,
+.flights-select:focus {
+  border-color: #ff6b00;
+  box-shadow: 0 0 0 2px rgba(255, 107, 0, 0.25);
+}
+
+.flights-search-button-wrapper {
+  display: flex;
+  justify-content: flex-end;
+  flex: 0 0 auto;
+  align-self: flex-end;
+}
+
+.flights-search-button {
+  border-radius: 999px;
+  border: none;
+  padding: 10px 26px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  background: linear-gradient(135deg, #ff6b00, #ff8a34);
+  color: #ffffff;
+  cursor: pointer;
+  box-shadow: 0 10px 20px rgba(255, 107, 0, 0.35);
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+
+.flights-search-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 22px rgba(255, 107, 0, 0.45);
+}
+
+.flights-search-button:disabled {
+  opacity: 0.7;
+  cursor: default;
+  box-shadow: none;
+  transform: none;
+}
+
+/* Results + pagination */
+
+.flights-results {
+  margin-top: 8px;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 10px;
+}
+
+.flights-results-meta {
+  font-size: 0.82rem;
+  color: #6b7280;
+  margin-bottom: 6px;
+}
+
+.flights-result-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.flight-card {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  background-color: #fafbff;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.9rem;
+}
+
+.flight-card-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.flight-card-route {
+  font-weight: 600;
+  color: #111827;
+}
+
+.flight-card-meta {
+  color: #6b7280;
+  font-size: 0.82rem;
+}
+
+.flight-card-price {
+  font-weight: 700;
+  color: #111827;
+}
+
+.flights-empty-state,
+.flights-error {
+  font-size: 0.9rem;
+  color: #6b7280;
+}
+
+.flights-error {
+  color: #b91c1c;
+}
+
+.flights-loading {
+  font-size: 0.9rem;
+  color: #6b7280;
+}
+
+/* Pagination */
+.flights-pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 10px;
+  gap: 12px;
+}
+
+.flights-pagination-info {
+  font-size: 0.82rem;
+  color: #6b7280;
+}
+
+.flights-pagination-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.flights-pagination-button {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid #d0d4de;
+  background-color: #ffffff;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.flights-pagination-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* --- AI Mode panel extras --- */
+
+.ai-prompt-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-radius: 999px;
+  background-color: #f9fafb;
+  padding: 10px 12px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.ai-icon-circle {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #ff6b00, #ff8a34);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: #ffffff;
+  flex-shrink: 0;
+}
+
+.ai-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  outline: none;
+  font-size: 0.95rem;
+  color: #111827;
+  min-width: 0; /* allow shrinking without overflow */
+}
+
+.ai-input::placeholder {
+  color: #9ca3af;
+}
+
+.ai-submit-button {
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  border: none;
+  background-color: #e5ecf7;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 1.1rem;
+  color: #4b5563;
+  transition: background-color 0.15s ease, transform 0.1s ease;
+  flex-shrink: 0;
+}
+
+.ai-submit-button:hover {
+  background-color: #d1ddf4;
+  transform: translateY(-1px);
+}
+
+.ai-chips-row {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ai-chip {
+  border-radius: 999px;
+  border: 1px solid #d0d4de;
+  background-color: #ffffff;
+  padding: 6px 14px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  color: #111827;
+}
+
+.ai-chip--active {
+  border-color: #ff6b00;
+  background-color: #fff7ed;
+}
+
+.ai-response-card {
+  margin-top: 4px;
+  border-radius: 14px;
+  background-color: #f9fafb;
+  padding: 10px 12px;
+  font-size: 0.9rem;
+  color: #111827;
+}
+
+.ai-response-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+/* =================== Responsive =================== */
+
+/* Slightly narrower screens */
+@media (max-width: 1200px) {
+  .home-page {
+    padding: 20px 20px 32px;
+  }
+
+  .home-hero {
+    padding: 28px 24px 24px 24px;
+  }
+
+  .flights-field {
+    flex: 1 1 45%;
+    min-width: 200px;
+  }
+}
+
+@media (max-width: 900px) {
+  .home-page {
+    padding: 16px 14px 28px;
+  }
+
+  .home-hero {
+    flex-direction: column;
+    padding: 24px 18px 20px 18px;
+    border-radius: 20px;
+  }
+
+  .home-hero-title {
+    font-size: 2rem;
+  }
+}
+
+/* Small mobile: stack fields vertically and make Search full-width */
+@media (max-width: 700px) {
+  .home-tab {
+    width: 86px;
+    height: 86px;
+    border-radius: 18px;
+  }
+
+  .flights-form {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .flights-field {
+    flex: 1 1 auto;
+    min-width: 100%;
+  }
+
+  .flights-search-button-wrapper {
+    width: 100%;
+    align-self: stretch;
+    justify-content: flex-start;
+    margin-top: 8px;
+  }
+
+  .flights-search-button {
+    width: 100%;
+    text-align: center;
+  }
+
+  /* AI Mode: keep arrow nicely inside pill on narrow / zoomed views */
+  .ai-prompt-row {
+    gap: 10px;
+    padding-right: 10px; /* breathing room on right for the arrow */
+  }
+
+  .ai-input {
+    font-size: 0.9rem;
+  }
+
+  .ai-submit-button {
+    width: 34px;
+    height: 34px;
+    margin-right: 4px;  /* pulls arrow slightly inward */
+    transform: none;    /* avoid hover shift on tiny screens */
+  }
+
+  .ai-submit-button:hover {
+    transform: none;
+  }
+
+  /* Extra safety: keep panels fully inside the white card */
+  .home-page-inner,
+  .home-hero,
+  .home-search-panel,
+  .flights-search-panel,
+  .hotels-search-panel,
+  .cars-search-panel,
+  .ai-panel {
+    width: 100%;
+    max-width: 100%;
+  }
+}
+
+/* =================== Phase 6 - Book button =================== */
+
+.book-btn-kayak {
+  margin-top: 8px;
+  width: 100%;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: none;
+  background: linear-gradient(135deg, #ff6b00, #ff8a34);
+  color: #ffffff;
+  font-size: 0.86rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+
+.book-btn-kayak:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(255, 107, 0, 0.35);
+}
+
+.book-btn-kayak:active {
+  transform: translateY(0);
+}
+
+@media (max-width: 600px) {
+  .book-btn-kayak {
+    width: 100%;
+    font-size: 0.8rem;
+  }
+}

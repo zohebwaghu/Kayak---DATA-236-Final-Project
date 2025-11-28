@@ -1,0 +1,132 @@
+.booking-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55); /* dark slate overlay */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1050; /* above navbar & cards */
+}
+
+.booking-modal-container {
+  background: #ffffff;
+  border-radius: 16px;
+  max-width: 720px;
+  width: 95%;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.35);
+  padding: 20px 24px;
+}
+
+.booking-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.booking-modal-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.booking-modal-close {
+  border: none;
+  background: transparent;
+  font-size: 1.1rem;
+  cursor: pointer;
+  color: #64748b;
+}
+
+.booking-modal-close:hover {
+  color: #0f172a;
+}
+
+.booking-modal-body {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 16px;
+  padding: 8px 0 4px;
+}
+
+.booking-modal-section {
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  padding: 12px 14px;
+  background: #f8fafc;
+}
+
+.booking-section-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin-bottom: 10px;
+  color: #0f172a;
+}
+
+.booking-trip-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-size: 0.88rem;
+}
+
+.booking-label {
+  color: #64748b;
+}
+
+.booking-value {
+  color: #0f172a;
+  font-weight: 500;
+  margin-left: 8px;
+}
+
+.booking-price {
+  font-weight: 700;
+  color: #ea5300; /* Kayak-ish orange */
+}
+
+.booking-note {
+  margin-top: 10px;
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+
+/* Footer buttons */
+.booking-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.booking-btn-secondary {
+  border-radius: 999px;
+  padding-inline: 18px;
+}
+
+.booking-btn-primary {
+  border-radius: 999px;
+  padding-inline: 20px;
+  background: linear-gradient(90deg, #ff7a00, #ff4b00);
+  border: none;
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.booking-btn-primary:hover {
+  filter: brightness(0.95);
+}
+
+/* Mobile */
+@media (max-width: 768px) {
+  .booking-modal-body {
+    grid-template-columns: 1fr;
+  }
+
+  .booking-modal-container {
+    padding: 16px 14px;
+  }
+}
