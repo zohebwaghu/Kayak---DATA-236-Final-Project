@@ -1,0 +1,66 @@
+/* Root container tweaks (kept minimal so we don’t affect other pages) */
+.mytrips-root {
+  /* no layout changes for now */
+}
+
+/* Tabs row */
+.mytrips-tabs {
+  display: flex;
+  gap: 0.75rem;
+}
+
+/* Base tab button style */
+.mytrips-tab-btn {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 0.5rem 1.5rem;
+  font-size: 0.95rem;
+  font-weight: 500;
+  background-color: #f3f4f6; /* light gray */
+  color: #111827; /* near-black */
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease,
+    box-shadow 0.15s ease, border-color 0.15s ease, transform 0.05s ease;
+}
+
+.mytrips-tab-btn:hover {
+  background-color: #e5e7eb;
+}
+
+/* Active tab – Kayak-ish orange gradient similar to other CTA buttons */
+.mytrips-tab-btn-active {
+  background-image: linear-gradient(90deg, #ff6900, #ff9900);
+  color: #ffffff;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.12);
+  border-color: transparent;
+  transform: translateY(-1px);
+}
+
+/* Back to search – Kayak primary CTA style */
+.mytrips-back-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.55rem 1.6rem;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  border: none;
+  text-decoration: none;
+  background-image: linear-gradient(90deg, #ff6900, #ff9900);
+  color: #ffffff;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.16);
+  transition: transform 0.05s ease, box-shadow 0.1s ease, opacity 0.1s ease;
+}
+
+.mytrips-back-btn:hover {
+  text-decoration: none;
+  opacity: 0.95;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+  transform: translateY(-1px);
+}
+
+.mytrips-back-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.16);
+}

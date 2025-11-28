@@ -181,7 +181,6 @@ const PaymentPage = () => {
     setSubmitting(true);
 
     try {
-      // Safety: ensure we have a logged-in user
       if (!user || !user.userId) {
         setSubmitError(
           'Your session has expired. Please log in again to complete payment.'
@@ -190,7 +189,6 @@ const PaymentPage = () => {
         return;
       }
 
-      // Determine listingId from various possible fields
       const listingId =
         listing.listingId ||
         listing.id ||
@@ -200,7 +198,6 @@ const PaymentPage = () => {
         listing.flightId ||
         '';
 
-      // Dates: use listing dates when available, otherwise a safe future range
       let startDateStr = '';
       let endDateStr = '';
 
@@ -209,7 +206,7 @@ const PaymentPage = () => {
         if (!Number.isNaN(dep.getTime())) {
           const start = dep;
           const end = new Date(dep);
-          end.setDate(end.getDate() + 1); // ensure end > start
+          end.setDate(end.getDate() + 1);
           startDateStr = toISODate(start);
           endDateStr = toISODate(end);
         }
@@ -255,11 +252,11 @@ const PaymentPage = () => {
       const totalPrice =
         typeof priceNumeric === 'number' && priceNumeric > 0
           ? priceNumeric
-          : 1; // minimal positive value to satisfy backend validation
+          : 1;
 
       const payload = {
         userId: user.userId,
-        listingType: bookingType,
+        listingType: bookingType.toLowerCase(),   // ✅ ONLY CHANGE
         listingId,
         startDate: startDateStr,
         endDate: endDateStr,
@@ -275,8 +272,6 @@ const PaymentPage = () => {
         },
       };
 
-      // ✅ Call Booking API via Gateway
-      // Axios baseURL already includes `/api/v1`, so we call just `/bookings`
       await api.post('/bookings', payload);
 
       navigate('/my-bookings');
