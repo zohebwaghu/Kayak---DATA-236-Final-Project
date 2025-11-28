@@ -1,567 +1,265 @@
 """
 AI Recommendation Service - FastAPI Application
-LLM Provider:
-- If OPENAI_API_KEY is set: use OpenAI
-- If no OPENAI_API_KEY: use Ollama (llama3.2)
+Main entry point for the AI service
+
+Integrates:
+- Concierge Agent (chat)
+- Deals Agent (background worker)
+- Bundles API
+- Watches API
+- Price Analysis API
+- Quotes API
+- WebSocket Events
 """
 
 import os
 import sys
-import logging
-import json
-import httpx
+import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Optional, Dict, List, Any
 
 # Add the ai directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 from dotenv import load_dotenv
+from loguru import logger
 
 # Load environment variables
 load_dotenv()
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+# Configure loguru
+logger.remove()
+logger.add(
+    sys.stderr,
+    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+    level="INFO"
 )
-logger = logging.getLogger(__name__)
-
-# ============================================
-# Import AI Modules with Error Handling
-# ============================================
-
-# Config
-try:
-    from config import settings
-    CONFIG_AVAILABLE = True
-    logger.info("✓ Config loaded")
-except ImportError as e:
-    CONFIG_AVAILABLE = False
-    settings = None
-    logger.warning(f"✗ Config: {e}")
-
-# Algorithms - deal_scorer
-try:
-    from algorithms.deal_scorer import calculate_deal_score, get_deal_quality, calculate_savings
-    DEAL_SCORER_AVAILABLE = True
-    logger.info("✓ DealScorer loaded")
-except ImportError as e:
-    DEAL_SCORER_AVAILABLE = False
-    logger.warning(f"✗ DealScorer: {e}")
-
-# Algorithms - fit_scorer
-try:
-    from algorithms.fit_scorer import calculate_fit_score
-    FIT_SCORER_AVAILABLE = True
-    logger.info("✓ FitScorer loaded")
-except Exception as e:
-    FIT_SCORER_AVAILABLE = False
-    logger.warning(f"✗ FitScorer: {e}")
-
-# Algorithms - bundle_matcher
-try:
-    from algorithms.bundle_matcher import find_best_bundles, BundleMatcher
-    BUNDLE_MATCHER_AVAILABLE = True
-    logger.info("✓ BundleMatcher loaded")
-except Exception as e:
-    BUNDLE_MATCHER_AVAILABLE = False
-    logger.warning(f"✗ BundleMatcher: {e}")
-
-# Database - direct import
-try:
-    import mysql.connector
-    MYSQL_AVAILABLE = True
-    logger.info("✓ MySQL connector loaded")
-except ImportError as e:
-    MYSQL_AVAILABLE = False
-    logger.warning(f"✗ MySQL: {e}")
-
-# Redis - direct import
-try:
-    import redis
-    REDIS_AVAILABLE = True
-    logger.info("✓ Redis loaded")
-except ImportError as e:
-    REDIS_AVAILABLE = False
-    logger.warning(f"✗ Redis: {e}")
+logger.add(
+    "logs/ai_service_{time}.log",
+    rotation="500 MB",
+    retention="10 days",
+    level="DEBUG"
+)
 
 
 # ============================================
-# Settings from environment
+# Configuration
 # ============================================
 
 API_HOST = os.getenv("API_HOST", "0.0.0.0")
 API_PORT = int(os.getenv("API_PORT", "8000"))
 API_ENV = os.getenv("API_ENV", "development")
-CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:3001")
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:3001,http://localhost:5173")
 
-# LLM Settings
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
-
-# Determine LLM provider
-USE_OPENAI = bool(OPENAI_API_KEY)
-
-# Database settings
-DB_HOST = os.getenv("DB_HOST", "localhost")
-DB_PORT = int(os.getenv("DB_PORT", "3306"))
-DB_USER = os.getenv("DB_USER", "root")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "password")
-DB_NAME_USERS = os.getenv("DB_NAME_USERS", "kayak_users")
-DB_NAME_BOOKINGS = os.getenv("DB_NAME_BOOKINGS", "kayak_bookings")
-
-# Redis settings
-REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
-REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+# Feature flags
+ENABLE_DEALS_AGENT = os.getenv("ENABLE_DEALS_AGENT", "true").lower() == "true"
+ENABLE_WEBSOCKET = os.getenv("ENABLE_WEBSOCKET", "true").lower() == "true"
 
 
 # ============================================
-# LLM Clients
+# Import Routers and Services
 # ============================================
 
-# OpenAI client (if key available)
-openai_client = None
-if USE_OPENAI:
-    try:
-        from openai import OpenAI
-        openai_client = OpenAI(api_key=OPENAI_API_KEY)
-        logger.info(f"✓ LLM Provider: OpenAI ({OPENAI_MODEL})")
-    except ImportError:
-        logger.error("OpenAI library not installed. Run: pip install openai")
-        USE_OPENAI = False
-else:
-    logger.info(f"✓ LLM Provider: Ollama ({OLLAMA_MODEL})")
+# API Routers
+try:
+    from api.bundles import router as bundles_router
+    BUNDLES_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Bundles router not available: {e}")
+    BUNDLES_AVAILABLE = False
+    bundles_router = None
 
+try:
+    from api.watches import router as watches_router, watch_store
+    WATCHES_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Watches router not available: {e}")
+    WATCHES_AVAILABLE = False
+    watches_router = None
+    watch_store = None
 
-# ============================================
-# Pydantic Models
-# ============================================
+try:
+    from api.price_analysis import router as price_analysis_router
+    PRICE_ANALYSIS_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Price analysis router not available: {e}")
+    PRICE_ANALYSIS_AVAILABLE = False
+    price_analysis_router = None
 
-class ChatRequest(BaseModel):
-    query: str
-    user_id: str
-    session_id: Optional[str] = None
-    preferences: Optional[Dict[str, Any]] = None
+try:
+    from api.quotes import router as quotes_router
+    QUOTES_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Quotes router not available: {e}")
+    QUOTES_AVAILABLE = False
+    quotes_router = None
 
-class ChatResponse(BaseModel):
-    response: str
-    session_id: str
-    user_id: str
-    recommendations: List[Dict[str, Any]] = []
-    timestamp: str
+try:
+    from api.chat import router as chat_router
+    CHAT_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Chat router not available: {e}")
+    CHAT_AVAILABLE = False
+    chat_router = None
 
-class RecommendationRequest(BaseModel):
-    destination: Optional[str] = None
-    origin: Optional[str] = "SFO"
-    date_from: Optional[str] = None
-    date_to: Optional[str] = None
-    user_id: str
-    preferences: Optional[Dict[str, Any]] = None
-    limit: int = 10
+# WebSocket Events
+try:
+    from api.events_websocket import events_manager, websocket_endpoint
+    EVENTS_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Events WebSocket not available: {e}")
+    EVENTS_AVAILABLE = False
+    events_manager = None
 
-class ScoreRequest(BaseModel):
-    current_price: float
-    avg_30d_price: float
-    availability: int = 10
-    rating: float = 4.0
-    has_promotion: bool = False
+# Background Services
+try:
+    from agents.deals_agent_runner import deals_agent, start_deals_agent, stop_deals_agent
+    DEALS_AGENT_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Deals agent not available: {e}")
+    DEALS_AGENT_AVAILABLE = False
+    deals_agent = None
 
-class BundleRequest(BaseModel):
-    flights: List[Dict[str, Any]]
-    hotels: List[Dict[str, Any]]
-    limit: int = 5
+# Concierge Agent (for inline chat endpoint)
+try:
+    from agents.concierge_agent_v2 import concierge_agent, process_chat
+    CONCIERGE_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Concierge agent not available: {e}")
+    CONCIERGE_AVAILABLE = False
+    concierge_agent = None
+    async def process_chat(query, user_id, session_id=None):
+        return {"response": "AI service initializing...", "session_id": session_id}
 
+# Session Store
+try:
+    from interfaces.session_store import session_store
+    SESSION_AVAILABLE = True
+except ImportError:
+    SESSION_AVAILABLE = False
+    session_store = None
 
-# ============================================
-# Database Helper Functions
-# ============================================
-
-def get_mysql_connection(database: str = "users"):
-    """Get MySQL connection"""
-    if not MYSQL_AVAILABLE:
-        return None
-    
-    db_name = DB_NAME_USERS if database == "users" else DB_NAME_BOOKINGS
-    
-    try:
-        return mysql.connector.connect(
-            host=DB_HOST,
-            port=DB_PORT,
-            user=DB_USER,
-            password=DB_PASSWORD,
-            database=db_name
-        )
-    except Exception as e:
-        logger.error(f"MySQL connection failed: {e}")
-        return None
-
-
-def get_redis_client():
-    """Get Redis client"""
-    if not REDIS_AVAILABLE:
-        return None
-    
-    try:
-        return redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=0)
-    except Exception as e:
-        logger.error(f"Redis connection failed: {e}")
-        return None
-
-
-async def get_user_by_id(user_id: str) -> Optional[Dict]:
-    """Get user from database"""
-    conn = get_mysql_connection("users")
-    if not conn:
-        return None
-    
-    try:
-        cursor = conn.cursor(dictionary=True)
-        cursor.execute(
-            "SELECT userId, firstName, lastName, email FROM users WHERE userId = %s",
-            (user_id,)
-        )
-        user = cursor.fetchone()
-        cursor.close()
-        conn.close()
-        return user
-    except Exception as e:
-        logger.error(f"Get user failed: {e}")
-        return None
-
-
-async def get_user_preferences(user_id: str) -> Dict:
-    """Get user preferences from booking history"""
-    conn = get_mysql_connection("bookings")
-    if not conn:
-        return {}
-    
-    try:
-        cursor = conn.cursor(dictionary=True)
-        cursor.execute("""
-            SELECT listingType, AVG(totalPrice) as avg_price, COUNT(*) as count
-            FROM bookings WHERE userId = %s
-            GROUP BY listingType
-        """, (user_id,))
-        bookings = cursor.fetchall()
-        cursor.close()
-        conn.close()
-        
-        preferences = {"budget": "medium", "preferred_types": []}
-        for b in bookings:
-            preferences["preferred_types"].append(b["listingType"])
-            if b["avg_price"] and b["avg_price"] < 200:
-                preferences["budget"] = "budget"
-            elif b["avg_price"] and b["avg_price"] > 500:
-                preferences["budget"] = "luxury"
-        
-        return preferences
-    except Exception as e:
-        logger.error(f"Get preferences failed: {e}")
-        return {}
+# Deals Cache
+try:
+    from interfaces.deals_cache import deals_cache
+    CACHE_AVAILABLE = True
+except ImportError:
+    CACHE_AVAILABLE = False
+    deals_cache = None
 
 
 # ============================================
-# Conversation Store (In-Memory)
-# ============================================
-
-class ConversationStore:
-    def __init__(self):
-        self.conversations: Dict[str, List[Dict]] = {}
-        self.redis = get_redis_client()
-    
-    def add_message(self, session_id: str, role: str, content: str):
-        if session_id not in self.conversations:
-            self.conversations[session_id] = []
-        
-        message = {
-            "role": role,
-            "content": content,
-            "timestamp": datetime.now().isoformat()
-        }
-        self.conversations[session_id].append(message)
-        
-        if self.redis:
-            try:
-                key = f"chat:{session_id}"
-                self.redis.rpush(key, json.dumps(message))
-                self.redis.expire(key, 86400)
-            except Exception as e:
-                logger.error(f"Redis store failed: {e}")
-    
-    def get_history(self, session_id: str, limit: int = 20) -> List[Dict]:
-        return self.conversations.get(session_id, [])[-limit:]
-    
-    def clear(self, session_id: str):
-        if session_id in self.conversations:
-            del self.conversations[session_id]
-        if self.redis:
-            try:
-                self.redis.delete(f"chat:{session_id}")
-            except:
-                pass
-
-conversation_store = ConversationStore()
-
-
-# ============================================
-# LLM Functions
-# ============================================
-
-SYSTEM_PROMPT = """You are a helpful travel assistant for a Kayak-like travel booking platform. 
-You help users find flights, hotels, and travel bundles. 
-Be concise and helpful. When users ask about travel, suggest relevant options.
-If they mention a destination, provide flight and hotel recommendations.
-Always be friendly and professional."""
-
-
-async def call_openai(query: str, history: List[Dict] = None) -> str:
-    """Call OpenAI API"""
-    if not openai_client:
-        return "OpenAI client not available"
-    
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    
-    # Add history
-    if history:
-        for msg in history[-6:]:  # Last 6 messages
-            messages.append({"role": msg["role"], "content": msg["content"]})
-    
-    messages.append({"role": "user", "content": query})
-    
-    try:
-        response = openai_client.chat.completions.create(
-            model=OPENAI_MODEL,
-            messages=messages,
-            max_tokens=500,
-            temperature=0.7
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        logger.error(f"OpenAI API error: {e}")
-        return f"Sorry, I encountered an error: {str(e)}"
-
-
-async def call_ollama(query: str, history: List[Dict] = None) -> str:
-    """Call Ollama API (local)"""
-    
-    # Build prompt with history
-    prompt = f"{SYSTEM_PROMPT}\n\n"
-    
-    if history:
-        for msg in history[-6:]:
-            role = "User" if msg["role"] == "user" else "Assistant"
-            prompt += f"{role}: {msg['content']}\n"
-    
-    prompt += f"User: {query}\nAssistant:"
-    
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
-                f"{OLLAMA_BASE_URL}/api/generate",
-                json={
-                    "model": OLLAMA_MODEL,
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {
-                        "temperature": 0.7,
-                        "num_predict": 500
-                    }
-                }
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                return result.get("response", "No response from Ollama")
-            else:
-                logger.error(f"Ollama error: {response.status_code}")
-                return f"Ollama error: {response.status_code}"
-                
-    except httpx.ConnectError:
-        logger.error("Cannot connect to Ollama. Make sure Ollama is running.")
-        return "Cannot connect to Ollama. Please ensure Ollama is running (ollama serve)."
-    except Exception as e:
-        logger.error(f"Ollama API error: {e}")
-        return f"Ollama error: {str(e)}"
-
-
-async def get_llm_response(query: str, history: List[Dict] = None) -> str:
-    """Get LLM response from OpenAI or Ollama"""
-    if USE_OPENAI:
-        return await call_openai(query, history)
-    else:
-        return await call_ollama(query, history)
-
-
-# ============================================
-# AI Response Generator
-# ============================================
-
-async def generate_ai_response(query: str, user_id: str, session_id: str = None, preferences: Dict = None) -> Dict:
-    """Generate AI response using LLM and add recommendations"""
-    
-    # Get conversation history
-    history = []
-    if session_id:
-        history = conversation_store.get_history(session_id)
-    
-    # Get LLM response
-    llm_response = await get_llm_response(query, history)
-    
-    # Generate recommendations based on keywords
-    recommendations = []
-    query_lower = query.lower()
-    
-    if any(word in query_lower for word in ["flight", "fly", "plane", "airport"]):
-        flights = [
-            {"type": "flight", "id": "FLT001", "origin": "SFO", "destination": "MIA", 
-             "price": 299, "avg_price": 400, "availability": 3, "rating": 4.5},
-            {"type": "flight", "id": "FLT002", "origin": "SFO", "destination": "MIA", 
-             "price": 249, "avg_price": 350, "availability": 8, "rating": 4.2},
-        ]
-        for flight in flights:
-            if DEAL_SCORER_AVAILABLE:
-                try:
-                    score = calculate_deal_score(
-                        current_price=flight["price"],
-                        avg_30d_price=flight["avg_price"],
-                        availability=flight["availability"],
-                        rating=flight["rating"]
-                    )
-                    flight["score"] = score.total_score
-                    flight["is_deal"] = score.is_deal
-                    flight["quality"] = get_deal_quality(score.total_score)
-                except Exception as e:
-                    flight["score"] = 70
-            recommendations.append(flight)
-    
-    elif any(word in query_lower for word in ["hotel", "stay", "room", "accommodation"]):
-        hotels = [
-            {"type": "hotel", "id": "HTL001", "name": "Miami Beach Resort", "location": "Miami Beach",
-             "price": 189, "avg_price": 250, "availability": 2, "rating": 4.8},
-            {"type": "hotel", "id": "HTL002", "name": "Downtown Miami Hotel", "location": "Downtown",
-             "price": 129, "avg_price": 160, "availability": 10, "rating": 4.3},
-        ]
-        for hotel in hotels:
-            if DEAL_SCORER_AVAILABLE:
-                try:
-                    score = calculate_deal_score(
-                        current_price=hotel["price"],
-                        avg_30d_price=hotel["avg_price"],
-                        availability=hotel["availability"],
-                        rating=hotel["rating"]
-                    )
-                    hotel["score"] = score.total_score
-                    hotel["is_deal"] = score.is_deal
-                except Exception as e:
-                    hotel["score"] = 75
-            recommendations.append(hotel)
-    
-    elif any(word in query_lower for word in ["bundle", "package", "together", "combo"]):
-        recommendations = [
-            {
-                "type": "bundle",
-                "id": "BND001",
-                "flight": {"id": "FLT001", "origin": "SFO", "destination": "MIA", "price": 299},
-                "hotel": {"id": "HTL001", "name": "Miami Beach Resort", "price": 189, "nights": 3},
-                "total_price": 856,
-                "savings": 100,
-                "score": 88,
-                "is_deal": True
-            }
-        ]
-    
-    return {
-        "response": llm_response,
-        "recommendations": recommendations
-    }
-
-
-# ============================================
-# WebSocket Manager
-# ============================================
-
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: Dict[str, WebSocket] = {}
-    
-    async def connect(self, websocket: WebSocket, session_id: str):
-        await websocket.accept()
-        self.active_connections[session_id] = websocket
-        logger.info(f"WebSocket connected: {session_id}")
-    
-    def disconnect(self, session_id: str):
-        if session_id in self.active_connections:
-            del self.active_connections[session_id]
-            logger.info(f"WebSocket disconnected: {session_id}")
-    
-    async def send_message(self, session_id: str, message: dict):
-        if session_id in self.active_connections:
-            await self.active_connections[session_id].send_json(message)
-
-manager = ConnectionManager()
-
-
-# ============================================
-# Application Lifespan
+# Lifespan Handler
 # ============================================
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan handler"""
+    """
+    Application lifespan handler
+    Initializes and cleans up resources
+    """
+    # ========== STARTUP ==========
     logger.info("=" * 50)
-    logger.info("Starting AI Recommendation Service")
-    logger.info("=" * 50)
+    logger.info("Starting AI Recommendation Service...")
     logger.info(f"Environment: {API_ENV}")
-    logger.info(f"LLM Provider: {'OpenAI' if USE_OPENAI else 'Ollama'}")
-    if USE_OPENAI:
-        logger.info(f"  Model: {OPENAI_MODEL}")
-    else:
-        logger.info(f"  Model: {OLLAMA_MODEL}")
-        logger.info(f"  URL: {OLLAMA_BASE_URL}")
+    logger.info(f"CORS Origins: {CORS_ORIGINS}")
+    logger.info("=" * 50)
     
-    # Test connections
-    components = {
-        "config": CONFIG_AVAILABLE,
-        "deal_scorer": DEAL_SCORER_AVAILABLE,
-        "fit_scorer": FIT_SCORER_AVAILABLE,
-        "bundle_matcher": BUNDLE_MATCHER_AVAILABLE,
-        "mysql": MYSQL_AVAILABLE,
-        "redis": REDIS_AVAILABLE,
-        "llm": True,  # Either OpenAI or Ollama
+    # Log available features
+    features = {
+        "Bundles API": BUNDLES_AVAILABLE,
+        "Watches API": WATCHES_AVAILABLE,
+        "Price Analysis": PRICE_ANALYSIS_AVAILABLE,
+        "Quotes API": QUOTES_AVAILABLE,
+        "Chat API": CHAT_AVAILABLE,
+        "WebSocket Events": EVENTS_AVAILABLE and ENABLE_WEBSOCKET,
+        "Deals Agent": DEALS_AGENT_AVAILABLE and ENABLE_DEALS_AGENT,
+        "Concierge Agent": CONCIERGE_AVAILABLE,
+        "Session Store": SESSION_AVAILABLE,
+        "Deals Cache": CACHE_AVAILABLE,
     }
     
-    ready = sum(1 for v in components.values() if v)
-    logger.info(f"Components ready: {ready}/{len(components)}")
-    for name, status in components.items():
-        logger.info(f"  {'✓' if status else '✗'} {name}")
+    logger.info("Feature Status:")
+    for feature, available in features.items():
+        status = "✅" if available else "❌"
+        logger.info(f"  {status} {feature}")
+    
+    # Start Deals Agent background worker
+    if DEALS_AGENT_AVAILABLE and ENABLE_DEALS_AGENT:
+        try:
+            await start_deals_agent()
+            logger.info("Deals Agent started")
+        except Exception as e:
+            logger.error(f"Failed to start Deals Agent: {e}")
+    
+    # Register watch callbacks for WebSocket
+    if watch_store and events_manager:
+        watch_store.register_trigger_callback(events_manager.handle_watch_triggered)
+        logger.info("Watch callbacks registered with Events manager")
+    
+    logger.info("AI Service startup complete")
+    logger.info("=" * 50)
     
     yield
     
+    # ========== SHUTDOWN ==========
+    logger.info("=" * 50)
+    logger.info("Shutting down AI Service...")
+    
+    # Stop Deals Agent
+    if DEALS_AGENT_AVAILABLE and deals_agent:
+        try:
+            await stop_deals_agent()
+            logger.info("Deals Agent stopped")
+        except Exception as e:
+            logger.error(f"Error stopping Deals Agent: {e}")
+    
+    # Close WebSocket connections
+    if events_manager:
+        await events_manager.shutdown()
+        logger.info("WebSocket connections closed")
+    
     logger.info("AI Service shutdown complete")
+    logger.info("=" * 50)
 
 
 # ============================================
-# FastAPI Application
+# Create FastAPI Application
 # ============================================
 
 app = FastAPI(
     title="AI Recommendation Service",
-    description="Intelligent travel recommendation engine with deal scoring and real-time chat. Supports OpenAI and Ollama.",
-    version="3.0.0",
+    description="""
+    Intelligent travel recommendation engine with conversational AI.
+    
+    ## Features
+    - **Chat**: Natural language travel queries
+    - **Bundles**: Flight + Hotel package recommendations
+    - **Watches**: Price and availability alerts
+    - **Price Analysis**: Deal validation and comparison
+    - **Quotes**: Complete booking quotes
+    - **WebSocket**: Real-time event notifications
+    
+    ## User Journeys
+    1. Tell me what I should book
+    2. Refine without starting over
+    3. Keep an eye on it
+    4. Decide with confidence
+    5. Book or hand off cleanly
+    """,
+    version="2.0.0",
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc"
 )
 
-# CORS
+
+# ============================================
+# CORS Middleware
+# ============================================
+
 cors_origins = [origin.strip() for origin in CORS_ORIGINS.split(",")]
 app.add_middleware(
     CORSMiddleware,
@@ -573,7 +271,32 @@ app.add_middleware(
 
 
 # ============================================
-# REST Endpoints
+# Register Routers
+# ============================================
+
+if BUNDLES_AVAILABLE and bundles_router:
+    app.include_router(bundles_router)
+    logger.info("Registered: Bundles API")
+
+if WATCHES_AVAILABLE and watches_router:
+    app.include_router(watches_router)
+    logger.info("Registered: Watches API")
+
+if PRICE_ANALYSIS_AVAILABLE and price_analysis_router:
+    app.include_router(price_analysis_router)
+    logger.info("Registered: Price Analysis API")
+
+if QUOTES_AVAILABLE and quotes_router:
+    app.include_router(quotes_router)
+    logger.info("Registered: Quotes API")
+
+if CHAT_AVAILABLE and chat_router:
+    app.include_router(chat_router)
+    logger.info("Registered: Chat API")
+
+
+# ============================================
+# Core Endpoints
 # ============================================
 
 @app.get("/")
@@ -581,317 +304,262 @@ async def root():
     """Root endpoint"""
     return {
         "service": "AI Recommendation Service",
-        "version": "3.0.0",
+        "version": "2.0.0",
         "status": "running",
-        "llm_provider": "OpenAI" if USE_OPENAI else "Ollama",
         "docs": "/docs",
-        "endpoints": [
-            "/api/ai/health",
-            "/api/ai/chat",
-            "/api/ai/recommendations",
-            "/api/ai/score",
-            "/api/ai/bundle",
-            "/api/ai/chat/ws"
-        ]
+        "endpoints": {
+            "chat": "/api/ai/chat",
+            "bundles": "/api/ai/bundles",
+            "watches": "/api/ai/watches",
+            "price_analysis": "/api/ai/price-analysis",
+            "quotes": "/api/ai/quotes",
+            "events": "/api/ai/events (WebSocket)"
+        }
     }
 
 
 @app.get("/api/ai/health")
 async def health_check():
-    """Detailed health check"""
-    
-    # Test MySQL
-    mysql_status = "unavailable"
-    if MYSQL_AVAILABLE:
-        conn = get_mysql_connection()
-        if conn:
-            mysql_status = "connected"
-            conn.close()
-    
-    # Test Redis
-    redis_status = "unavailable"
-    if REDIS_AVAILABLE:
-        r = get_redis_client()
-        if r:
-            try:
-                r.ping()
-                redis_status = "connected"
-            except:
-                redis_status = "error"
-    
-    # Test LLM
-    llm_status = "unavailable"
-    if USE_OPENAI:
-        llm_status = "openai"
-    else:
-        try:
-            async with httpx.AsyncClient(timeout=2.0) as client:
-                response = await client.get(f"{OLLAMA_BASE_URL}/api/tags")
-                if response.status_code == 200:
-                    llm_status = "ollama"
-        except:
-            llm_status = "ollama (not responding)"
-    
+    """Health check endpoint"""
     return {
         "status": "healthy",
         "service": "ai-recommendation-service",
-        "version": "3.0.0",
-        "llm_provider": "OpenAI" if USE_OPENAI else "Ollama",
-        "llm_model": OPENAI_MODEL if USE_OPENAI else OLLAMA_MODEL,
-        "components": {
-            "config": "ready" if CONFIG_AVAILABLE else "unavailable",
-            "deal_scorer": "ready" if DEAL_SCORER_AVAILABLE else "unavailable",
-            "fit_scorer": "ready" if FIT_SCORER_AVAILABLE else "unavailable",
-            "bundle_matcher": "ready" if BUNDLE_MATCHER_AVAILABLE else "unavailable",
-            "mysql": mysql_status,
-            "redis": redis_status,
-            "llm": llm_status
-        },
-        "timestamp": datetime.now().isoformat()
+        "version": "2.0.0",
+        "timestamp": datetime.utcnow().isoformat(),
+        "features": {
+            "bundles": BUNDLES_AVAILABLE,
+            "watches": WATCHES_AVAILABLE,
+            "price_analysis": PRICE_ANALYSIS_AVAILABLE,
+            "quotes": QUOTES_AVAILABLE,
+            "chat": CHAT_AVAILABLE or CONCIERGE_AVAILABLE,
+            "websocket": EVENTS_AVAILABLE and ENABLE_WEBSOCKET,
+            "deals_agent": DEALS_AGENT_AVAILABLE and ENABLE_DEALS_AGENT
+        }
     }
 
 
-@app.post("/api/ai/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
-    """Chat with AI assistant"""
-    
-    session_id = request.session_id or f"session_{request.user_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
-    
-    # Get user preferences
-    preferences = request.preferences or await get_user_preferences(request.user_id)
-    
-    # Store user message
-    conversation_store.add_message(session_id, "user", request.query)
-    
-    # Generate response
-    result = await generate_ai_response(request.query, request.user_id, session_id, preferences)
-    
-    # Store AI response
-    conversation_store.add_message(session_id, "assistant", result["response"])
-    
-    return ChatResponse(
-        response=result["response"],
-        session_id=session_id,
-        user_id=request.user_id,
-        recommendations=result.get("recommendations", []),
-        timestamp=datetime.now().isoformat()
-    )
-
-
-@app.post("/api/ai/recommendations")
-async def get_recommendations(request: RecommendationRequest):
-    """Get personalized travel recommendations"""
-    
-    preferences = request.preferences or await get_user_preferences(request.user_id)
-    
-    query = f"Find flights and hotels to {request.destination or 'popular destinations'}"
-    result = await generate_ai_response(query, request.user_id, preferences=preferences)
-    
-    return {
-        "recommendations": result.get("recommendations", [])[:request.limit],
-        "destination": request.destination,
-        "dates": {"from": request.date_from, "to": request.date_to},
-        "user_id": request.user_id,
-        "generated_at": datetime.now().isoformat()
+@app.get("/api/ai/status")
+async def service_status():
+    """Detailed service status"""
+    status = {
+        "service": "ai-recommendation-service",
+        "version": "2.0.0",
+        "environment": API_ENV,
+        "timestamp": datetime.utcnow().isoformat(),
+        "components": {}
     }
-
-
-@app.post("/api/ai/score")
-async def score_deal(request: ScoreRequest):
-    """Score a deal using the deal scoring algorithm"""
     
-    if not DEAL_SCORER_AVAILABLE:
-        return {
-            "error": "Deal scorer not available",
-            "score": 70,
-            "message": "Using default score"
+    # Check Deals Agent
+    if DEALS_AGENT_AVAILABLE and deals_agent:
+        status["components"]["deals_agent"] = {
+            "running": deals_agent.running,
+            "status": "active" if deals_agent.running else "stopped"
         }
     
-    try:
-        score = calculate_deal_score(
-            current_price=request.current_price,
-            avg_30d_price=request.avg_30d_price,
-            availability=request.availability,
-            rating=request.rating,
-            has_promotion=request.has_promotion
-        )
-        
-        savings_amount, savings_pct = calculate_savings(
-            request.current_price, request.avg_30d_price
-        )
-        
-        return {
-            "score": score.total_score,
-            "is_deal": score.is_deal,
-            "quality": get_deal_quality(score.total_score),
-            "breakdown": {
-                "price_advantage": score.price_advantage_score,
-                "scarcity": score.scarcity_score,
-                "rating": score.rating_score,
-                "promotion": score.promotion_score
-            },
-            "savings": {
-                "amount": savings_amount,
-                "percentage": savings_pct
-            },
-            "timestamp": datetime.now().isoformat()
+    # Check WebSocket connections
+    if events_manager:
+        status["components"]["websocket"] = {
+            "active_connections": len(events_manager.active_connections),
+            "status": "active"
         }
-    except Exception as e:
-        logger.error(f"Score calculation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    
+    # Check Deals Cache
+    if CACHE_AVAILABLE and deals_cache:
+        stats = deals_cache.get_stats()
+        status["components"]["deals_cache"] = {
+            "total_deals": stats.get("total_deals", 0),
+            "status": "active"
+        }
+    
+    # Check Session Store
+    if SESSION_AVAILABLE and session_store:
+        status["components"]["session_store"] = {
+            "active_sessions": len(session_store._sessions) if hasattr(session_store, '_sessions') else "unknown",
+            "status": "active"
+        }
+    
+    return status
 
 
-@app.post("/api/ai/bundle")
-async def create_bundle(request: BundleRequest):
-    """Create flight + hotel bundles"""
+# ============================================
+# Inline Chat Endpoint (if chat router not available)
+# ============================================
+
+if not CHAT_AVAILABLE:
+    from pydantic import BaseModel
+    from typing import Optional, List
     
-    bundles = []
+    class ChatRequest(BaseModel):
+        query: str
+        user_id: str
+        session_id: Optional[str] = None
+        preferences: dict = {}
     
-    for flight in request.flights[:request.limit]:
-        for hotel in request.hotels[:request.limit]:
-            flight_price = flight.get("price", 0)
-            hotel_price = hotel.get("price", 0) * hotel.get("nights", 3)
-            total = flight_price + hotel_price
-            savings = total * 0.1
+    class ChatResponse(BaseModel):
+        response: str
+        session_id: Optional[str] = None
+        user_id: str
+        type: str = "response"
+        bundles: List[dict] = []
+        timestamp: str
+    
+    @app.post("/api/ai/chat", response_model=ChatResponse)
+    async def chat_endpoint(request: ChatRequest):
+        """
+        Chat with AI assistant
+        
+        Supports natural language travel queries.
+        """
+        try:
+            result = await process_chat(
+                query=request.query,
+                user_id=request.user_id,
+                session_id=request.session_id
+            )
             
-            bundle = {
-                "id": f"BND_{flight.get('id')}_{hotel.get('id')}",
-                "flight": flight,
-                "hotel": hotel,
-                "total_price": round(total - savings, 2),
-                "original_price": total,
-                "savings": round(savings, 2),
-                "score": 80
-            }
-            
-            if DEAL_SCORER_AVAILABLE:
-                try:
-                    score = calculate_deal_score(
-                        current_price=bundle["total_price"],
-                        avg_30d_price=bundle["original_price"],
-                        availability=5,
-                        rating=4.5
-                    )
-                    bundle["score"] = score.total_score
-                    bundle["is_deal"] = score.is_deal
-                except:
-                    pass
-            
-            bundles.append(bundle)
-    
-    bundles.sort(key=lambda x: x.get("score", 0), reverse=True)
-    
-    return {
-        "bundles": bundles[:request.limit],
-        "count": len(bundles[:request.limit]),
-        "timestamp": datetime.now().isoformat()
-    }
-
-
-@app.get("/api/ai/history/{session_id}")
-async def get_conversation_history(session_id: str, limit: int = 20):
-    """Get conversation history"""
-    history = conversation_store.get_history(session_id, limit)
-    return {
-        "session_id": session_id,
-        "messages": history,
-        "count": len(history)
-    }
-
-
-@app.delete("/api/ai/history/{session_id}")
-async def clear_conversation(session_id: str):
-    """Clear conversation history"""
-    conversation_store.clear(session_id)
-    return {"session_id": session_id, "status": "cleared"}
-
-
-@app.get("/api/ai/user/{user_id}")
-async def get_user_info(user_id: str):
-    """Get user info and preferences"""
-    user = await get_user_by_id(user_id)
-    preferences = await get_user_preferences(user_id)
-    
-    return {
-        "user": user,
-        "preferences": preferences,
-        "timestamp": datetime.now().isoformat()
-    }
+            return ChatResponse(
+                response=result.get("response", "I'm here to help with travel recommendations!"),
+                session_id=result.get("session_id"),
+                user_id=request.user_id,
+                type=result.get("type", "response"),
+                bundles=result.get("bundles", []),
+                timestamp=datetime.utcnow().isoformat()
+            )
+        except Exception as e:
+            logger.error(f"Chat error: {e}")
+            return ChatResponse(
+                response="I apologize, but I encountered an error. Please try again.",
+                session_id=request.session_id,
+                user_id=request.user_id,
+                type="error",
+                bundles=[],
+                timestamp=datetime.utcnow().isoformat()
+            )
 
 
 # ============================================
 # WebSocket Endpoint
 # ============================================
 
-@app.websocket("/api/ai/chat/ws")
-async def websocket_chat(websocket: WebSocket, user_id: str = "anonymous"):
-    """Real-time WebSocket chat"""
-    
-    session_id = f"ws_{user_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
-    
-    await manager.connect(websocket, session_id)
-    
-    await manager.send_message(session_id, {
-        "type": "connected",
-        "content": f"Connected to AI Travel Concierge! (Using {'OpenAI' if USE_OPENAI else 'Ollama'})",
-        "session_id": session_id,
-        "timestamp": datetime.now().isoformat()
-    })
-    
-    try:
-        while True:
-            data = await websocket.receive_json()
-            
-            msg_type = data.get("type", "message")
-            content = data.get("content", "")
-            
-            if msg_type == "message" and content:
-                await manager.send_message(session_id, {
-                    "type": "typing",
-                    "timestamp": datetime.now().isoformat()
-                })
-                
-                conversation_store.add_message(session_id, "user", content)
-                result = await generate_ai_response(content, user_id, session_id)
-                conversation_store.add_message(session_id, "assistant", result["response"])
-                
-                await manager.send_message(session_id, {
-                    "type": "response",
-                    "content": result["response"],
-                    "recommendations": result.get("recommendations", []),
-                    "timestamp": datetime.now().isoformat()
-                })
-            
-            elif msg_type == "ping":
-                await manager.send_message(session_id, {
-                    "type": "pong",
-                    "timestamp": datetime.now().isoformat()
-                })
-            
-            elif msg_type == "history":
-                history = conversation_store.get_history(session_id)
-                await manager.send_message(session_id, {
-                    "type": "history",
-                    "messages": history,
-                    "timestamp": datetime.now().isoformat()
-                })
-    
-    except WebSocketDisconnect:
-        manager.disconnect(session_id)
-    except Exception as e:
-        logger.error(f"WebSocket error: {e}")
-        manager.disconnect(session_id)
+if EVENTS_AVAILABLE and ENABLE_WEBSOCKET:
+    @app.websocket("/api/ai/events")
+    async def websocket_events(websocket: WebSocket):
+        """
+        WebSocket endpoint for real-time events.
+        
+        Connect with: ws://host/api/ai/events?user_id=xxx
+        
+        Event types:
+        - price_alert: Price dropped below threshold
+        - inventory_alert: Low inventory warning
+        - deal_found: New deal discovered
+        - watch_triggered: User's watch triggered
+        """
+        await websocket_endpoint(websocket)
+else:
+    @app.websocket("/api/ai/events")
+    async def websocket_events_disabled(websocket: WebSocket):
+        """WebSocket disabled"""
+        await websocket.accept()
+        await websocket.send_json({
+            "type": "error",
+            "message": "WebSocket events are not enabled"
+        })
+        await websocket.close()
 
 
 # ============================================
-# Main
+# Legacy Endpoints (backward compatibility)
+# ============================================
+
+@app.post("/api/ai/recommendations")
+async def get_recommendations_legacy(request: dict):
+    """
+    Legacy recommendations endpoint.
+    Use /api/ai/bundles for new integrations.
+    """
+    destination = request.get("destination", "")
+    user_id = request.get("user_id", "")
+    
+    # Redirect to bundles if available
+    if BUNDLES_AVAILABLE:
+        from api.bundles import get_bundles
+        try:
+            result = await get_bundles(
+                destination=destination,
+                user_id=user_id
+            )
+            return {
+                "recommendations": [b.model_dump() for b in result.bundles],
+                "destination": destination,
+                "user_id": user_id,
+                "total_count": result.total_count,
+                "status": "success"
+            }
+        except Exception as e:
+            logger.error(f"Legacy recommendations error: {e}")
+    
+    # Fallback response
+    return {
+        "recommendations": [],
+        "destination": destination,
+        "user_id": user_id,
+        "total_count": 0,
+        "status": "success",
+        "message": "Use /api/ai/bundles for bundle recommendations"
+    }
+
+
+@app.post("/api/ai/score")
+async def score_deal_legacy(request: dict):
+    """
+    Legacy score endpoint.
+    Use /api/ai/price-analysis for new integrations.
+    """
+    return {
+        "flight_score": 75,
+        "hotel_score": 75,
+        "bundle_score": 75,
+        "recommendation": "Use /api/ai/price-analysis/{type}/{id} for detailed analysis",
+        "status": "success"
+    }
+
+
+# ============================================
+# Error Handlers
+# ============================================
+
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Global exception handler"""
+    logger.error(f"Unhandled exception: {exc}")
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "Internal server error",
+            "message": str(exc) if API_ENV == "development" else "An unexpected error occurred",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    )
+
+
+# ============================================
+# Main Entry Point
 # ============================================
 
 if __name__ == "__main__":
     import uvicorn
+    
+    # Create logs directory
+    os.makedirs("logs", exist_ok=True)
+    
     uvicorn.run(
         "main:app",
         host=API_HOST,
         port=API_PORT,
-        reload=API_ENV == "development"
+        reload=API_ENV == "development",
+        log_level="info"
     )

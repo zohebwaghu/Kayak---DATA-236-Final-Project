@@ -1,32 +1,58 @@
+# schemas/__init__.py
 """
-Schemas Module
-Pydantic models for API validation
+Pydantic Schemas Package
+
+Contains all Pydantic v2 models for:
+- API requests/responses
+- Internal data structures
+- Kafka message schemas
 """
 
-from .ai_schemas import (
-    SessionCreateResponse,
-    QueryRequest,
-    QueryResponse,
-    ParsedIntent,
-    BundleResponse,
-    FlightInfo,
-    HotelInfo,
-    WatchRequest,
-    WatchResponse,
-    ErrorResponse,
-    HealthCheckResponse
-)
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .ai_schemas import (
+        # Enums
+        ListingType, WatchType, DealQuality, AlertType,
+        # Intent & Session
+        ParsedIntent, SessionState,
+        # Explanations
+        Explanation, PriceComparison,
+        # Policy
+        PolicyInfo,
+        # Listings
+        FlightInfo, HotelInfo,
+        # Bundle
+        Bundle, BundleRecommendations, RefinedRecommendations,
+        # Watches
+        Watch, WatchCreate, WatchList,
+        # Events
+        Alert, EventMessage,
+        # Quotes
+        FlightQuote, HotelQuote, FullQuote,
+        # API
+        ChatRequest, ChatResponse, ScoreRequest, ScoreResponse, HealthResponse
+    )
 
 __all__ = [
-    "SessionCreateResponse",
-    "QueryRequest",
-    "QueryResponse",
-    "ParsedIntent",
-    "BundleResponse",
-    "FlightInfo",
-    "HotelInfo",
-    "WatchRequest",
-    "WatchResponse",
-    "ErrorResponse",
-    "HealthCheckResponse"
+    # Enums
+    "ListingType", "WatchType", "DealQuality", "AlertType",
+    # Intent & Session
+    "ParsedIntent", "SessionState",
+    # Explanations
+    "Explanation", "PriceComparison",
+    # Policy
+    "PolicyInfo",
+    # Listings
+    "FlightInfo", "HotelInfo",
+    # Bundle
+    "Bundle", "BundleRecommendations", "RefinedRecommendations",
+    # Watches
+    "Watch", "WatchCreate", "WatchList",
+    # Events
+    "Alert", "EventMessage",
+    # Quotes
+    "FlightQuote", "HotelQuote", "FullQuote",
+    # API
+    "ChatRequest", "ChatResponse", "ScoreRequest", "ScoreResponse", "HealthResponse"
 ]

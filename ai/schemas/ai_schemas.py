@@ -1,280 +1,404 @@
+# schemas/ai_schemas.py
 """
-AI Service API Schemas
-Pydantic v2 models for request/response validation
+Complete Pydantic v2 schemas for AI Recommendation Service
+Covers all 5 user journeys and API requirements
 """
 
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any
+from typing import Optional, List, Dict, Any
 from datetime import datetime
+from enum import Enum
 
 
 # ============================================
-# Session Management
+# Enums
 # ============================================
 
-class SessionCreateResponse(BaseModel):
-    """Response for session creation"""
-    sessionId: str = Field(..., description="Unique session identifier")
-    createdAt: datetime = Field(default_factory=datetime.now)
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "sessionId": "session-abc123",
-                "createdAt": "2025-11-07T20:00:00"
-            }
-        }
+class ListingType(str, Enum):
+    FLIGHT = "flight"
+    HOTEL = "hotel"
+    CAR = "car"
+
+
+class WatchType(str, Enum):
+    PRICE = "price"
+    INVENTORY = "inventory"
+
+
+class DealQuality(str, Enum):
+    EXCELLENT = "excellent"  # 80+
+    GREAT = "great"          # 60-79
+    GOOD = "good"            # 40-59
+    FAIR = "fair"            # <40
+
+
+class AlertType(str, Enum):
+    PRICE_DROP = "price_drop"
+    INVENTORY_LOW = "inventory_low"
+    DEAL_FOUND = "deal_found"
+    WATCH_TRIGGERED = "watch_triggered"
 
 
 # ============================================
-# Query Requests
+# Intent & Session (Refine without starting over)
 # ============================================
-
-class QueryRequest(BaseModel):
-    """Request for natural language query"""
-    query: str = Field(..., min_length=1, max_length=500, description="Natural language query")
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "query": "Find cheap flights from SFO to Miami under $800"
-            }
-        }
-
 
 class ParsedIntent(BaseModel):
-    """Parsed user intent from LLM"""
+    """Structured intent extracted from natural language"""
     origin: Optional[str] = None
     destination: Optional[str] = None
-    dates: Optional[List[str]] = None
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
     budget: Optional[float] = None
+    travelers: int = 1
+    constraints: List[str] = Field(default_factory=list)  # ["pet-friendly", "no-redeye"]
+    raw_query: str = ""
+    confidence: float = 0.0
+    needs_clarification: bool = False
+    clarification_question: Optional[str] = None
+
+
+class SessionState(BaseModel):
+    """Session state for multi-turn conversations"""
+    session_id: str
+    user_id: str
+    
+    # Accumulated search parameters
+    origin: Optional[str] = None
+    destination: Optional[str] = None
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+    budget: Optional[float] = None
+    travelers: int = 1
     constraints: List[str] = Field(default_factory=list)
+    
+    # Previous recommendations for comparison
+    previous_recommendations: List[Dict[str, Any]] = Field(default_factory=list)
+    
+    # Conversation history
+    conversation_turns: int = 0
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 # ============================================
-# Bundle Responses
+# Explanations (Why this + What to watch)
+# ============================================
+
+class Explanation(BaseModel):
+    """Structured explanation for recommendations"""
+    why_this: str = Field(..., max_length=150)  # ≤25 words
+    what_to_watch: str = Field(..., max_length=75)  # ≤12 words
+
+
+class PriceComparison(BaseModel):
+    """Price analysis for 'Decide with confidence'"""
+    current_price: float
+    avg_30d_price: float
+    avg_60d_price: Optional[float] = None
+    price_vs_avg_percent: float  # e.g., -19 means 19% below average
+    similar_options: List[Dict[str, Any]] = Field(default_factory=list)
+    verdict: str  # "EXCELLENT DEAL", "GREAT DEAL", "FAIR PRICE", "OVERPRICED"
+
+
+# ============================================
+# Policy Info (Policy Answers)
+# ============================================
+
+class PolicyInfo(BaseModel):
+    """Structured policy information"""
+    refundable: bool = False
+    refund_window: Optional[str] = None  # "24 hours before", "Oct 23, 6:00 PM"
+    cancellation_fee: Optional[float] = None
+    pet_friendly: bool = False
+    pet_fee: Optional[float] = None
+    parking: Optional[str] = None  # "Free", "$20/night", "Not available"
+    breakfast: bool = False
+    breakfast_fee: Optional[float] = None
+    wifi: bool = True
+    wifi_fee: Optional[float] = None
+
+
+# ============================================
+# Flight & Hotel Models
 # ============================================
 
 class FlightInfo(BaseModel):
-    """Flight information in bundle"""
-    listingId: str
+    """Flight details"""
+    flight_id: str
     airline: str
-    departure: str
-    arrival: str
-    date: Optional[str] = None
+    origin: str
+    destination: str
+    departure_time: datetime
+    arrival_time: datetime
+    duration_minutes: int
+    stops: int = 0
+    flight_class: str = "Economy"
     price: float
-    duration: Optional[int] = None
-    stops: Optional[int] = None
+    avg_30d_price: Optional[float] = None
+    seats_left: Optional[int] = None
+    baggage_included: str = "1 carry-on"
+    checked_bag_fee: Optional[float] = None
+    seat_selection_fee: Optional[float] = None
+    change_fee: Optional[float] = None
+    rating: Optional[float] = None
 
 
 class HotelInfo(BaseModel):
-    """Hotel information in bundle"""
-    listingId: str
-    hotelName: str
+    """Hotel details"""
+    hotel_id: str
+    name: str
     city: str
-    starRating: float
-    price: float
+    star_rating: int
+    room_type: str = "Standard"
+    price_per_night: float
+    avg_30d_price: Optional[float] = None
+    total_nights: int = 1
+    total_price: float
+    rooms_left: Optional[int] = None
     amenities: List[str] = Field(default_factory=list)
-    availability: Optional[int] = None
+    rating: Optional[float] = None
+    review_count: Optional[int] = None
+    neighborhood: Optional[str] = None
+    policy: Optional[PolicyInfo] = None
+    resort_fee: Optional[float] = None
+    taxes: Optional[float] = None
 
 
-class BundleResponse(BaseModel):
-    """Single bundle recommendation"""
-    bundleId: str
-    totalPrice: float
-    savings: float
-    dealScore: int = Field(..., ge=0, le=100)
-    fitScore: float = Field(..., ge=0.0, le=1.0)
-    combinedScore: float
-    explanation: str = Field(..., max_length=200)
+# ============================================
+# Bundle (Tell me what I should book)
+# ============================================
+
+class Bundle(BaseModel):
+    """Flight + Hotel bundle"""
+    bundle_id: str
     flight: FlightInfo
     hotel: HotelInfo
     
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "bundleId": "bundle-123",
-                "totalPrice": 430.0,
-                "savings": 120.0,
-                "dealScore": 85,
-                "fitScore": 0.92,
-                "combinedScore": 0.89,
-                "explanation": "Save $120 on Miami getaway - 4.5★ hotel with pool",
-                "flight": {
-                    "listingId": "flight-001",
-                    "airline": "United",
-                    "departure": "SFO",
-                    "arrival": "Miami",
-                    "price": 280.0
-                },
-                "hotel": {
-                    "listingId": "hotel-001",
-                    "hotelName": "Grand Hyatt",
-                    "city": "Miami",
-                    "starRating": 4.5,
-                    "price": 150.0,
-                    "amenities": ["wifi", "pool"]
-                }
-            }
-        }
-
-
-class QueryResponse(BaseModel):
-    """Response for query request"""
-    sessionId: str
-    query: str
-    parsedIntent: ParsedIntent
-    bundles: List[BundleResponse]
-    totalResults: int
-    processingTime: float = Field(..., description="Processing time in seconds")
+    # Pricing
+    total_price: float
+    separate_price: float  # If booked separately
+    savings: float
+    savings_percent: float
     
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "sessionId": "session-abc123",
-                "query": "cheap flights to Miami",
-                "parsedIntent": {
-                    "origin": None,
-                    "destination": "Miami",
-                    "budget": None,
-                    "constraints": []
-                },
-                "bundles": [],
-                "totalResults": 3,
-                "processingTime": 0.45
-            }
-        }
-
-
-# ============================================
-# Watch/Alert Requests
-# ============================================
-
-class WatchRequest(BaseModel):
-    """Request to watch a listing for price changes"""
-    listingId: str = Field(..., description="Listing to watch")
-    targetPrice: Optional[float] = Field(None, description="Alert when price drops below this")
+    # Scores
+    deal_score: int = Field(..., ge=0, le=100)
+    fit_score: int = Field(..., ge=0, le=100)
     
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "listingId": "flight-001",
-                "targetPrice": 250.0
-            }
-        }
-
-
-class WatchResponse(BaseModel):
-    """Response for watch request"""
-    watchId: str
-    listingId: str
-    targetPrice: Optional[float]
-    createdAt: datetime = Field(default_factory=datetime.now)
+    # Explanations
+    explanation: Explanation
     
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "watchId": "watch-xyz789",
-                "listingId": "flight-001",
-                "targetPrice": 250.0,
-                "createdAt": "2025-11-07T20:00:00"
-            }
-        }
+    # Price analysis
+    price_analysis: Optional[PriceComparison] = None
+
+
+class BundleRecommendations(BaseModel):
+    """Response for 'Tell me what I should book'"""
+    bundles: List[Bundle]
+    query_understood: str  # Echo back what we understood
+    session_id: str
+    total_options_found: int
 
 
 # ============================================
-# WebSocket Messages
+# Change Highlight (Refine without starting over)
 # ============================================
 
-class WebSocketMessage(BaseModel):
-    """Base WebSocket message"""
-    eventType: str
-    timestamp: datetime = Field(default_factory=datetime.now)
+class ChangeItem(BaseModel):
+    """Single change from previous recommendation"""
+    field: str  # "price", "flight_time", "hotel"
+    previous_value: str
+    new_value: str
+    change_type: str  # "increase", "decrease", "added", "removed"
+    change_amount: Optional[str] = None  # "+$38", "-2 hours"
+    is_improvement: bool
 
 
-class DealUpdateMessage(WebSocketMessage):
-    """Deal update notification"""
-    eventType: str = "DEAL_UPDATE"
+class RefinedRecommendations(BaseModel):
+    """Response for 'Refine without starting over'"""
+    bundles: List[Bundle]
+    changes_summary: str  # "Updated based on: pet-friendly, no red-eye"
+    changes: List[ChangeItem]
+    constraints_applied: List[str]
+    session_id: str
+
+
+# ============================================
+# Watches (Keep an eye on it)
+# ============================================
+
+class WatchCreate(BaseModel):
+    """Request to create a watch"""
+    user_id: str
+    listing_type: ListingType
+    listing_id: str
+    listing_name: str
+    watch_type: WatchType
+    threshold: float  # Price threshold or inventory count
+    current_value: float
+
+
+class Watch(BaseModel):
+    """Watch record"""
+    watch_id: str
+    user_id: str
+    listing_type: ListingType
+    listing_id: str
+    listing_name: str
+    watch_type: WatchType
+    threshold: float
+    current_value: float
+    created_at: datetime
+    triggered: bool = False
+    triggered_at: Optional[datetime] = None
+
+
+class WatchList(BaseModel):
+    """User's watches"""
+    watches: List[Watch]
+    active_count: int
+    triggered_count: int
+
+
+# ============================================
+# Alerts & Events (WebSocket push)
+# ============================================
+
+class Alert(BaseModel):
+    """Real-time alert pushed via WebSocket"""
+    alert_id: str
+    alert_type: AlertType
+    user_id: str
+    title: str
+    message: str
+    listing_type: Optional[ListingType] = None
+    listing_id: Optional[str] = None
+    previous_value: Optional[float] = None
+    new_value: Optional[float] = None
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    read: bool = False
+
+
+class EventMessage(BaseModel):
+    """WebSocket event message"""
+    event_type: str  # "alert", "deal", "watch_triggered"
     payload: Dict[str, Any]
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "eventType": "DEAL_UPDATE",
-                "timestamp": "2025-11-07T20:00:00",
-                "payload": {
-                    "listingId": "flight-001",
-                    "dealScore": 85,
-                    "price": 280.0
-                }
-            }
-        }
-
-
-class WatchNotificationMessage(WebSocketMessage):
-    """Watch notification (price alert)"""
-    eventType: str = "WATCH_NOTIFICATION"
-    watchId: str
-    listingId: str
-    oldPrice: float
-    newPrice: float
-    message: str
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "eventType": "WATCH_NOTIFICATION",
-                "timestamp": "2025-11-07T20:00:00",
-                "watchId": "watch-xyz789",
-                "listingId": "flight-001",
-                "oldPrice": 280.0,
-                "newPrice": 250.0,
-                "message": "Price dropped below your target!"
-            }
-        }
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 
 # ============================================
-# Error Responses
+# Full Quote (Book or hand off cleanly)
 # ============================================
 
-class ErrorResponse(BaseModel):
-    """Standard error response"""
-    error: str
-    message: str
-    timestamp: datetime = Field(default_factory=datetime.now)
+class FlightQuote(BaseModel):
+    """Detailed flight quote"""
+    flight: FlightInfo
+    base_fare: float
+    taxes: float
+    baggage_fee: float = 0
+    seat_selection_fee: float = 0
+    total: float
+    cancellation_policy: str
+    change_policy: str
+
+
+class HotelQuote(BaseModel):
+    """Detailed hotel quote"""
+    hotel: HotelInfo
+    room_rate: float
+    nights: int
+    subtotal: float
+    resort_fee: float = 0
+    taxes: float
+    total: float
+    cancellation_policy: str
+    cancellation_deadline: Optional[datetime] = None
+
+
+class FullQuote(BaseModel):
+    """Complete quote for 'Book or hand off cleanly'"""
+    quote_id: str
+    bundle_id: str
     
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "error": "ValidationError",
-                "message": "Query must be between 1 and 500 characters",
-                "timestamp": "2025-11-07T20:00:00"
-            }
-        }
+    flight_quote: FlightQuote
+    hotel_quote: HotelQuote
+    
+    grand_total: float
+    bundle_savings: float
+    
+    # Policies summary
+    cancellation_summary: str
+    important_notes: List[str]
+    
+    # Valid until
+    quote_valid_until: datetime
+    
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# ============================================
+# Chat Request/Response
+# ============================================
+
+class ChatRequest(BaseModel):
+    """Chat API request"""
+    query: str
+    user_id: str
+    session_id: Optional[str] = None
+    preferences: Optional[Dict[str, Any]] = None
+
+
+class ChatResponse(BaseModel):
+    """Chat API response"""
+    response: str
+    session_id: str
+    user_id: str
+    
+    # Parsed intent
+    parsed_intent: Optional[ParsedIntent] = None
+    
+    # Recommendations (if applicable)
+    recommendations: Optional[BundleRecommendations] = None
+    
+    # Changes (if refining)
+    changes: Optional[List[ChangeItem]] = None
+    
+    # Clarification needed
+    needs_clarification: bool = False
+    clarification_question: Optional[str] = None
+    
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+# ============================================
+# Score Request/Response
+# ============================================
+
+class ScoreRequest(BaseModel):
+    """Deal score request"""
+    current_price: float
+    avg_30d_price: float
+    availability: Optional[int] = None
+    rating: Optional[float] = None
+    has_promotion: bool = False
+
+
+class ScoreResponse(BaseModel):
+    """Deal score response"""
+    deal_score: int
+    quality: DealQuality
+    breakdown: Dict[str, int]
+    explanation: Explanation
 
 
 # ============================================
 # Health Check
 # ============================================
 
-class HealthCheckResponse(BaseModel):
+class HealthResponse(BaseModel):
     """Health check response"""
-    status: str = Field(..., description="Service status")
-    version: str = Field(default="0.1.0")
-    timestamp: datetime = Field(default_factory=datetime.now)
-    dependencies: Dict[str, bool] = Field(default_factory=dict)
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "status": "healthy",
-                "version": "0.1.0",
-                "timestamp": "2025-11-07T20:00:00",
-                "dependencies": {
-                    "redis": True,
-                    "ollama": True,
-                    "openai": True
-                }
-            }
-        }
+    status: str
+    llm_provider: str
+    llm_model: str
+    components: Dict[str, str]
+    timestamp: datetime = Field(default_factory=datetime.utcnow)

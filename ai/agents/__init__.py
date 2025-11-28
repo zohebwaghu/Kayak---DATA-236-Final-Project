@@ -1,19 +1,24 @@
+# agents/__init__.py
 """
-AI Agents Module
+AI Agents Package
 
-This module contains the intelligent agents that power the recommendation system:
-- DealsAgent: Backend worker that processes Kafka streams and scores deals
-- ConciergeAgent: User-facing conversational AI assistant
+Contains the core AI agents:
+- ConciergeAgent: Chat-facing agent for user interactions
+- DealsAgent: Background worker for deal processing
 """
 
-from .deals_agent import DealsAgent, get_deals_agent
-from .concierge_agent import ConciergeAgent, get_concierge_agent
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .concierge_agent_v2 import concierge_agent, process_chat, ConciergeAgent
+    from .deals_agent_runner import deals_agent, start_deals_agent, stop_deals_agent, DealsAgentRunner
 
 __all__ = [
-    "DealsAgent",
-    "get_deals_agent",
+    "concierge_agent",
+    "process_chat",
     "ConciergeAgent",
-    "get_concierge_agent",
+    "deals_agent",
+    "start_deals_agent",
+    "stop_deals_agent",
+    "DealsAgentRunner"
 ]
-
-__version__ = "2.0.0"

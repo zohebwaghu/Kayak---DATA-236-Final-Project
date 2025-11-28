@@ -1,260 +1,437 @@
+# llm/intent_parser.py
 """
-Intent Parser - Natural Language Understanding
-Uses GPT-3.5 + Langchain to parse user queries
-Includes Redis semantic caching to reduce API costs
+Intent Parser for Concierge Agent
+Extracts structured data from natural language queries:
+- Dates, budget, travelers
+- Origin/destination
+- Constraints (pet-friendly, no red-eye, etc.)
+Implements: "Intent understanding with a single clarifying question max"
 """
 
-import json
-from typing import Dict, Any, Optional
-from langchain_openai import ChatOpenAI
-from langchain.chains import LLMChain
+import re
+import os
+from datetime import datetime, timedelta
+from typing import Optional, Dict, Any, List, Tuple
+from dataclasses import dataclass, field
 from loguru import logger
 
-from config import Config
-from .prompts import INTENT_PARSER_PROMPT
+# Try to import OpenAI for advanced parsing
+try:
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
+
+
+@dataclass
+class ParsedIntent:
+    """Structured intent extracted from natural language"""
+    origin: Optional[str] = None
+    destination: Optional[str] = None
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+    budget: Optional[float] = None
+    travelers: int = 1
+    constraints: List[str] = field(default_factory=list)
+    raw_query: str = ""
+    confidence: float = 0.0
+    needs_clarification: bool = False
+    clarification_question: Optional[str] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "origin": self.origin,
+            "destination": self.destination,
+            "date_from": self.date_from,
+            "date_to": self.date_to,
+            "budget": self.budget,
+            "travelers": self.travelers,
+            "constraints": self.constraints,
+            "raw_query": self.raw_query,
+            "confidence": self.confidence,
+            "needs_clarification": self.needs_clarification,
+            "clarification_question": self.clarification_question
+        }
 
 
 class IntentParser:
     """
-    Parse natural language travel queries into structured data
-    
-    Features:
-    - GPT-3.5 powered intent extraction
-    - Redis semantic caching (similarity > 0.85)
-    - Automatic constraint normalization
-    
-    Usage:
-        parser = IntentParser()
-        intent = parser.parse("Find cheap flights from SFO to Miami")
-        # Returns: {"origin": "SFO", "destination": "Miami", ...}
+    Parses natural language travel queries into structured intents.
+    Uses rule-based parsing with optional LLM enhancement.
     """
     
-    def __init__(self, use_cache: bool = True):
-        """
-        Initialize Intent Parser
+    def __init__(self):
+        # Common airport codes
+        self.airport_codes = {
+            "sfo": "SFO", "san francisco": "SFO",
+            "lax": "LAX", "los angeles": "LAX", "la": "LAX",
+            "jfk": "JFK", "new york": "JFK", "nyc": "JFK",
+            "mia": "MIA", "miami": "MIA",
+            "ord": "ORD", "chicago": "ORD",
+            "dfw": "DFW", "dallas": "DFW",
+            "den": "DEN", "denver": "DEN",
+            "sea": "SEA", "seattle": "SEA",
+            "bos": "BOS", "boston": "BOS",
+            "atl": "ATL", "atlanta": "ATL",
+            "las": "LAS", "vegas": "LAS", "las vegas": "LAS",
+            "phx": "PHX", "phoenix": "PHX",
+            "hnl": "HNL", "honolulu": "HNL", "hawaii": "HNL",
+            "cancun": "CUN", "cun": "CUN",
+            "tokyo": "NRT", "nrt": "NRT",
+            "paris": "CDG", "cdg": "CDG",
+            "london": "LHR", "lhr": "LHR",
+        }
         
-        Args:
-            use_cache: Enable Redis semantic caching (default: True)
-        """
-        # Initialize LLM (GPT-3.5)
-        self.llm = ChatOpenAI(
-            model=Config.OPENAI_MODEL,
-            api_key=Config.OPENAI_API_KEY,
-            temperature=0.0  # Deterministic for consistent parsing
-        )
+        # Destination keywords (for "anywhere warm" type queries)
+        self.destination_keywords = {
+            "warm": ["MIA", "CUN", "HNL", "PHX"],
+            "beach": ["MIA", "CUN", "HNL"],
+            "mountain": ["DEN", "SLC"],
+            "city": ["JFK", "ORD", "LAX"],
+            "europe": ["CDG", "LHR", "FCO"],
+            "asia": ["NRT", "HKG", "SIN"],
+        }
         
-        # Create Langchain chain
-        self.chain = LLMChain(
-            llm=self.llm,
-            prompt=INTENT_PARSER_PROMPT,
-            verbose=False
-        )
+        # Constraint patterns
+        self.constraint_patterns = {
+            "pet-friendly": [r"pet[- ]?friendly", r"pets? allowed", r"with pets?", r"bring.*pet"],
+            "no-redeye": [r"no red[- ]?eye", r"avoid red[- ]?eye", r"not red[- ]?eye"],
+            "direct-flight": [r"direct", r"non[- ]?stop", r"no stops?", r"no layover"],
+            "refundable": [r"refundable", r"free cancel", r"flexible"],
+            "breakfast": [r"breakfast", r"with breakfast"],
+            "wifi": [r"wifi", r"wi-fi", r"internet"],
+            "parking": [r"parking", r"free parking"],
+            "pool": [r"pool", r"swimming"],
+            "gym": [r"gym", r"fitness"],
+            "business-class": [r"business class", r"business seat"],
+            "first-class": [r"first class"],
+            "economy": [r"economy", r"cheap"],
+        }
         
-        # Initialize semantic cache (if enabled)
-        self.cache = None
-        if use_cache:
-            try:
-                from cache.semantic_cache import SemanticCache
-                from cache.embeddings import EmbeddingService
-                from cache.redis_client import get_redis_client
-                
-                redis_client = get_redis_client()
-                embedding_service = EmbeddingService()
-                self.cache = SemanticCache(
-                    redis_client=redis_client,
-                    embedding_service=embedding_service,
-                    threshold=Config.CACHE_SIMILARITY_THRESHOLD
-                )
-                logger.info("Intent Parser initialized with semantic caching")
-            except Exception as e:
-                logger.warning(f"Could not initialize cache: {e}. Running without cache.")
-                self.cache = None
-        else:
-            logger.info("Intent Parser initialized without caching")
+        # Budget patterns
+        self.budget_patterns = [
+            r"\$(\d+(?:,\d{3})*(?:\.\d{2})?)",  # $1000, $1,000, $1000.00
+            r"(\d+(?:,\d{3})*)\s*(?:dollars?|usd|bucks?)",  # 1000 dollars
+            r"budget\s*(?:of|is|:)?\s*\$?(\d+(?:,\d{3})*)",  # budget of 1000
+            r"under\s*\$?(\d+(?:,\d{3})*)",  # under 1000
+            r"(?:max|maximum)\s*\$?(\d+(?:,\d{3})*)",  # max 1000
+        ]
+        
+        # Date patterns
+        self.month_names = {
+            "jan": 1, "january": 1, "feb": 2, "february": 2,
+            "mar": 3, "march": 3, "apr": 4, "april": 4,
+            "may": 5, "jun": 6, "june": 6,
+            "jul": 7, "july": 7, "aug": 8, "august": 8,
+            "sep": 9, "september": 9, "oct": 10, "october": 10,
+            "nov": 11, "november": 11, "dec": 12, "december": 12
+        }
+        
+        # OpenAI client (if available)
+        self.openai_client = None
+        if OPENAI_AVAILABLE:
+            api_key = os.getenv("OPENAI_API_KEY", "")
+            if api_key and not api_key.startswith("sk-your"):
+                try:
+                    self.openai_client = OpenAI(api_key=api_key)
+                    logger.info("IntentParser: OpenAI client initialized")
+                except Exception as e:
+                    logger.warning(f"IntentParser: OpenAI init failed: {e}")
     
-    def parse(self, user_query: str) -> Dict[str, Any]:
+    def parse(self, query: str, context: Optional[Dict[str, Any]] = None) -> ParsedIntent:
         """
-        Parse user query into structured intent
+        Parse a natural language query into structured intent.
         
         Args:
-            user_query: Natural language query
+            query: User's natural language query
+            context: Optional session context for multi-turn conversations
         
         Returns:
-            dict: Structured intent with keys:
-                - origin: str
-                - destination: str
-                - dates: list or null
-                - budget: float or null
-                - constraints: list of str
-        
-        Example:
-            >>> parser = IntentParser()
-            >>> intent = parser.parse("Weekend trip to Miami under $800, need wifi")
-            >>> print(intent)
-            {
-                "origin": "flexible",
-                "destination": "Miami",
-                "dates": null,
-                "budget": 800,
-                "constraints": ["wifi"]
-            }
+            ParsedIntent with extracted data
         """
-        # Try cache first
-        if self.cache:
-            cached_result = self.cache.get(user_query)
-            if cached_result:
-                logger.info(
-                    f"[Cache Hit] Similarity: {cached_result['similarity']:.3f} | "
-                    f"Original: '{cached_result['cached_query']}'"
-                )
-                return cached_result['response']
+        query_lower = query.lower().strip()
         
-        # Cache miss - call LLM
-        logger.info(f"[Cache Miss] Calling GPT-3.5 to parse: '{user_query}'")
+        intent = ParsedIntent(raw_query=query)
         
-        try:
-            # Call LLM
-            result = self.chain.run(user_query=user_query)
-            
-            # Parse JSON response
-            parsed_intent = self._parse_llm_response(result)
-            
-            # Normalize intent
-            normalized_intent = self._normalize_intent(parsed_intent)
-            
-            # Store in cache
-            if self.cache:
-                self.cache.set(user_query, normalized_intent)
-                logger.debug("Intent stored in cache")
-            
-            logger.info(f"Parsed intent: {normalized_intent}")
-            return normalized_intent
-            
-        except Exception as e:
-            logger.error(f"Error parsing intent: {e}")
-            # Return default intent on error
-            return self._get_default_intent()
+        # Extract each component
+        intent.origin = self._extract_origin(query_lower, context)
+        intent.destination = self._extract_destination(query_lower)
+        intent.date_from, intent.date_to = self._extract_dates(query_lower)
+        intent.budget = self._extract_budget(query_lower)
+        intent.travelers = self._extract_travelers(query_lower)
+        intent.constraints = self._extract_constraints(query_lower)
+        
+        # Calculate confidence
+        intent.confidence = self._calculate_confidence(intent)
+        
+        # Check if clarification needed (single question max)
+        intent.needs_clarification, intent.clarification_question = self._check_clarification_needed(intent)
+        
+        logger.info(f"Parsed intent: destination={intent.destination}, "
+                   f"dates={intent.date_from}-{intent.date_to}, "
+                   f"budget={intent.budget}, confidence={intent.confidence:.2f}")
+        
+        return intent
     
-    def _parse_llm_response(self, response: str) -> Dict[str, Any]:
-        """
-        Parse LLM JSON response
+    def _extract_origin(self, query: str, context: Optional[Dict] = None) -> Optional[str]:
+        """Extract origin airport/city"""
+        # Pattern: "from SFO", "departing from San Francisco"
+        patterns = [
+            r"from\s+(\w+(?:\s+\w+)?)",
+            r"departing\s+(?:from\s+)?(\w+(?:\s+\w+)?)",
+            r"leaving\s+(?:from\s+)?(\w+(?:\s+\w+)?)",
+            r"(\w{3})\s+to\s+",  # SFO to ...
+        ]
         
-        Handles cases where LLM includes markdown formatting
-        """
-        # Remove markdown code blocks if present
-        response = response.strip()
-        if response.startswith("```json"):
-            response = response[7:]
-        if response.startswith("```"):
-            response = response[3:]
-        if response.endswith("```"):
-            response = response[:-3]
-        response = response.strip()
+        for pattern in patterns:
+            match = re.search(pattern, query)
+            if match:
+                location = match.group(1).lower().strip()
+                if location in self.airport_codes:
+                    return self.airport_codes[location]
         
-        try:
-            return json.loads(response)
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse LLM response as JSON: {response}")
-            raise ValueError(f"Invalid JSON from LLM: {e}")
+        # Check context for previous origin
+        if context and context.get("origin"):
+            return context["origin"]
+        
+        # Default to SFO (common in our dataset)
+        return None
     
-    def _normalize_intent(self, intent: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Normalize intent values
+    def _extract_destination(self, query: str) -> Optional[str]:
+        """Extract destination airport/city"""
+        # Pattern: "to Miami", "going to NYC"
+        patterns = [
+            r"to\s+(\w+(?:\s+\w+)?)",
+            r"going\s+(?:to\s+)?(\w+(?:\s+\w+)?)",
+            r"visiting\s+(\w+(?:\s+\w+)?)",
+            r"trip\s+to\s+(\w+(?:\s+\w+)?)",
+            r"fly\s+to\s+(\w+(?:\s+\w+)?)",
+            r"in\s+(\w+(?:\s+\w+)?)",
+        ]
         
-        - Convert null strings to None
-        - Normalize airport codes to uppercase
-        - Clean constraint strings
-        """
-        normalized = intent.copy()
+        for pattern in patterns:
+            match = re.search(pattern, query)
+            if match:
+                location = match.group(1).lower().strip()
+                # Skip common words
+                if location in ["the", "a", "an", "anywhere", "somewhere"]:
+                    continue
+                if location in self.airport_codes:
+                    return self.airport_codes[location]
         
-        # Normalize origin
-        if normalized.get("origin") in ["null", "flexible", None]:
-            normalized["origin"] = None
-        elif normalized.get("origin"):
-            normalized["origin"] = normalized["origin"].upper()
+        # Check for keyword destinations ("anywhere warm")
+        for keyword, destinations in self.destination_keywords.items():
+            if keyword in query:
+                return destinations[0]  # Return first match
         
-        # Normalize destination
-        if normalized.get("destination") in ["null", "flexible", None]:
-            normalized["destination"] = None
-        elif normalized.get("destination"):
-            # Keep city names as-is, but uppercase airport codes
-            dest = normalized["destination"]
-            if len(dest) == 3:  # Airport code
-                normalized["destination"] = dest.upper()
+        return None
+    
+    def _extract_dates(self, query: str) -> Tuple[Optional[str], Optional[str]]:
+        """Extract travel dates"""
+        date_from = None
+        date_to = None
+        today = datetime.now()
         
-        # Normalize dates
-        if normalized.get("dates") == "null" or not normalized.get("dates"):
-            normalized["dates"] = None
+        # Pattern: "Oct 25-27", "October 25 to 27"
+        range_pattern = r"(\w+)\s+(\d{1,2})[-–to]+\s*(\d{1,2})"
+        match = re.search(range_pattern, query)
+        if match:
+            month_str = match.group(1).lower()
+            day1 = int(match.group(2))
+            day2 = int(match.group(3))
+            
+            if month_str in self.month_names:
+                month = self.month_names[month_str]
+                year = today.year if month >= today.month else today.year + 1
+                
+                date_from = f"{year}-{month:02d}-{day1:02d}"
+                date_to = f"{year}-{month:02d}-{day2:02d}"
+                return date_from, date_to
         
-        # Normalize budget
-        if normalized.get("budget") in ["null", None]:
-            normalized["budget"] = None
-        elif isinstance(normalized.get("budget"), str):
-            # Extract number from string like "$800"
-            import re
-            budget_str = normalized["budget"]
-            numbers = re.findall(r'\d+', budget_str)
-            if numbers:
-                normalized["budget"] = float(numbers[0])
+        # Pattern: "next weekend", "this weekend"
+        if "next weekend" in query:
+            # Find next Saturday
+            days_until_saturday = (5 - today.weekday()) % 7
+            if days_until_saturday == 0:
+                days_until_saturday = 7
+            saturday = today + timedelta(days=days_until_saturday + 7)
+            sunday = saturday + timedelta(days=1)
+            date_from = saturday.strftime("%Y-%m-%d")
+            date_to = sunday.strftime("%Y-%m-%d")
+            return date_from, date_to
+        
+        if "this weekend" in query or "weekend" in query:
+            days_until_saturday = (5 - today.weekday()) % 7
+            if days_until_saturday == 0:
+                days_until_saturday = 7
+            saturday = today + timedelta(days=days_until_saturday)
+            sunday = saturday + timedelta(days=1)
+            date_from = saturday.strftime("%Y-%m-%d")
+            date_to = sunday.strftime("%Y-%m-%d")
+            return date_from, date_to
+        
+        # Pattern: "next month"
+        if "next month" in query:
+            next_month = today.month + 1 if today.month < 12 else 1
+            year = today.year if today.month < 12 else today.year + 1
+            date_from = f"{year}-{next_month:02d}-01"
+            # End of month
+            if next_month in [4, 6, 9, 11]:
+                date_to = f"{year}-{next_month:02d}-30"
+            elif next_month == 2:
+                date_to = f"{year}-{next_month:02d}-28"
             else:
-                normalized["budget"] = None
+                date_to = f"{year}-{next_month:02d}-31"
+            return date_from, date_to
         
-        # Normalize constraints
-        if not normalized.get("constraints"):
-            normalized["constraints"] = []
-        else:
-            # Clean constraint strings
-            normalized["constraints"] = [
-                c.lower().strip() for c in normalized["constraints"]
-            ]
+        # Pattern: specific date "December 15"
+        single_date = r"(\w+)\s+(\d{1,2})(?:st|nd|rd|th)?"
+        match = re.search(single_date, query)
+        if match:
+            month_str = match.group(1).lower()
+            day = int(match.group(2))
+            
+            if month_str in self.month_names:
+                month = self.month_names[month_str]
+                year = today.year if month >= today.month else today.year + 1
+                date_from = f"{year}-{month:02d}-{day:02d}"
+                # Default 3-night stay
+                date_to_obj = datetime(year, month, day) + timedelta(days=3)
+                date_to = date_to_obj.strftime("%Y-%m-%d")
+                return date_from, date_to
         
-        return normalized
+        return date_from, date_to
     
-    def _get_default_intent(self) -> Dict[str, Any]:
-        """
-        Return default intent on error
-        """
-        return {
-            "origin": None,
-            "destination": None,
-            "dates": None,
-            "budget": None,
-            "constraints": []
+    def _extract_budget(self, query: str) -> Optional[float]:
+        """Extract budget amount"""
+        for pattern in self.budget_patterns:
+            match = re.search(pattern, query, re.IGNORECASE)
+            if match:
+                budget_str = match.group(1).replace(",", "")
+                try:
+                    return float(budget_str)
+                except ValueError:
+                    continue
+        return None
+    
+    def _extract_travelers(self, query: str) -> int:
+        """Extract number of travelers"""
+        patterns = [
+            r"for\s+(\d+)\s*(?:people|persons?|travelers?|adults?)",
+            r"(\d+)\s*(?:people|persons?|travelers?|adults?)",
+            r"party\s+of\s+(\d+)",
+            r"(\d+)\s+of\s+us",
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, query, re.IGNORECASE)
+            if match:
+                try:
+                    return int(match.group(1))
+                except ValueError:
+                    continue
+        
+        # Check for "two", "three", etc.
+        word_numbers = {
+            "two": 2, "three": 3, "four": 4, "five": 5,
+            "six": 6, "couple": 2, "pair": 2
         }
+        for word, num in word_numbers.items():
+            if word in query:
+                return num
+        
+        return 1  # Default to 1
     
-    def clear_cache(self):
-        """Clear semantic cache (for testing)"""
-        if self.cache:
-            # Note: SemanticCache doesn't have clear method
-            # This would need to be implemented
-            logger.info("Cache clear requested (not implemented)")
+    def _extract_constraints(self, query: str) -> List[str]:
+        """Extract travel constraints/preferences"""
+        constraints = []
+        
+        for constraint_name, patterns in self.constraint_patterns.items():
+            for pattern in patterns:
+                if re.search(pattern, query, re.IGNORECASE):
+                    constraints.append(constraint_name)
+                    break
+        
+        return constraints
+    
+    def _calculate_confidence(self, intent: ParsedIntent) -> float:
+        """Calculate confidence score based on extracted data"""
+        score = 0.0
+        
+        if intent.destination:
+            score += 0.3
+        if intent.date_from and intent.date_to:
+            score += 0.25
+        elif intent.date_from:
+            score += 0.15
+        if intent.budget:
+            score += 0.2
+        if intent.origin:
+            score += 0.15
+        if intent.constraints:
+            score += 0.1
+        
+        return min(score, 1.0)
+    
+    def _check_clarification_needed(self, intent: ParsedIntent) -> Tuple[bool, Optional[str]]:
+        """
+        Check if clarification is needed.
+        Returns at most ONE clarifying question (as per requirements).
+        """
+        # Priority order for clarification
+        if not intent.destination:
+            return True, "Where would you like to go? (e.g., Miami, Tokyo, 'anywhere warm')"
+        
+        if not intent.date_from:
+            return True, "When are you planning to travel? (e.g., 'next weekend', 'Oct 25-27')"
+        
+        # Budget and travelers are optional, don't ask
+        return False, None
+    
+    def merge_with_context(self, intent: ParsedIntent, context: Dict[str, Any]) -> ParsedIntent:
+        """
+        Merge new intent with existing session context.
+        Implements 'Refine without starting over'.
+        """
+        # Only update fields that are present in new intent
+        if not intent.origin and context.get("origin"):
+            intent.origin = context["origin"]
+        if not intent.destination and context.get("destination"):
+            intent.destination = context["destination"]
+        if not intent.date_from and context.get("date_from"):
+            intent.date_from = context["date_from"]
+        if not intent.date_to and context.get("date_to"):
+            intent.date_to = context["date_to"]
+        if not intent.budget and context.get("budget"):
+            intent.budget = context["budget"]
+        if intent.travelers == 1 and context.get("travelers", 1) > 1:
+            intent.travelers = context["travelers"]
+        
+        # Merge constraints (append new, don't replace)
+        existing_constraints = context.get("constraints", [])
+        intent.constraints = list(set(existing_constraints + intent.constraints))
+        
+        # Recalculate confidence
+        intent.confidence = self._calculate_confidence(intent)
+        intent.needs_clarification, intent.clarification_question = self._check_clarification_needed(intent)
+        
+        return intent
 
 
 # ============================================
-# Example Usage
+# Global Instance
 # ============================================
 
-if __name__ == "__main__":
-    # Example: Parse various queries
-    parser = IntentParser(use_cache=True)
-    
-    queries = [
-        "Find cheap flights from SFO to Miami",
-        "Weekend trip to Miami under $800, need pet-friendly hotel with wifi",
-        "Business trip to NYC, hotel near city center",
-        "Fly to anywhere warm under $1000",
-        "SFO to MIA, budget $500, need pool and breakfast"
-    ]
-    
-    for query in queries:
-        print(f"\n{'='*60}")
-        print(f"Query: {query}")
-        intent = parser.parse(query)
-        print(f"Intent: {json.dumps(intent, indent=2)}")
-    
-    # Test cache hit
-    print(f"\n{'='*60}")
-    print("Testing cache with similar query...")
-    similar_query = "cheap flight SFO to Miami"  # Should hit cache
-    intent = parser.parse(similar_query)
-    print(f"Intent: {json.dumps(intent, indent=2)}")
+intent_parser = IntentParser()
+
+
+# ============================================
+# Convenience Function
+# ============================================
+
+def parse_intent(query: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Parse a query and return dict"""
+    intent = intent_parser.parse(query, context)
+    if context:
+        intent = intent_parser.merge_with_context(intent, context)
+    return intent.to_dict()
