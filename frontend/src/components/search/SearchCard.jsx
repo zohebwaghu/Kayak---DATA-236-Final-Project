@@ -27,7 +27,7 @@ const SearchCard = ({
   const showThumbnail = Boolean(thumbnailUrl || thumbnailFallback);
 
   return (
-    <div className="flight-card">
+    <div className="flight-card fade-in-up">
       <div className="flight-card-main">
         {/* Thumbnail (optional) */}
         {showThumbnail && (
