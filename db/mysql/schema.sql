@@ -118,12 +118,14 @@ CREATE TABLE `flights` (
   `departure_ts_utc` DATETIME(3) NOT NULL,
   `arrival_ts_utc` DATETIME(3) NOT NULL,
   `duration_min` INT UNSIGNED NOT NULL,
+  `flight_class` ENUM('economy', 'business', 'first') NOT NULL DEFAULT 'economy', -- Flight class (required field)
   `ticket_price_usd` DECIMAL(10,2) NOT NULL,
   `total_available_seats` INT UNSIGNED NOT NULL,
   `rating_avg` DECIMAL(3,2) NULL,
   `created_at_utc` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`flight_id`),
   KEY `ix_flights_route_time` (`departure_airport`,`arrival_airport`,`departure_ts_utc`),
+  KEY `ix_flights_class` (`flight_class`),
   CONSTRAINT `fk_flights_dep_airport` FOREIGN KEY (`departure_airport`) REFERENCES `airports` (`iata_code`),
   CONSTRAINT `fk_flights_arr_airport` FOREIGN KEY (`arrival_airport`) REFERENCES `airports` (`iata_code`),
   CONSTRAINT `chk_flights_times` CHECK (`arrival_ts_utc` > `departure_ts_utc`)
