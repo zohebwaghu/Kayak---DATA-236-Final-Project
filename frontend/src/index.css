@@ -1,20 +1,88 @@
+:root {
+  /* --- Color Palette --- */
+  --primary-orange: #ff690f;
+  --primary-orange-hover: #e85f00;
+  --primary-gradient: linear-gradient(135deg, #ff690f 0%, #ff8a3d 100%);
+  
+  --dark-navy: #192024;
+  --slate-gray: #3a4856;
+  --light-gray: #8390a2;
+  --off-white: #f5f7fa;
+  --pure-white: #ffffff;
+  
+  /* --- Glassmorphism --- */
+  --glass-bg: rgba(255, 255, 255, 0.85);
+  --glass-border: rgba(255, 255, 255, 0.5);
+  --glass-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.07);
+  
+  /* --- Typography --- */
+  --font-heading: 'Outfit', sans-serif;
+  --font-body: 'Inter', sans-serif;
+}
+
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
+  font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background-color: var(--off-white);
+  color: var(--dark-navy);
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
+  margin: 0;
 }
 
 code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
 }
+
+/* --- Utilities --- */
+
+.glass-panel {
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+}
+
+.btn-primary {
+  background: var(--primary-gradient);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 20px;
+  font-family: var(--font-heading);
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 20px rgba(255, 105, 15, 0.3);
+}
+
+.fade-in-up {
+  animation: fadeInUp 0.6s ease-out forwards;
+  opacity: 0;
+  transform: translateY(20px);
+}
+
+@keyframes fadeInUp {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* --- Legacy / Specific Overrides --- */
 
 /* Signup page background similar to Kayak hero section */
 .signup-page-bg {
-  background-color: #f3f4f6; /* light gray */
+  background-color: var(--off-white);
 }
 
 /* Centered card with rounded corners like Kayak’s modal */
@@ -26,7 +94,7 @@ code {
 
 /* Brand accent colors inspired by Kayak */
 .kayak-accent-dot {
-  color: #ff6900; 
+  color: var(--primary-orange); 
 }
 
 .kayak-word {
@@ -35,23 +103,24 @@ code {
 
 /* Primary action button */
 .btn-kayak {
-  background-color: #ff6900;
-  border-color: #ff6900;
+  background: var(--primary-gradient);
+  border: none;
   color: #ffffff;
   font-weight: 600;
   border-radius: 999px;
+  font-family: var(--font-heading);
 }
 
 .btn-kayak:hover,
 .btn-kayak:focus {
-  background-color: #e85f00;
-  border-color: #e85f00;
+  background: linear-gradient(135deg, #e85f00 0%, #ff7b29 100%);
   color: #ffffff;
+  box-shadow: 0 4px 12px rgba(255, 105, 15, 0.25);
 }
 
 /* Login page background similar to signup */
 .login-page-bg {
-  background-color: #f3f4f6;
+  background-color: var(--off-white);
 }
 
 /* Centered auth card */
@@ -61,26 +130,24 @@ code {
   border-radius: 24px;
 }
 
-/* Optional: small tweak so bottom text is nicely aligned */
 .login-legal-text {
   text-align: left;
 }
 
-/* (Optional, currently unused but kept for future) outline button style */
 .btn-kayak-outline {
   border-radius: 999px;
-  border-width: 1.5px;
-  border-color: #d1d5db;
+  border: 1.5px solid #d1d5db;
   background-color: #ffffff;
-  color: #111827;
+  color: var(--dark-navy);
   font-weight: 500;
+  font-family: var(--font-heading);
 }
 
 .btn-kayak-outline:hover,
 .btn-kayak-outline:focus {
   background-color: #f9fafb;
   border-color: #9ca3af;
-  color: #111827;
+  color: var(--dark-navy);
 }
 
 
