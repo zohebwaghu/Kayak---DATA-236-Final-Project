@@ -419,64 +419,69 @@ async def generate_ai_response(query: str, user_id: str, session_id: str = None,
     recommendations = []
     query_lower = query.lower()
     
-    if any(word in query_lower for word in ["flight", "fly", "plane", "airport"]):
-        flights = [
-            {"type": "flight", "id": "FLT001", "origin": "SFO", "destination": "MIA", 
-             "price": 299, "avg_price": 400, "availability": 3, "rating": 4.5},
-            {"type": "flight", "id": "FLT002", "origin": "SFO", "destination": "MIA", 
-             "price": 249, "avg_price": 350, "availability": 8, "rating": 4.2},
-        ]
-        for flight in flights:
-            if DEAL_SCORER_AVAILABLE:
-                try:
-                    score = calculate_deal_score(
-                        current_price=flight["price"],
-                        avg_30d_price=flight["avg_price"],
-                        availability=flight["availability"],
-                        rating=flight["rating"]
-                    )
-                    flight["score"] = score.total_score
-                    flight["is_deal"] = score.is_deal
-                    flight["quality"] = get_deal_quality(score.total_score)
-                except Exception as e:
-                    flight["score"] = 70
-            recommendations.append(flight)
-    
-    elif any(word in query_lower for word in ["hotel", "stay", "room", "accommodation"]):
-        hotels = [
-            {"type": "hotel", "id": "HTL001", "name": "Miami Beach Resort", "location": "Miami Beach",
-             "price": 189, "avg_price": 250, "availability": 2, "rating": 4.8},
-            {"type": "hotel", "id": "HTL002", "name": "Downtown Miami Hotel", "location": "Downtown",
-             "price": 129, "avg_price": 160, "availability": 10, "rating": 4.3},
-        ]
-        for hotel in hotels:
-            if DEAL_SCORER_AVAILABLE:
-                try:
-                    score = calculate_deal_score(
-                        current_price=hotel["price"],
-                        avg_30d_price=hotel["avg_price"],
-                        availability=hotel["availability"],
-                        rating=hotel["rating"]
-                    )
-                    hotel["score"] = score.total_score
-                    hotel["is_deal"] = score.is_deal
-                except Exception as e:
-                    hotel["score"] = 75
-            recommendations.append(hotel)
-    
-    elif any(word in query_lower for word in ["bundle", "package", "together", "combo"]):
-        recommendations = [
-            {
-                "type": "bundle",
-                "id": "BND001",
-                "flight": {"id": "FLT001", "origin": "SFO", "destination": "MIA", "price": 299},
-                "hotel": {"id": "HTL001", "name": "Miami Beach Resort", "price": 189, "nights": 3},
-                "total_price": 856,
-                "savings": 100,
-                "score": 88,
-                "is_deal": True
-            }
-        ]
+    try:
+        if any(word in query_lower for word in ["flight", "fly", "plane", "airport"]):
+            # Call search-service for flights
+            async with httpx.AsyncClient() as client:
+                # Extract basic entities if possible, otherwise default
+                # In a real app, we'd use the intent parser here
+                params = {"limit": 5}
+                if "sfo" in query_lower: params["origin"] = "SFO"
+                if "jfk" in query_lower: params["destination"] = "JFK"
+                if "miami" in query_lower or "mia" in query_lower: params["destination"] = "MIA"
+                if "london" in query_lower or "lhr" in query_lower: params["destination"] = "LHR"
+                
+                response = await client.get("http://search-service:3003/api/v1/search/flights", params=params, timeout=5.0)
+                if response.status_code == 200:
+                    data = response.json()
+                    flights = data.get("data", [])
+                    for flight in flights:
+                        flight["type"] = "flight"
+                        # Add score if available
+                        if DEAL_SCORER_AVAILABLE:
+                            try:
+                                score = calculate_deal_score(
+                                    current_price=flight.get("price", 0),
+                                    avg_30d_price=flight.get("price", 0) * 1.2, # Mock avg
+                                    availability=flight.get("seatsRemaining", 10),
+                                    rating=4.5
+                                )
+                                flight["score"] = score.total_score
+                                flight["is_deal"] = score.is_deal
+                            except:
+                                flight["score"] = 80
+                    recommendations.extend(flights)
+        
+        elif any(word in query_lower for word in ["hotel", "stay", "room", "accommodation"]):
+            # Call search-service for hotels
+            async with httpx.AsyncClient() as client:
+                params = {"limit": 5}
+                if "miami" in query_lower: params["city"] = "Miami"
+                if "paris" in query_lower: params["city"] = "Paris"
+                
+                response = await client.get("http://search-service:3003/api/v1/search/hotels", params=params, timeout=5.0)
+                if response.status_code == 200:
+                    data = response.json()
+                    hotels = data.get("data", [])
+                    for hotel in hotels:
+                        hotel["type"] = "hotel"
+                        if DEAL_SCORER_AVAILABLE:
+                            try:
+                                score = calculate_deal_score(
+                                    current_price=hotel.get("pricePerNight", 0),
+                                    avg_30d_price=hotel.get("pricePerNight", 0) * 1.1,
+                                    availability=5,
+                                    rating=hotel.get("rating", 4.0)
+                                )
+                                hotel["score"] = score.total_score
+                                hotel["is_deal"] = score.is_deal
+                            except:
+                                hotel["score"] = 80
+                    recommendations.extend(hotels)
+                    
+    except Exception as e:
+        logger.error(f"Error fetching recommendations: {e}")
+        # Fallback to empty list or error message in response
     
     return {
         "response": llm_response,
