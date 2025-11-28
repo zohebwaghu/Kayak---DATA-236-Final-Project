@@ -1,577 +1,626 @@
 # AI Recommendation Service
 
-Intelligent travel recommendation engine with conversational search, real-time deal monitoring, and LLM-powered assistance.
-
-## 🎯 Core Features
-
-### 1. Refine Without Starting Over
-Conversational travel search that remembers context. Users can iteratively refine their searches without repeating information.
-
-```
-User: "Weekend trip to Miami under $800"
-AI: [Shows 5 bundles]
-User: "Make it beachfront"
-AI: [Refines to beachfront hotels, shows what changed]
-```
-
-### 2. Keep an Eye on It
-Real-time price and inventory monitoring with WebSocket notifications.
-
-- Watch specific bundles, flights, or hotels
-- Get notified when prices drop below threshold
-- Alerts when availability is running low
-
-### 3. Decide with Confidence
-Price analysis with historical context and AI recommendations.
-
-- Current price vs 30-day average
-- Price trend (rising/falling/stable)
-- Verdict: Excellent Deal → Above Average
-- Buy/wait recommendation
-
-### 4. Book or Hand Off Cleanly
-Complete pricing breakdown before booking.
-
-- Itemized quote (base fare, taxes, fees)
-- Bundle discounts applied
-- Cancellation policy summary
-- One-click booking initiation
+Intelligent travel recommendation engine with conversational AI, built for the Kayak clone project (DATA 236 Final Project).
 
 ---
 
-## 🏗️ Architecture
+## Technology Stack Overview
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         Frontend                                 │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────────┐   │
-│  │ AiMode   │ │ AiResults│ │ AiBundle │ │ AiChatWidget     │   │
-│  │ Panel    │ │          │ │ Card     │ │ (floating)       │   │
-│  └────┬─────┘ └────┬─────┘ └────┬─────┘ └────────┬─────────┘   │
-│       │            │            │                 │             │
-│       └────────────┴────────────┴─────────────────┘             │
-│                            │                                     │
-│                    ┌───────▼───────┐                            │
-│                    │  aiService.js │                            │
-│                    └───────┬───────┘                            │
-└────────────────────────────┼────────────────────────────────────┘
-                             │ HTTP/WebSocket
-┌────────────────────────────▼────────────────────────────────────┐
-│                      AI Service (FastAPI)                        │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │                      main.py                             │    │
-│  │  /chat  /bundles  /watches  /analysis  /quotes  /events │    │
-│  └─────────────────────────────────────────────────────────┘    │
-│       │         │         │          │         │                 │
-│  ┌────▼────┐ ┌──▼───┐ ┌───▼───┐ ┌────▼────┐ ┌──▼──┐            │
-│  │Concierge│ │Bundle│ │ Watch │ │  Price  │ │Quote│            │
-│  │ Agent   │ │Matcher│ │Manager│ │Analyzer │ │ Gen │            │
-│  └────┬────┘ └──┬───┘ └───┬───┘ └────┬────┘ └──┬──┘            │
-│       │         │         │          │         │                 │
-│  ┌────▼─────────▼─────────▼──────────▼─────────▼────┐           │
-│  │              LLM Provider (OpenAI / Ollama)       │           │
-│  └──────────────────────────────────────────────────┘           │
-│       │                   │                    │                 │
-│  ┌────▼────┐         ┌────▼────┐         ┌────▼────┐            │
-│  │  Redis  │         │  MySQL  │         │  Kafka  │            │
-│  │ (cache) │         │ (data)  │         │ (events)│            │
-│  └─────────┘         └─────────┘         └─────────┘            │
-└─────────────────────────────────────────────────────────────────┘
-```
+| Category | Technology | Purpose |
+|----------|------------|---------|
+| **Framework** | FastAPI | REST API + WebSocket real-time events |
+| **LLM Integration** | LangChain | LLM integration, intent parsing, response generation |
+| **Agent Architecture** | LangGraph | Multi-agent orchestration with StateGraph |
+| **Caching** | Redis Cache | Session Store, Deals Cache, Semantic Cache |
+| **Message Queue** | Apache Kafka | Event-driven streaming pipeline |
+| **Multi-Agent** | Orchestrator-Workers | 6 specialized agents with supervisor routing |
+| **ReAct Pattern** | Reasoning + Acting | Thought-Action-Observation reasoning loop |
+| **MRKL Tools** | Modular Tools | 7 specialized tools (search_flights, search_hotels, etc.) |
+| **RAG** | Ollama Embeddings | Semantic similarity search with mxbai-embed-large |
+| **Memory** | Session-based | Multi-turn conversation context preservation |
 
 ---
 
-## 📁 Project Structure
+## Architecture
 
-### Backend (`ai/`)
+### Multi-Agent System (LangGraph)
 
-```
-ai/
-├── main.py                    # FastAPI app with all endpoints
-├── config.py                  # Environment configuration
-├── requirements.txt           # Python dependencies
-├── Dockerfile                 # Container build
-├── .env.example               # Environment template
-│
-├── algorithms/
-│   ├── deal_scorer.py         # Deal scoring (0-100)
-│   ├── fit_scorer.py          # User preference matching
-│   └── bundle_matcher.py      # Flight + Hotel bundling
-│
-├── agents/
-│   ├── concierge_agent.py     # LLM chat agent
-│   └── deals_agent.py         # Kafka deals processor
-│
-├── llm/
-│   ├── llm_router.py          # OpenAI/Ollama router
-│   ├── openai_client.py       # OpenAI integration
-│   └── ollama_client.py       # Ollama integration
-│
-├── services/
-│   ├── chat.py                # Chat service logic
-│   ├── session_store.py       # Session management
-│   ├── bundles.py             # Bundle operations
-│   ├── watches.py             # Watch CRUD
-│   ├── price_analysis.py      # Price analytics
-│   └── quotes.py              # Quote generation
-│
-├── cache/
-│   ├── semantic_cache.py      # LLM response caching
-│   └── redis_client.py        # Redis connection
-│
-└── kafka_client/
-    ├── kafka_consumer.py      # Event consumer
-    └── kafka_producer.py      # Event producer
-```
-
-### Frontend (`frontend/src/`)
+The AI service implements an **Orchestrator-Workers Pattern** using LangGraph's StateGraph (matches DATA 236 course material):
 
 ```
-frontend/src/
-├── api/
-│   └── aiService.js           # AI API client
-│
-├── components/ai/
-│   ├── ai.css                 # All AI component styles
-│   ├── AiBundleCard.jsx       # Bundle display card
-│   ├── AiChangeHighlight.jsx  # Refinement diff display
-│   ├── AiWatchesPanel.jsx     # Watch management
-│   ├── AiPriceAnalysis.jsx    # Price analysis modal
-│   ├── AiQuoteModal.jsx       # Booking quote modal
-│   ├── AiPolicyInfo.jsx       # Cancellation policies
-│   └── AiChatWidget.jsx       # Floating chat + notifications
-│
-└── pages/search/
-    ├── AiModePanel.jsx        # AI search input (teammate's)
-    ├── AiResults.jsx          # AI results container
-    └── HomeSearchPage.jsx     # Main page with AI integration
+                ┌─────────────────┐
+                │   supervisor    │  (Parse intent, route to worker)
+                └────────┬────────┘
+                         │
+    ┌────────────────────┼────────────────────┐
+    │          │         │         │          │
+    ▼          ▼         ▼         ▼          ▼
+┌────────┐┌────────┐┌──────────┐┌────────┐┌──────────┐
+│ policy ││ watch  ││  price   ││ quote  ││recommend │
+│ agent  ││ agent  ││ analysis ││ agent  ││  agent   │
+└────┬───┘└───┬────┘└────┬─────┘└───┬────┘└────┬─────┘
+     └────────┴──────────┴──────────┴──────────┘
+                         │
+                ┌────────▼────────┐
+                │   synthesizer   │  (Format final response)
+                └────────┬────────┘
+                         ▼
+                        END
 ```
+
+### Agent Descriptions
+
+| Agent | Responsibility | Trigger Keywords |
+|-------|----------------|------------------|
+| **Supervisor** | Parse intent, route to appropriate worker | Entry point for all queries |
+| **Policy Agent** | Answer policy questions (cancellation, pets, parking) | "cancel", "refund", "pet", "policy" |
+| **Watch Agent** | Create price/inventory alerts | "watch", "alert", "notify", "track" |
+| **Price Analysis Agent** | Evaluate if a deal is good | "good deal", "worth it", "compare" |
+| **Quote Agent** | Generate complete booking quotes | "book", "reserve", "quote", "checkout" |
+| **Recommendation Agent** | Find flight+hotel bundles | Default for travel queries |
+| **Synthesizer** | Format final response | All responses pass through |
 
 ---
 
-## 🚀 Deployment Guide
+## Core Technologies In Detail
 
-### For Teammates: Quick Start
+### 1. FastAPI (REST API + WebSocket)
 
-#### Prerequisites
-- Docker Desktop installed and running
-- Git
+```python
+from fastapi import FastAPI, WebSocket
 
-#### Step 1: Clone and Navigate
+app = FastAPI(title="AI Recommendation Service")
 
-```bash
-git clone <repo-url>
-cd Kayak---DATA-236-Final-Project
+# REST endpoints
+@app.post("/api/ai/chat")
+async def chat(request: ChatRequest): ...
+
+# WebSocket for real-time events
+@app.websocket("/api/ai/events")
+async def websocket_events(websocket: WebSocket): ...
 ```
 
-#### Step 2: Configure LLM Provider
+**Features:**
+- Async REST API for high concurrency
+- WebSocket for real-time price alerts and deal notifications
+- Auto-generated OpenAPI documentation (`/docs`)
 
-Choose ONE option:
+### 2. LangChain (LLM Integration)
 
-**Option A: OpenAI (Recommended for demo)**
-```bash
-cd ai
-cp .env.example .env
-# Edit .env and add your OpenAI key:
-# OPENAI_API_KEY=sk-your-key-here
+```python
+from langchain_openai import ChatOpenAI
+from langchain.agents import create_openai_functions_agent
+
+# LLM with function calling
+llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0.7)
 ```
 
-**Option B: Ollama (Free, local)**
-```bash
-# Install Ollama from https://ollama.ai/download
-ollama serve
-ollama pull llama3.2
+**Usage:**
+- Intent parsing with structured output
+- Natural language response generation
+- Context-aware conversation handling
 
-cd ai
-cp .env.example .env
-# Edit .env, leave OPENAI_API_KEY empty:
-# OPENAI_API_KEY=
+### 3. LangGraph (Multi-Agent Orchestration)
+
+```python
+from langgraph.graph import StateGraph, END
+
+# Define shared state
+class TravelState(TypedDict):
+    query: str
+    intent: str
+    agent_output: Dict
+    response: str
+
+# Build graph
+workflow = StateGraph(TravelState)
+workflow.add_node("supervisor", supervisor_node)
+workflow.add_node("policy_agent", policy_agent_node)
+workflow.add_node("watch_agent", watch_agent_node)
+workflow.add_node("price_analysis_agent", price_analysis_agent_node)
+workflow.add_node("quote_agent", quote_agent_node)
+workflow.add_node("recommendation_agent", recommendation_agent_node)
+workflow.add_node("synthesizer", synthesizer_node)
+
+# Conditional routing
+workflow.add_conditional_edges("supervisor", route_to_agent, {
+    "policy_agent": "policy_agent",
+    "watch_agent": "watch_agent",
+    "price_analysis_agent": "price_analysis_agent",
+    "quote_agent": "quote_agent",
+    "recommendation_agent": "recommendation_agent"
+})
+
+# All agents -> synthesizer -> END
+workflow.add_edge("policy_agent", "synthesizer")
+workflow.add_edge("synthesizer", END)
 ```
 
-#### Step 3: Start All Services
+**Key Features:**
+- **StateGraph**: Shared state across all nodes
+- **Conditional Edges**: Dynamic routing based on intent
+- **Orchestrator-Workers Pattern**: Supervisor delegates to specialized agents
 
-```bash
-cd middleware
-docker-compose up -d --build
+### 4. Redis Cache (Session, Deals, Semantic)
+
+```python
+from config import settings
+
+# Session Store - Multi-turn conversation memory
+session_store = SessionStore(
+    redis_host=settings.REDIS_HOST,
+    redis_port=settings.REDIS_PORT
+)
+
+# Deals Cache - Scored and tagged deals
+deals_cache = DealsCache(
+    redis_host=settings.REDIS_HOST,
+    redis_port=settings.REDIS_PORT
+)
 ```
 
-#### Step 4: Verify
+**Cache Types:**
+| Cache | Purpose | TTL |
+|-------|---------|-----|
+| **Session Store** | User conversation context, search params | 24 hours |
+| **Deals Cache** | Normalized, scored, tagged deals | 24 hours |
+| **Policy Store** | Cached policy information per listing | 5 minutes |
+| **Watch Store** | Active price/inventory watches | Persistent |
+| **Semantic Cache** | Similar query results (embedding-based) | 5 minutes |
 
-```bash
-# Check all containers are healthy
-docker ps
+### 5. Apache Kafka (Event-Driven Pipeline)
 
-# Test AI service
-curl http://localhost:8000/api/ai/health
+```
+┌──────────────┐     ┌─────────────┐     ┌────────────┐     ┌────────────┐
+│ raw_supplier │ --> │  Normalize  │ --> │   Score    │ --> │    Tag     │
+│    _feeds    │     │             │     │            │     │            │
+└──────────────┘     └─────────────┘     └────────────┘     └────────────┘
+                                                                   │
+                                                                   ▼
+                                                          ┌────────────────┐
+                                                          │  deal.events   │
+                                                          │ (WebSocket)    │
+                                                          └────────────────┘
 ```
 
-#### Step 5: Start Frontend
+**Kafka Topics:**
+| Topic | Description |
+|-------|-------------|
+| `raw_supplier_feeds` | Raw deal data from suppliers |
+| `deals.normalized` | Standardized deal format |
+| `deals.scored` | Deals with quality scores (0-100) |
+| `deals.tagged` | Deals with tags (pet-friendly, refundable) |
+| `deal.events` | Real-time deal notifications |
 
-```bash
-cd frontend
-npm install
-npm start
+### 6. Multi-Agent (Orchestrator-Workers Pattern)
+
+The system follows the **Orchestrator-Workers** design pattern from DATA 236:
+
+```python
+def supervisor_node(state: TravelState) -> TravelState:
+    """Supervisor: Parse intent and route to worker"""
+    query = state["query"].lower()
+    
+    # Route based on keywords
+    if any(kw in query for kw in ["cancel", "refund", "pet"]):
+        state["intent"] = "policy"
+    elif any(kw in query for kw in ["watch", "alert", "notify"]):
+        state["intent"] = "watch"
+    elif any(kw in query for kw in ["good deal", "worth it"]):
+        state["intent"] = "price_analysis"
+    elif any(kw in query for kw in ["book", "reserve", "quote"]):
+        state["intent"] = "quote"
+    else:
+        state["intent"] = "recommendation"
+    
+    return state
+
+def route_to_agent(state: TravelState) -> str:
+    """Router function for conditional edges"""
+    return f"{state['intent']}_agent"
 ```
 
-Open http://localhost:3000 and click **AI Mode** tab.
+### 7. ReAct Pattern (Reasoning + Acting)
+
+The agents implement ReAct-style reasoning:
+
+```
+User: "I want a pet-friendly hotel in Miami under $500"
+
+Thought: User wants to go to Miami with pets, budget constraint $500
+Action: search_deals(destination="MIA", tags=["pet-friendly"], max_price=500)
+Observation: Found 3 pet-friendly hotels under $500
+
+Thought: Should recommend the highest-scored bundle
+Action: generate_response(bundles=[...])
+Observation: Response generated
+
+Final Answer: "Here are 3 pet-friendly options for Miami..."
+```
+
+### 8. MRKL-Style Tools
+
+The system defines 7 specialized tools:
+
+| Tool | Function | Input | Output |
+|------|----------|-------|--------|
+| `search_flights` | Search flight deals | origin, destination, dates | List[Flight] |
+| `search_hotels` | Search hotel deals | destination, dates, tags | List[Hotel] |
+| `get_recommendations` | Get bundle recommendations | destination, budget, constraints | List[Bundle] |
+| `analyze_price` | Check if price is good | listing_id, current_price | PriceAnalysis |
+| `create_watch` | Set price/inventory alert | listing_id, threshold, type | Watch |
+| `get_policy` | Get cancellation/policy info | listing_id, question | PolicyAnswer |
+| `generate_quote` | Create booking quote | bundle_id | Quote |
+
+### 9. RAG (Retrieval-Augmented Generation)
+
+```python
+from ollama import Client
+
+# Generate embeddings for semantic similarity
+ollama_client = Client(host=settings.OLLAMA_BASE_URL)
+embedding = ollama_client.embeddings(
+    model=settings.OLLAMA_EMBEDDING_MODEL,  # mxbai-embed-large
+    prompt=query
+)
+
+# Semantic cache: find similar past queries
+similarity = cosine_similarity(query_embedding, cached_embedding)
+if similarity > SEMANTIC_SIMILARITY_THRESHOLD:  # 0.85
+    return cached_response
+```
+
+**RAG Components:**
+- **Embedding Model**: Ollama mxbai-embed-large (local, free)
+- **Similarity Threshold**: 0.85 for semantic cache hits
+- **Vector Storage**: Redis-based (extensible to ChromaDB/Pinecone)
+
+### 10. Memory (Session-based Context)
+
+```python
+class SessionStore:
+    def get_or_create_session(user_id, session_id) -> str
+    def get_search_params(session_id) -> Dict
+    def merge_intent(session_id, new_intent) -> Dict
+    def save_recommendations(session_id, bundles) -> None
+    def get_previous_recommendations(session_id) -> List[Dict]
+```
+
+**Memory Features:**
+- **Conversation Context**: Preserves search parameters across turns
+- **Intent Merging**: "Make it pet-friendly" updates existing search
+- **Recommendation History**: Track what was shown to user
+- **Change Detection**: Highlight what changed after refinement
 
 ---
 
-## 📡 API Reference
+## API Endpoints
 
 ### Chat API
+```http
+POST /api/ai/chat
+Content-Type: application/json
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/ai/chat` | POST | Send message, get AI response + bundles |
-| `/api/ai/chat/history/{session_id}` | GET | Get conversation history |
-| `/api/ai/chat/history/{session_id}` | DELETE | Clear session |
-
-**Chat Request:**
-```json
 {
-  "message": "Weekend trip to Miami under $800",
+  "query": "I want to go to Miami next week with pets",
   "user_id": "user123",
   "session_id": "optional-session-id"
 }
 ```
 
-**Chat Response:**
-```json
-{
-  "response": "I found 5 great weekend packages to Miami...",
-  "bundles": [...],
-  "suggestions": ["Make it beachfront", "Add car rental"],
-  "changes": null,
-  "session_id": "abc123"
-}
-```
-
 ### Bundles API
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/ai/bundles` | GET | List bundles with filters |
-| `/api/ai/bundles/search` | POST | Search bundles |
-| `/api/ai/bundles/{id}` | GET | Get bundle details |
-| `/api/ai/bundles/popular` | GET | Popular destinations |
-
-**Bundle Object:**
-```json
-{
-  "bundle_id": "bun_123",
-  "name": "Miami Beach Getaway",
-  "destination": "Miami",
-  "origin": "SFO",
-  "total_price": 816,
-  "savings": 82,
-  "savings_percent": 9.1,
-  "deal_score": 78,
-  "fit_score": 85,
-  "flight": {
-    "airline": "Delta",
-    "price": 320,
-    "stops": 0
-  },
-  "hotel": {
-    "name": "Oceanfront Resort",
-    "price_per_night": 165,
-    "nights": 3,
-    "rating": 4.5
-  },
-  "why_this": "Direct flight + beachfront hotel matches your preferences",
-  "what_to_watch": "Only 3 rooms left at this rate"
-}
+```http
+GET /api/ai/bundles?destination=MIA&budget=1500&tags=pet-friendly
 ```
 
 ### Watches API
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/ai/watches` | POST | Create watch |
-| `/api/ai/watches/{user_id}` | GET | List user's watches |
-| `/api/ai/watches/{watch_id}` | DELETE | Delete watch |
-| `/api/ai/watches/{watch_id}/toggle` | POST | Pause/resume watch |
-
-**Create Watch:**
-```json
+```http
+POST /api/ai/watches
 {
   "user_id": "user123",
-  "listing_type": "bundle",
-  "listing_id": "bun_123",
-  "listing_name": "Miami Beach Getaway",
+  "listing_id": "bundle_001",
   "watch_type": "price",
-  "price_threshold": 750
+  "threshold": 800
 }
 ```
 
 ### Price Analysis API
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/ai/analysis/{type}/{id}` | GET | Get price analysis |
-| `/api/ai/analysis/bundle/{id}` | GET | Bundle price analysis |
-| `/api/ai/analysis/verdict` | POST | Quick verdict |
-
-**Analysis Response:**
-```json
-{
-  "current_price": 816,
-  "avg_30d_price": 892,
-  "min_30d_price": 756,
-  "max_30d_price": 1050,
-  "price_vs_avg_percent": -8.5,
-  "price_trend": "falling",
-  "verdict": "GREAT_DEAL",
-  "verdict_explanation": "This is 8.5% below the 30-day average",
-  "recommendation": "Book now - prices typically rise closer to travel dates",
-  "confidence": 0.85
-}
-```
-
-### Quotes API
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/ai/quotes` | POST | Generate quote |
-| `/api/ai/quotes/{id}` | GET | Get quote |
-| `/api/ai/quotes/{id}/refresh` | POST | Refresh expired quote |
-| `/api/ai/quotes/{id}/book` | POST | Initiate booking |
-| `/api/ai/policies/{type}/{id}` | GET | Get listing policies |
-
-**Quote Response:**
-```json
-{
-  "quote_id": "qt_123",
-  "flight_quote": {
-    "base_fare": 280,
-    "taxes": 42,
-    "carrier_fee": 0,
-    "subtotal": 322
-  },
-  "hotel_quote": {
-    "rate_per_night": 165,
-    "nights": 3,
-    "room_total": 495,
-    "taxes": 59,
-    "subtotal": 554
-  },
-  "summary": {
-    "subtotal": 876,
-    "bundle_discount": 60,
-    "grand_total": 816
-  },
-  "quote_valid_until": "2025-01-15T23:59:59Z",
-  "cancellation_summary": "Free cancellation until Jan 10"
-}
+```http
+GET /api/ai/price-analysis/bundle/bundle_001
 ```
 
 ### WebSocket Events
-
-| Endpoint | Description |
-|----------|-------------|
-| `/api/ai/events?user_id=xxx` | Real-time event stream |
-
-**Event Types:**
-```json
-{"event_type": "price_alert", "title": "Price Drop!", "message": "Miami bundle dropped to $756"}
-{"event_type": "inventory_alert", "title": "Low Availability", "message": "Only 2 rooms left"}
-{"event_type": "deal_found", "title": "New Deal", "message": "85-score deal to NYC"}
-{"event_type": "watch_triggered", "title": "Watch Alert", "message": "Your Miami watch triggered"}
+```javascript
+const ws = new WebSocket('ws://localhost:8000/api/ai/events?user_id=user123');
+ws.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  // Handle: price_alert, inventory_alert, deal_found, watch_triggered
+};
 ```
 
 ---
 
-## 🧮 Deal Scoring Algorithm
+## User Journeys
 
-Scores range from 0-100:
+The AI service supports 5 key user journeys:
 
-| Component | Max Points | Calculation |
-|-----------|------------|-------------|
-| Price Advantage | 40 | `min(40, discount_percent * 2)` |
-| Scarcity | 30 | `30 if avail <= 3 else 20 if avail <= 5 else 10` |
-| Rating | 20 | `(rating - 3.0) * 10` for rating >= 3.0 |
-| Promotion | 10 | `10` if active promo else `0` |
-
-**Verdicts:**
-- 80+: `EXCELLENT_DEAL` 🏆
-- 70-79: `GREAT_DEAL` 👍
-- 60-69: `GOOD_DEAL` ✓
-- 50-59: `FAIR_PRICE` —
-- <50: `ABOVE_AVERAGE` ⚠️
+| Journey | Description | Example |
+|---------|-------------|---------|
+| **1. Tell me what to book** | Get personalized bundle recommendations | "I want a beach vacation under $1500" |
+| **2. Refine without starting over** | Update search without losing context | "Make it pet-friendly" |
+| **3. Keep an eye on it** | Set price/availability alerts | "Watch this and alert me if it drops below $500" |
+| **4. Decide with confidence** | Get price analysis and comparison | "Is this actually a good deal?" |
+| **5. Book or hand off cleanly** | Generate complete booking quote | "Book option 1" |
 
 ---
 
-## 🔧 Environment Variables
+## Project Structure
+
+```
+ai/
+├── agents/
+│   ├── langgraph_concierge.py   # LangGraph multi-agent implementation
+│   ├── concierge_agent_v2.py    # Original agent (fallback)
+│   └── deals_agent_runner.py    # Kafka pipeline processor
+├── api/
+│   ├── bundles.py               # Bundle recommendations API
+│   ├── watches.py               # Price alert API
+│   ├── price_analysis.py        # Deal analysis API
+│   ├── quotes.py                # Booking quotes API
+│   ├── chat.py                  # Chat API
+│   └── events_websocket.py      # WebSocket events
+├── interfaces/
+│   ├── session_store.py         # Redis session management
+│   ├── deals_cache.py           # Redis deals cache
+│   └── policy_store.py          # Policy information store
+├── kafka_client/
+│   ├── kafka_producer.py        # Async Kafka producer
+│   ├── kafka_consumer.py        # Async Kafka consumer
+│   └── message_schemas.py       # Event schemas
+├── llm/
+│   ├── intent_parser.py         # NLU intent extraction
+│   ├── explainer.py             # "Why this deal" explanations
+│   └── quote_generator.py       # Quote generation
+├── algorithms/
+│   └── deal_scorer.py           # Deal scoring algorithm
+├── config.py                    # Configuration management
+├── main.py                      # FastAPI application
+├── requirements.txt             # Python dependencies
+└── Dockerfile                   # Container definition
+```
+
+---
+
+## Configuration
+
+Environment variables (set in docker-compose.yml):
 
 ```bash
-# LLM Configuration
-OPENAI_API_KEY=                    # Leave empty for Ollama
+# OpenAI (optional - can use Ollama instead)
+OPENAI_API_KEY=sk-...
 OPENAI_MODEL=gpt-3.5-turbo
-OLLAMA_BASE_URL=http://host.docker.internal:11434
-OLLAMA_MODEL=llama3.2
 
-# Database
-DB_HOST=mysql
-DB_PORT=3306
-DB_USER=root
-DB_PASSWORD=password
-DB_NAME_USERS=kayak_users
-DB_NAME_BOOKINGS=kayak_bookings
+# Kafka
+KAFKA_BOOTSTRAP_SERVERS=kafka:9093
+KAFKA_CONSUMER_GROUP=ai-deals-agent
 
 # Redis
 REDIS_HOST=redis
 REDIS_PORT=6379
+REDIS_DB=0
 
-# MongoDB
-MONGO_URI=mongodb://mongo:27017
+# Ollama (local LLM - free alternative to OpenAI)
+OLLAMA_BASE_URL=http://host.docker.internal:11434
+OLLAMA_EMBEDDING_MODEL=mxbai-embed-large
+
+# Database
+MONGO_URI=mongodb://mongodb:27017
 MONGO_DB=kayak_doc
-
-# Kafka
-KAFKA_BOOTSTRAP_SERVERS=kafka:29092
-KAFKA_CONSUMER_GROUP=ai-deals-agent
-
-# API
-API_HOST=0.0.0.0
-API_PORT=8000
-CORS_ORIGINS=http://localhost:3000
 ```
 
 ---
 
-## 🧪 Testing
+## Running Without OpenAI API Key (Using Ollama)
 
-### Test Chat API
+If you don't have an OpenAI API key, you can run the AI service using **Ollama** for local LLM inference.
+
+### Step 1: Install Ollama
+
+**Windows:**
 ```bash
-curl -X POST http://localhost:8000/api/ai/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message": "Weekend trip to Miami under $800", "user_id": "test123"}'
+# Download from https://ollama.ai/download
+# Or use winget:
+winget install Ollama.Ollama
 ```
 
-### Test Bundles API
+**Mac:**
 ```bash
-curl "http://localhost:8000/api/ai/bundles?destination=Miami&max_price=1000"
+brew install ollama
 ```
 
-### Test WebSocket (using websocat)
+**Linux:**
 ```bash
-websocat "ws://localhost:8000/api/ai/events?user_id=test123"
+curl -fsSL https://ollama.ai/install.sh | sh
 ```
 
-### Health Check
+### Step 2: Pull Required Models
+
 ```bash
-curl http://localhost:8000/api/ai/health
-```
-
-Expected response:
-```json
-{
-  "status": "healthy",
-  "llm_provider": "OpenAI",
-  "services": {
-    "redis": "connected",
-    "mysql": "connected",
-    "kafka": "connected"
-  }
-}
-```
-
----
-
-## 🐛 Troubleshooting
-
-### "Cannot connect to Ollama"
-```bash
-# Ensure Ollama is running
+# Start Ollama service
 ollama serve
 
-# For Docker, use host.docker.internal
-OLLAMA_BASE_URL=http://host.docker.internal:11434
+# Pull embedding model (required for semantic search)
+ollama pull mxbai-embed-large
+
+# Pull LLM model (for chat/intent parsing)
+ollama pull llama3.1:8b
+# Or smaller model for less RAM:
+ollama pull llama3.2:3b
 ```
 
-### "OpenAI API error: Invalid API key"
-1. Verify key at https://platform.openai.com/api-keys
-2. Check `.env` has correct format: `OPENAI_API_KEY=sk-...`
-3. Restart: `docker-compose restart ai-service`
+### Step 3: Update Configuration
 
-### "CORS error in browser"
+Edit `ai/.env` or `middleware/docker-compose.yml`:
+
 ```bash
-# Check CORS_ORIGINS in .env includes your frontend URL
-CORS_ORIGINS=http://localhost:3000
+# Leave OpenAI empty or remove
+OPENAI_API_KEY=
+
+# Ollama configuration
+OLLAMA_BASE_URL=http://host.docker.internal:11434  # Docker
+# Or for local development:
+OLLAMA_BASE_URL=http://localhost:11434
+
+OLLAMA_EMBEDDING_MODEL=mxbai-embed-large
+OLLAMA_CHAT_MODEL=llama3.1:8b
 ```
 
-### "WebSocket connection failed"
-```bash
-# Check AI service is running
-docker logs kayak-ai-service
+### Step 4: Modify Code for Ollama LLM (Optional)
 
-# Verify WebSocket endpoint
+If you want to use Ollama for chat (not just embeddings), update `agents/langgraph_concierge.py`:
+
+```python
+from ollama import Client
+
+ollama_client = Client(host=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"))
+
+def get_llm_response(prompt: str, system_prompt: str = None) -> str:
+    """Get response from Ollama instead of OpenAI"""
+    try:
+        response = ollama_client.chat(
+            model=os.getenv("OLLAMA_CHAT_MODEL", "llama3.1:8b"),
+            messages=[
+                {"role": "system", "content": system_prompt or "You are a helpful travel assistant."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        return response['message']['content']
+    except Exception as e:
+        logger.error(f"Ollama error: {e}")
+        return "I'd be happy to help you find great travel deals."
+```
+
+### Step 5: Verify Ollama is Running
+
+```bash
+# Check Ollama status
+curl http://localhost:11434/api/tags
+
+# Test embedding
+curl http://localhost:11434/api/embeddings -d '{
+  "model": "mxbai-embed-large",
+  "prompt": "Hello world"
+}'
+
+# Test chat
+curl http://localhost:11434/api/chat -d '{
+  "model": "llama3.1:8b",
+  "messages": [{"role": "user", "content": "Hello"}]
+}'
+```
+
+### Resource Requirements for Ollama
+
+| Model | RAM Required | Disk Space |
+|-------|--------------|------------|
+| mxbai-embed-large | ~1GB | ~700MB |
+| llama3.2:3b | ~4GB | ~2GB |
+| llama3.1:8b | ~8GB | ~5GB |
+| llama3.1:70b | ~48GB | ~40GB |
+
+**Recommended minimum**: 8GB RAM for embedding + llama3.2:3b
+
+---
+
+## Dependencies
+
+```txt
+# FastAPI
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.5.0
+websockets>=12.0
+
+# LangChain + LangGraph
+langchain>=0.1.0
+langchain-openai>=0.0.2
+langchain-community>=0.0.10
+langgraph>=0.0.30
+
+# Kafka
+kafka-python>=2.0.2
+
+# OpenAI (optional)
+openai>=1.6.1
+
+# Redis
+redis>=5.0.0
+
+# Ollama (local LLM)
+ollama>=0.1.7
+
+# Data Processing
+pandas>=2.1.0
+numpy>=1.24.0
+```
+
+---
+
+## Running the Service
+
+### With Docker Compose (Recommended)
+
+```bash
+cd middleware
+docker-compose up -d
+docker-compose logs -f ai-service
+```
+
+### Local Development
+
+```bash
+cd ai
+pip install -r requirements.txt
+python main.py
+```
+
+---
+
+## Testing
+
+```bash
+# Test chat endpoint
+curl -X POST http://localhost:8000/api/ai/chat \
+  -H "Content-Type: application/json" \
+  -d '{"query": "I want to go to Miami", "user_id": "test123"}'
+
+# Check health
 curl http://localhost:8000/api/ai/health
-```
 
-### "Bundles returning empty"
-```bash
-# Check database has data
-docker exec -it kayak-mysql mysql -u root -p -e "SELECT COUNT(*) FROM kayak_bookings.flights;"
-
-# Check logs for errors
-docker logs kayak-ai-service --tail 50
+# Check status
+curl http://localhost:8000/api/ai/status
 ```
 
 ---
 
-## 📊 Frontend Components
+## Course Alignment (DATA 236)
 
-### AiModePanel
-Input panel with suggestion chips. Created by teammate.
+This implementation demonstrates:
 
-### AiResults
-Main results container showing:
-- AI response text
-- Change highlights (when refining)
-- Bundle cards list
-- Follow-up suggestions
-
-### AiBundleCard
-Individual bundle display:
-- Rank badge (🏆, 🥈, 🥉)
-- Deal score with color coding
-- Why This (green) / What to Watch (yellow)
-- Price with savings
-- Expandable flight/hotel details
-- Action buttons (Watch, Analyze, Quote, Book)
-
-### AiWatchesPanel
-Watch management:
-- List active watches
-- Create new watches
-- Pause/resume/delete
-
-### AiPriceAnalysis
-Modal showing:
-- Verdict badge
-- Price comparison (current vs avg)
-- 30-day price range slider
-- Trend indicator
-- Recommendation
-
-### AiQuoteModal
-Booking quote modal:
-- Flight breakdown
-- Hotel breakdown
-- Bundle discount
-- Grand total
-- Cancellation summary
-- Book now button
-
-### AiChatWidget
-Floating widget (bottom-right):
-- Chat button with conversation
-- Notification bell with badge
-- Real-time WebSocket events
+| Course Topic | Implementation |
+|--------------|----------------|
+| **Multi-Agent Systems** | LangGraph Orchestrator-Workers pattern with 6 agents |
+| **LangGraph** | StateGraph with conditional routing |
+| **ReAct Pattern** | Thought-Action-Observation reasoning loop |
+| **MRKL Architecture** | 7 specialized tools for each capability |
+| **RAG** | Semantic embeddings with Ollama mxbai-embed-large |
+| **Kafka Streaming** | Event-driven deal processing pipeline (5 topics) |
+| **Redis Caching** | Session, deals, policy, and semantic cache |
+| **Memory** | Session-based multi-turn conversation context |
+| **DevOps** | Docker containerization, environment-based config |
 
 ---
 
-## 📝 License
+## Authors
 
-MIT
+Group 3 - DATA 236 Distributed Systems (Fall 2025)
