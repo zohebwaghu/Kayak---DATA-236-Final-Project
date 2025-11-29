@@ -18,7 +18,7 @@ const rateLimit = require('express-rate-limit');
 const jwt = require('jsonwebtoken');
 const axios = require('axios');
 
-const { createErrorResponse } = require('./shared/errorHandler');
+const { createErrorResponse } = require('../../shared/errorHandler');
 
 const app = express();
 const PORT = process.env.API_GATEWAY_PORT || 3000;
@@ -193,14 +193,14 @@ const proxyToService = async (req, res, serviceName, serviceUrl) => {
 app.post('/api/v1/auth/register', (req, res) => {
   const serviceUrl =
     process.env.USER_SERVICE_URL ||
-    `http://user-service:${process.env.USER_SERVICE_PORT || 3001}`;
+    `http://localhost:${process.env.USER_SERVICE_PORT || 3001}`;
   proxyToService(req, res, 'User Service', serviceUrl);
 });
 
 app.post('/api/v1/auth/login', (req, res) => {
   const serviceUrl =
     process.env.USER_SERVICE_URL ||
-    `http://user-service:${process.env.USER_SERVICE_PORT || 3001}`;
+    `http://localhost:${process.env.USER_SERVICE_PORT || 3001}`;
   proxyToService(req, res, 'User Service', serviceUrl);
 });
 
@@ -209,7 +209,7 @@ app.post('/api/v1/auth/login', (req, res) => {
 app.use('/api/v1/users', authenticateJWT, (req, res) => {
   const serviceUrl =
     process.env.USER_SERVICE_URL ||
-    `http://user-service:${process.env.USER_SERVICE_PORT || 3001}`;
+    `http://localhost:${process.env.USER_SERVICE_PORT || 3001}`;
   proxyToService(req, res, 'User Service', serviceUrl);
 });
 
@@ -218,7 +218,7 @@ app.use('/api/v1/users', authenticateJWT, (req, res) => {
 app.use('/api/v1/search', (req, res) => {
   const serviceUrl =
     process.env.SEARCH_SERVICE_URL ||
-    `http://search-service:${process.env.SEARCH_SERVICE_PORT || 3003}`;
+    `http://localhost:${process.env.SEARCH_SERVICE_PORT || 3003}`;
   proxyToService(req, res, 'Search Service', serviceUrl);
 });
 

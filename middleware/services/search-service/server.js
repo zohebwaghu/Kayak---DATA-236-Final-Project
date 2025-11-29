@@ -184,6 +184,14 @@ app.get('/health', (req, res) => {
  */
 const handleHotelsSearch = async (req, res) => {
   try {
+    // Check if database is connected
+    if (!db) {
+      console.error('❌ Database not connected yet');
+      return res.status(503).json(
+        createErrorResponse(503, 'Service Unavailable', 'Database connection not ready. Please try again in a moment.', req.path)
+      );
+    }
+
     const {
       city,
       minStarRating,
@@ -327,6 +335,14 @@ app.get('/hotels', handleHotelsSearch);
  */
 const handleFlightsSearch = async (req, res) => {
   try {
+    // Check if database is connected
+    if (!db) {
+      console.error('❌ Database not connected yet');
+      return res.status(503).json(
+        createErrorResponse(503, 'Service Unavailable', 'Database connection not ready. Please try again in a moment.', req.path)
+      );
+    }
+
     const {
       origin,
       destination,
@@ -420,8 +436,9 @@ const handleFlightsSearch = async (req, res) => {
 
   } catch (error) {
     console.error('Error searching flights:', error);
+    console.error('Error stack:', error.stack);
     res.status(500).json(
-      createErrorResponse(500, 'Internal Server Error', 'Failed to search flights', req.path)
+      createErrorResponse(500, 'Internal Server Error', `Failed to search flights: ${error.message}`, req.path)
     );
   }
 };

@@ -1,0 +1,56 @@
+# Quick Start Commands - Copy & Paste
+
+## STEP 1: Setup Databases (Tier 3)
+
+# MySQL - No password needed (Homebrew default)
+mysql -u root < db/mysql/schema.sql
+mysql -u root < db/mysql/migration_tier2_compatibility.sql
+
+# MongoDB
+mongosh < db/mongodb/init.js
+mongosh < db/mongodb/create_search_collections_tier2.js
+mongosh < db/mongodb/migration_tier2_compatibility.js
+
+# Load sample data (optional)
+mysql -u root kayak < db/test_sample_data.sql
+
+# Verify
+mysql -u root kayak -e "SHOW TABLES;"
+mongosh kayak_doc --eval "db.getCollectionNames()"
+
+## STEP 2: Start Middleware Services
+
+# IMPORTANT: Install root dependencies first (one time setup)
+cd middleware && npm install
+
+# Terminal 1 - API Gateway
+cd middleware/services/api-gateway && npm install && node server.js
+
+# Terminal 2 - User Service  
+cd middleware/services/user-service && npm install && node server.js
+
+# Terminal 3 - Search Service
+cd middleware/services/search-service && npm install && node server.js
+
+# Terminal 4 - Booking Service
+cd middleware/services/booking-service && npm install && node server.js
+
+## STEP 3: Start Frontend
+
+# Terminal 5 - Frontend
+cd frontend && npm install && npm start
+
+## STEP 4: Start AI Service
+
+# Terminal 6 - AI Service
+cd ai && python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt && python main.py
+
+## STEP 5: Test
+
+# Quick health check
+curl http://localhost:3000/health
+curl http://localhost:8000/health
+
+# Run comprehensive tests
+./scripts/test-functionality.sh
+

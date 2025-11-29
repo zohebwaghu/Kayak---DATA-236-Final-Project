@@ -52,7 +52,7 @@ app.use(express.json());
 const MYSQL_HOST = process.env.MYSQL_HOST || 'localhost';
 const MYSQL_PORT = process.env.MYSQL_PORT || 3306;
 const MYSQL_USER = process.env.MYSQL_USER || 'root';
-const MYSQL_PASSWORD = process.env.MYSQL_PASSWORD || 'password';
+const MYSQL_PASSWORD = process.env.MYSQL_PASSWORD || ''; // Empty password for Homebrew MySQL
 
 // ---- IMPORTANT FIX HERE ----
 let USERS_DB = process.env.MYSQL_DB_USERS || 'kayak_users';

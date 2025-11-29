@@ -1,0 +1,6 @@
+# Ignore all CSV files for Kaggle datasets (they can be large)
+**/*.csv
+
+# But keep the directory structure metadata
+!.gitkeep
+!README.md

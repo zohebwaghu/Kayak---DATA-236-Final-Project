@@ -57,8 +57,8 @@ const pool = mysql.createPool({
   host: process.env.MYSQL_HOST || 'localhost',
   port: process.env.MYSQL_PORT || 3306,
   user: process.env.MYSQL_USER || 'root',
-  password: process.env.MYSQL_PASSWORD || 'password',
-  database: process.env.MYSQL_DB_USERS || 'kayak', // Use 'kayak' (Tier 3's main DB) or 'kayak_users' (compatibility)
+  password: process.env.MYSQL_PASSWORD || '', // Empty password for Homebrew MySQL
+  database: process.env.MYSQL_DB_USERS || 'kayak_users', // Use 'kayak_users' (Tier 2 compatibility)
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
@@ -109,7 +109,7 @@ app.get('/health', (req, res) => {
  */
 app.post('/api/v1/auth/register', async (req, res) => {
   try {
-    const { userId, firstName, lastName, address, phone, email, password } = req.body;
+    let { userId, firstName, lastName, address, phone, email, password } = req.body;
 
     // ===== VALIDATION =====
     
@@ -130,7 +130,17 @@ app.post('/api/v1/auth/register', async (req, res) => {
       throw new ValidationError(passwordValidation.message);
     }
 
-    if (address) {
+    // Address validation - if provided, must be valid
+    // If no address provided, use defaults to satisfy database constraints
+    if (!address) {
+      address = {
+        line1: 'TBD',
+        city: 'TBD',
+        state: 'CA', // Default to California (valid state code)
+        zipCode: '00000' // Default ZIP that passes regex validation
+      };
+    } else {
+      // Validate provided address
       if (!validateState(address.state)) {
         throw new ValidationError('Invalid US state abbreviation');
       }
@@ -213,6 +223,13 @@ app.post('/api/v1/auth/register', async (req, res) => {
 
   } catch (error) {
     console.error('Error in user registration:', error);
+    console.error('Error stack:', error.stack);
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      sqlState: error.sqlState,
+      sqlMessage: error.sqlMessage
+    });
     
     if (error instanceof ValidationError || error instanceof ConflictError) {
       return res.status(error.status).json(
@@ -220,8 +237,10 @@ app.post('/api/v1/auth/register', async (req, res) => {
       );
     }
 
+    // Include more details in error response for debugging
+    const errorMessage = error.sqlMessage || error.message || 'Failed to register user';
     res.status(500).json(
-      createErrorResponse(500, 'Internal Server Error', 'Failed to register user', req.path)
+      createErrorResponse(500, 'Internal Server Error', errorMessage, req.path)
     );
   }
 });

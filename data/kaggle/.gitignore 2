@@ -1,0 +1,6 @@
+# Ignore all CSV files (they can be large)
+# *.csv - Allow CSV files for Kaggle datasets
+
+# But keep the directory structure
+!.gitkeep
+!README.md
