@@ -81,6 +81,7 @@ const HomeSearchPage = () => {
 
   // ===== AI STATE =====
   const [aiLoading, setAiLoading] = useState(false);
+  const [aiConversation, setAiConversation] = useState([]);
   const [aiError, setAiError] = useState(null);
   const [aiResponse, setAiResponse] = useState('');
   const [aiBundles, setAiBundles] = useState([]);
@@ -225,20 +226,39 @@ const HomeSearchPage = () => {
     setAiLoading(true);
     setAiError(null);
 
+    // Add user message to conversation
+    setAiConversation(prev => [...prev, {
+      role: 'user',
+      content: prompt
+    }]);
+
     try {
       const response = await sendChatMessage(prompt, userId, aiSessionId);
-      
+
       setAiResponse(response.response || '');
       setAiBundles(response.bundles || []);
       setAiChanges(response.changes || null);
       setAiSuggestions(response.suggestions || []);
-      
+
       if (response.session_id) {
         setAiSessionId(response.session_id);
       }
+
+      // Add AI response to conversation
+      setAiConversation(prev => [...prev, {
+        role: 'assistant',
+        content: response.response || ''
+      }]);
+
     } catch (err) {
       console.error('AI search error:', err);
       setAiError('Failed to get AI recommendations. Please try again.');
+      
+      // Add error message to conversation
+      setAiConversation(prev => [...prev, {
+        role: 'assistant',
+        content: 'Sorry, I encountered an error. Please try again.'
+      }]);
     } finally {
       setAiLoading(false);
     }
@@ -425,7 +445,10 @@ const HomeSearchPage = () => {
               )}
 
               {activeTab === 'ai' && (
-                <AiModePanel onPromptSubmit={handleAiPromptSubmit} />
+                <AiModePanel 
+                  onPromptSubmit={handleAiPromptSubmit} 
+                  conversationHistory={aiConversation}
+                />
               )}
             </div>
           </div>

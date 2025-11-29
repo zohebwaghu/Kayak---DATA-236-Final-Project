@@ -197,6 +197,8 @@ def supervisor_node(state: TravelState) -> TravelState:
         parsed_intent = intent_parser.parse(query, search_params)
         if session_store and parsed_intent:
             session_store.merge_intent(session_id, parsed_intent.to_dict())
+            # Re-fetch merged search params
+            search_params = session_store.get_search_params(session_id) or {}
     
     # Determine routing based on keywords
     intent = "recommendation"  # default
@@ -434,13 +436,36 @@ def recommendation_agent_node(state: TravelState) -> TravelState:
             "destination": search_params.get("destination", ""),
             "origin": search_params.get("origin", "")
         }
-    # Check if clarification needed
+    # Check if clarification needed - but first check if search_params already has enough info
     elif parsed_intent and parsed_intent.get("needs_clarification"):
-        output = {
-            "success": False,
-            "needs_clarification": True,
-            "question": parsed_intent.get("clarification_question", "Could you tell me more about your trip?")
-        }
+        # If we already have destination from session, don't ask for clarification
+        if search_params.get("destination"):
+            destination = search_params.get("destination")
+            origin = search_params.get("origin", "SFO")
+            budget = search_params.get("budget")
+            constraints = search_params.get("constraints", [])
+            deals = get_deals_for_bundle(
+                destination=destination,
+                origin=origin,
+                max_flight_price=budget * 0.4 if budget else None,
+                max_hotel_price=budget * 0.6 / 3 if budget else None,
+                tags=constraints
+            )
+            bundles = _build_bundles(deals, search_params)
+            if session_store and bundles:
+                session_store.save_recommendations(session_id, bundles)
+            output = {
+                "success": True,
+                "bundles": bundles,
+                "destination": destination,
+                "origin": origin
+            }
+        else:
+            output = {
+                "success": False,
+                "needs_clarification": True,
+                "question": parsed_intent.get("clarification_question", "Could you tell me more about your trip?")
+            }
     else:
         # Get search parameters
         destination = search_params.get("destination", "MIA")
@@ -513,7 +538,7 @@ def _build_bundles(deals: Dict[str, List], params: Dict) -> List[Dict]:
         
         bundle = {
             "bundle_id": f"bundle_{i+1}_{datetime.utcnow().strftime('%H%M%S')}",
-            "name": f"{params.get('origin', 'SFO')} -> {params.get('destination', 'MIA')} + {hotel.get('name', 'Hotel') if hotel else 'Hotel'}",
+            "name": f"{(flight.get('origin') if flight else None) or params.get('origin') or '???'} -> {(flight.get('destination') if flight else None) or params.get('destination') or '???'} + {hotel.get('name', 'Hotel') if hotel else 'Hotel'}",
             "flight": flight,
             "hotel": hotel,
             "total_price": total_price,

@@ -129,7 +129,7 @@ class DealsCache:
             flights_count = flights_collection.count_documents({})
             logger.info(f"Loading {flights_count} flights from MongoDB")
 
-            for flight in flights_collection.find().limit(1000):  # Limit for performance
+            for flight in flights_collection.find():  
                 deal = self._flight_to_deal(flight)
                 if deal:
                     self.add_deal(deal)
@@ -139,7 +139,7 @@ class DealsCache:
             hotels_count = hotels_collection.count_documents({})
             logger.info(f"Loading {hotels_count} hotels from MongoDB")
 
-            for hotel in hotels_collection.find().limit(1000):  # Limit for performance
+            for hotel in hotels_collection.find():  
                 deal = self._hotel_to_deal(hotel)
                 if deal:
                     self.add_deal(deal)
@@ -465,6 +465,14 @@ class DealsCache:
             tags=[t for t in (tags or []) if t not in ["direct-flight", "no-redeye"]],
             limit=5
         )
+
+        # If no hotels found for destination, get any available hotels (for demo)
+        if not hotels:
+            hotels = self.search_deals(
+                listing_type="hotel",
+                max_price=max_hotel_price,
+                limit=5
+            )
 
         return {"flights": flights, "hotels": hotels}
 

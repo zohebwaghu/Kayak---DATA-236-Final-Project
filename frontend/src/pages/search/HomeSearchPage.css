@@ -540,3 +540,56 @@
 .book-btn-kayak:active {
   transform: translateY(0);
 }
+
+/* AI Conversation History */
+.ai-conversation-history {
+  max-height: 300px;
+  overflow-y: auto;
+  margin-bottom: 16px;
+  padding: 12px;
+  background: #f8f9fa;
+  border-radius: 8px;
+}
+
+.ai-message {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+  align-items: flex-start;
+}
+
+.ai-message--user {
+  flex-direction: row-reverse;
+}
+
+.ai-message-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.ai-message-content {
+  max-width: 80%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  line-height: 1.4;
+  font-size: 14px;
+}
+
+.ai-message--user .ai-message-content {
+  background: #0066ff;
+  color: white;
+  border-bottom-right-radius: 4px;
+}
+
+.ai-message--assistant .ai-message-content {
+  background: white;
+  color: #333;
+  border: 1px solid #e0e0e0;
+  border-bottom-left-radius: 4px;
+}

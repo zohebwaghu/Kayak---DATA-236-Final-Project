@@ -1,9 +1,8 @@
 // src/pages/search/AiModePanel.jsx
 import React, { useState } from 'react';
 
-const AiModePanel = ({ onPromptSubmit }) => {
+const AiModePanel = ({ onPromptSubmit, conversationHistory = [] }) => {
   const [prompt, setPrompt] = useState('');
-
   const suggestions = [
     'Hotels under $300 in Paris next month',
     'Weekend trip ideas from SFO',
@@ -12,27 +11,39 @@ const AiModePanel = ({ onPromptSubmit }) => {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-
     const text = prompt.trim();
     if (!text) return;
-
-    // Tell parent (HomeSearchPage) about the prompt
     if (typeof onPromptSubmit === 'function') {
       onPromptSubmit(text);
     }
+    setPrompt(''); // Clear input after submit
   };
 
   const handleChipClick = (text) => {
-    setPrompt(text);
-
-    // Immediately trigger AI search for this chip text
     if (typeof onPromptSubmit === 'function') {
       onPromptSubmit(text);
     }
+    setPrompt(''); // Clear input after click
   };
 
   return (
     <div className="ai-panel">
+      {/* Conversation History */}
+      {conversationHistory.length > 0 && (
+        <div className="ai-conversation-history">
+          {conversationHistory.map((msg, idx) => (
+            <div key={idx} className={`ai-message ai-message--${msg.role}`}>
+              <div className="ai-message-avatar">
+                {msg.role === 'user' ? '👤' : '🤖'}
+              </div>
+              <div className="ai-message-content">
+                {msg.content}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       <form onSubmit={handleSubmit}>
         <div className="ai-prompt-row">
           <div className="ai-icon-circle">AI</div>
@@ -47,21 +58,20 @@ const AiModePanel = ({ onPromptSubmit }) => {
             →
           </button>
         </div>
-
-        <div className="ai-chips-row">
-          {suggestions.map((text) => (
-            <button
-              key={text}
-              type="button"
-              className={`ai-chip ${
-                prompt === text ? 'ai-chip--active' : ''
-              }`}
-              onClick={() => handleChipClick(text)}
-            >
-              {text}
-            </button>
-          ))}
-        </div>
+        {conversationHistory.length === 0 && (
+          <div className="ai-chips-row">
+            {suggestions.map((text) => (
+              <button
+                key={text}
+                type="button"
+                className={`ai-chip ${prompt === text ? 'ai-chip--active' : ''}`}
+                onClick={() => handleChipClick(text)}
+              >
+                {text}
+              </button>
+            ))}
+          </div>
+        )}
       </form>
     </div>
   );
