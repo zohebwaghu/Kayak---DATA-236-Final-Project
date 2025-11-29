@@ -212,7 +212,10 @@ def supervisor_node(state: TravelState) -> TravelState:
     quote_keywords = ["book", "reserve", "quote", "total cost", "full price",
                      "complete", "proceed", "checkout"]
     
-    if any(kw in query for kw in policy_keywords):
+    # If user has previous recommendations and is refining search, stay in recommendation
+    if prev_recs and any(kw in query for kw in ["option", "show", "find", "want", "need", "prefer", "like"]):
+        intent = "recommendation"
+    elif any(kw in query for kw in policy_keywords) and not prev_recs:
         intent = "policy"
     elif any(kw in query for kw in watch_keywords):
         intent = "watch"
@@ -428,13 +431,42 @@ def recommendation_agent_node(state: TravelState) -> TravelState:
     # Get previous recommendations from state
     prev_recs = state.get("previous_recommendations", [])
     
-    # If we have previous recommendations, use them (for follow-up questions)
-    if prev_recs:
+    # Check if we need to re-search (new constraints added)
+    current_constraints = search_params.get("constraints", [])
+    
+    # If we have previous recommendations AND no new constraints, reuse them
+    if prev_recs and not current_constraints:
         output = {
             "success": True,
             "bundles": prev_recs,
             "destination": search_params.get("destination", ""),
             "origin": search_params.get("origin", "")
+        }
+    # If we have constraints (new or existing), re-search with filters
+    elif search_params.get("destination"):
+        destination = search_params.get("destination")
+        origin = search_params.get("origin")
+        budget = search_params.get("budget")
+        constraints = current_constraints
+        
+        deals = get_deals_for_bundle(
+            destination=destination,
+            origin=origin,
+            max_flight_price=budget * 0.4 if budget else None,
+            max_hotel_price=budget * 0.6 / 3 if budget else None,
+            tags=constraints
+        )
+        
+        bundles = _build_bundles(deals, search_params)
+        
+        if session_store and bundles:
+            session_store.save_recommendations(session_id, bundles)
+        
+        output = {
+            "success": True,
+            "bundles": bundles,
+            "destination": destination,
+            "origin": origin
         }
     # Check if clarification needed - but first check if search_params already has enough info
     elif parsed_intent and parsed_intent.get("needs_clarification"):
@@ -506,7 +538,10 @@ def recommendation_agent_node(state: TravelState) -> TravelState:
 
 
 def _build_bundles(deals: Dict[str, List], params: Dict) -> List[Dict]:
-    """Build flight+hotel bundles from deals"""
+    """
+    Build flight+hotel bundles from deals.
+    Calculate Fit Score based on: price vs budget + amenity match + location flag
+    """
     flights = deals.get("flights", [])
     hotels = deals.get("hotels", [])
     
@@ -514,6 +549,8 @@ def _build_bundles(deals: Dict[str, List], params: Dict) -> List[Dict]:
         return []
     
     bundles = []
+    budget = params.get("budget")
+    constraints = params.get("constraints", [])
     
     for i in range(min(3, max(len(flights), len(hotels)))):
         flight = flights[i] if i < len(flights) else (flights[0] if flights else None)
@@ -523,17 +560,77 @@ def _build_bundles(deals: Dict[str, List], params: Dict) -> List[Dict]:
             continue
         
         flight_price = flight.get("current_price", 0) if flight else 0
-        hotel_price = hotel.get("current_price", 0) * 3 if hotel else 0
+        hotel_price = hotel.get("current_price", 0) * 3 if hotel else 0  # 3 nights
         total_price = flight_price + hotel_price
+        
+        # Get actual avg_30d_price from deals (pre-calculated in database)
+        flight_avg = flight.get("avg_30d_price", flight_price * 1.15) if flight else 0
+        hotel_avg = (hotel.get("avg_30d_price", hotel_price / 3 * 1.15) * 3) if hotel else 0
+        avg_30d_total = flight_avg + hotel_avg
+        
         separate_price = total_price * 1.1
         
+        # Calculate actual discount percentage
+        discount_pct = ((avg_30d_total - total_price) / avg_30d_total * 100) if avg_30d_total > 0 else 10
+        
+        # ========================================
+        # FIT SCORE CALCULATION (作业要求)
+        # Based on: price vs budget + amenity match + location flag
+        # ========================================
+        
+        # 1. Price vs Budget (0-15 points)
+        budget_score = 0
+        if budget:
+            if total_price <= budget * 0.7:
+                budget_score = 15  # Far under budget - great value
+            elif total_price <= budget * 0.9:
+                budget_score = 10  # Under budget - good value
+            elif total_price <= budget:
+                budget_score = 5   # At budget - acceptable
+            else:
+                budget_score = 0   # Over budget
+        else:
+            budget_score = 8  # No budget specified - neutral
+        
+        # 2. Amenity/Policy Match (0-15 points)
+        hotel_tags = hotel.get("tags", []) if hotel else []
+        match_count = sum(1 for c in constraints if c in hotel_tags)
+        amenity_score = min(15, match_count * 5)  # 5 points per match, max 15
+        
+        # 3. Location/Convenience Flag (0-10 points)
+        # Direct flight = convenient location (no layovers)
+        stops = flight.get("metadata", {}).get("stops", 1) if flight else 1
+        if stops == 0:
+            location_score = 10  # Direct flight - best
+        elif stops == 1:
+            location_score = 5   # 1 stop - okay
+        else:
+            location_score = 0   # Multiple stops - inconvenient
+        
+        # Base Deal Score from database (average of flight + hotel)
+        flight_deal_score = flight.get("deal_score", 50) if flight else 50
+        hotel_deal_score = hotel.get("deal_score", 50) if hotel else 50
+        base_deal_score = (flight_deal_score + hotel_deal_score) // 2
+        
+        # Final Fit Score = weighted combination
+        # Base score contributes 60%, fit factors contribute 40%
+        fit_bonus = budget_score + amenity_score + location_score  # 0-40 points
+        fit_score = min(95, max(30, int(base_deal_score * 0.6 + fit_bonus)))
+        
+        # Generate explanation with real data
         exp = generate_explanation({
             "total_price": total_price,
-            "avg_30d_price": total_price * 1.15,
-            "rating": hotel.get("metadata", {}).get("star_rating", 4) if hotel else 4,
+            "avg_30d_price": avg_30d_total,
+            "discount_pct": discount_pct,
+            "rating": hotel.get("metadata", {}).get("rating", 4.0) if hotel else 4.0,
             "rooms_left": hotel.get("availability", 5) if hotel else 5,
             "flight": flight or {},
-            "hotel": {"amenities": hotel.get("tags", []), "policy": {"refundable": True}} if hotel else {}
+            "hotel": {
+                "amenities": hotel_tags, 
+                "policy": {"refundable": "refundable" in hotel_tags}
+            } if hotel else {},
+            "has_promo": (flight.get("has_promo", False) if flight else False) or (hotel.get("has_promo", False) if hotel else False),
+            "promo_end_date": flight.get("promo_end_date") or hotel.get("promo_end_date") if hotel else None
         })
         
         bundle = {
@@ -544,7 +641,9 @@ def _build_bundles(deals: Dict[str, List], params: Dict) -> List[Dict]:
             "total_price": total_price,
             "separate_price": separate_price,
             "savings": separate_price - total_price,
-            "deal_score": (flight.get("deal_score", 70) + (hotel.get("deal_score", 70) if hotel else 70)) // 2,
+            "deal_score": fit_score,  # This is now the Fit Score
+            "base_deal_score": base_deal_score,  # Original deal score for reference
+            "discount_percent": round(discount_pct, 1),
             "explanation": exp,
             "destination": params.get("destination", "MIA"),
             "origin": params.get("origin", "SFO")
