@@ -272,13 +272,16 @@ const HomeSearchPage = () => {
     }
 
     try {
+      // Watch the hotel in this bundle
+      const hotel = bundle.hotel;
       await createWatch({
         user_id: userId,
-        listing_type: 'bundle',
-        listing_id: bundle.bundle_id,
+        listing_type: 'hotel',
+        listing_id: hotel?.listing_id || bundle.bundle_id,
         listing_name: bundle.name,
         watch_type: 'price',
-        price_threshold: bundle.total_price * 0.9 // Alert if 10% drop
+        threshold: bundle.total_price * 0.9, // Alert if 10% drop
+        current_value: bundle.total_price
       });
       alert('Watch created! You\'ll be notified when the price drops.');
     } catch (err) {

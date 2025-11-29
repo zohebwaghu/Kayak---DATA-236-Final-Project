@@ -1,11 +1,10 @@
 // src/App.js
 import React from 'react';
 import { Routes, Route } from 'react-router-dom';
-
 import ProtectedRoute from './components/ProtectedRoute';
 import AdminRoute from './components/AdminRoute';
 import Navbar from './components/layout/Navbar';
-
+import AiChatWidget from './components/ai/AiChatWidget';  // 添加这行
 // Pages
 import HomeSearchPage from './pages/search/HomeSearchPage';
 import LoginPage from './pages/auth/LoginPage';
@@ -20,30 +19,24 @@ function App() {
   return (
     <>
       <Navbar />
-
       <Routes>
         {/* Home / main search hero (flights/stays/cars/AI tabs) */}
         <Route path="/" element={<HomeSearchPage />} />
-
         {/* Auth */}
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
-
         {/* Profile – currently not protected for debugging */}
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/user/profile" element={<ProfilePage />} />
-
         {/* Protected user routes */}
         <Route path="/my-bookings" element={<ProtectedRoute />}>
           <Route index element={<MyBookingsPage />} />
         </Route>
-
         {/* Booking flow (summary + payment) */}
         <Route path="/booking" element={<ProtectedRoute />}>
           <Route path="summary" element={<BookingSummaryPage />} />
           <Route path="payment" element={<PaymentPage />} />
         </Route>
-
         {/* Admin routes */}
         <Route
           path="/admin"
@@ -53,10 +46,10 @@ function App() {
             </AdminRoute>
           }
         />
-
         {/* Fallback: any unknown route goes to home */}
         <Route path="*" element={<HomeSearchPage />} />
       </Routes>
+      <AiChatWidget />
     </>
   );
 }

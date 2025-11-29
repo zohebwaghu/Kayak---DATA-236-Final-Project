@@ -6,6 +6,7 @@ Allows users to set price/inventory thresholds and get alerts
 
 import json
 import uuid
+import asyncio
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, HTTPException
@@ -332,7 +333,11 @@ class WatchStore:
         # Call registered callbacks (for WebSocket push)
         for callback in self._trigger_callbacks:
             try:
-                callback(event)
+                # Handle both sync and async callbacks
+                if asyncio.iscoroutinefunction(callback):
+                    asyncio.create_task(callback(event))
+                else:
+                    callback(event)
             except Exception as e:
                 logger.error(f"Error in trigger callback: {e}")
         
@@ -415,3 +420,57 @@ async def get_triggered_watches(user_id: str):
     """Get only triggered watches for a user"""
     watch_list = watch_store.get_user_watches(user_id)
     return [w for w in watch_list.watches if w.triggered]
+
+# ============================================
+# Test/Simulate Endpoints
+# ============================================
+
+class PriceChangeSimulation(BaseModel):
+    """Simulate a price change to trigger watches"""
+    listing_id: str
+    new_price: Optional[float] = None
+    new_inventory: Optional[int] = None
+
+
+@router.post("/simulate/price-change", response_model=List[WatchTriggerEvent])
+async def simulate_price_change(data: PriceChangeSimulation):
+    """
+    Simulate a price or inventory change to test watch triggers.
+    
+    This endpoint is for testing the 'Keep an eye on it' user journey.
+    In production, this would be called by a price monitoring service.
+    
+    Example: Simulate Miami package price dropping to $800
+    """
+    if data.new_price is None and data.new_inventory is None:
+        raise HTTPException(
+            status_code=400, 
+            detail="Must provide either new_price or new_inventory"
+        )
+    
+    triggered_events = watch_store.check_and_trigger(
+        listing_id=data.listing_id,
+        new_price=data.new_price,
+        new_inventory=data.new_inventory
+    )
+    
+    # Directly push to WebSocket for each triggered event
+    try:
+        from api.events_websocket import events_manager
+        for event in triggered_events:
+            await events_manager.send_watch_triggered(event.user_id, event.model_dump())
+            logger.info(f"WebSocket push sent for user {event.user_id}")
+    except Exception as e:
+        logger.error(f"WebSocket push error: {e}")
+    
+    logger.info(f"Price change simulation: listing={data.listing_id}, "
+                f"new_price={data.new_price}, new_inventory={data.new_inventory}, "
+                f"triggered={len(triggered_events)} watches")
+    
+    return triggered_events
+
+
+@router.get("/listing/{listing_id}", response_model=List[Watch])
+async def get_watches_for_listing(listing_id: str):
+    """Get all watches monitoring a specific listing"""
+    return watch_store.get_watches_for_listing(listing_id)

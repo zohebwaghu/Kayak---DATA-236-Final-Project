@@ -469,7 +469,7 @@ def recommendation_agent_node(state: TravelState) -> TravelState:
             "origin": origin
         }
     # Check if clarification needed - but first check if search_params already has enough info
-    elif parsed_intent and parsed_intent.get("needs_clarification"):
+    elif parsed_intent is not None and isinstance(parsed_intent, dict) and parsed_intent.get("needs_clarification"):
         # If we already have destination from session, don't ask for clarification
         if search_params.get("destination"):
             destination = search_params.get("destination")
@@ -496,7 +496,7 @@ def recommendation_agent_node(state: TravelState) -> TravelState:
             output = {
                 "success": False,
                 "needs_clarification": True,
-                "question": parsed_intent.get("clarification_question", "Could you tell me more about your trip?")
+                "question": parsed_intent.get("clarification_question", "Could you tell me more about your trip?") if parsed_intent else "Could you tell me more about your trip?"
             }
     else:
         # Get search parameters

@@ -106,12 +106,13 @@ except ImportError as e:
 
 # WebSocket Events
 try:
-    from api.events_websocket import events_manager, websocket_endpoint
+    from api.events_websocket import events_manager, websocket_endpoint, router as events_router
     EVENTS_AVAILABLE = True
 except ImportError as e:
     logger.warning(f"Events WebSocket not available: {e}")
     EVENTS_AVAILABLE = False
     events_manager = None
+    events_router = None
 
 # Background Services
 try:
@@ -293,6 +294,10 @@ if QUOTES_AVAILABLE and quotes_router:
 if CHAT_AVAILABLE and chat_router:
     app.include_router(chat_router)
     logger.info("Registered: Chat API")
+
+if EVENTS_AVAILABLE and events_router:
+    app.include_router(events_router)
+    logger.info("Events router registered")
 
 
 # ============================================
