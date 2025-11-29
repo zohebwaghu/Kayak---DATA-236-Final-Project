@@ -143,7 +143,7 @@ const MyBookingsPage = () => {
   return (
     <div className="container py-4 mytrips-root">
       <h1 className="mb-2">My trips</h1>
-      <p className="text-muted mb-4">Hi {greetingName}</p>
+      <p className="text-muted mb-4">Hi {greetingName}, Your bookings</p>
 
       {/* Kayak-ish tabs: Flights / Hotels / Cars */}
       <div className="mytrips-tabs mb-4">
@@ -188,9 +188,7 @@ const MyBookingsPage = () => {
       {!loading && !error && !hasAnyBookings && (
         <>
           <p className="mb-3">
-            Your booking flow completed successfully. This page is a placeholder
-            for your upcoming &amp; past trips. You can safely continue using
-            search and payment without any impact.
+            You don't have any trips yet. Once you book a flight, hotel, or car, it will show up here.
           </p>
           <Link to="/" className="mytrips-back-btn">
             Back to search
@@ -226,8 +224,7 @@ const MyBookingsPage = () => {
         filteredBookings.length > 0 && (
           <>
             <p className="mb-3">
-              Here&apos;s a summary of your recent trips. Future labs could
-              extend this page with cancellation, filters, and more details.
+              Here&apos;s a summary of your recent trips.
             </p>
 
             <div className="row g-3">
