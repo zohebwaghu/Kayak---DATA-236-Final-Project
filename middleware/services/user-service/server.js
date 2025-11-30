@@ -33,6 +33,7 @@ const {
   validateUserId,
   validateZipCode,
   validateState,
+  normalizeState,
   validateEmail,
   validatePassword
 } = require('../../shared/validators');
@@ -143,8 +144,11 @@ app.post('/api/v1/auth/register', async (req, res) => {
     } else {
       // Validate provided address
       if (!validateState(address.state)) {
-        throw new ValidationError('Invalid US state abbreviation');
+        throw new ValidationError('Invalid US state abbreviation or name');
       }
+      // Normalize state to 2-letter code
+      address.state = normalizeState(address.state);
+
       if (!validateZipCode(address.zipCode)) {
         throw new ValidationError('ZIP code must be in format ##### or #####-####');
       }
@@ -400,8 +404,12 @@ app.put('/:userId', async (req, res) => {
     // ===== VALIDATE UPDATES =====
 
     if (updates.address) {
-      if (updates.address.state && !validateState(updates.address.state)) {
-        throw new ValidationError('Invalid US state abbreviation');
+      if (updates.address.state) {
+        if (!validateState(updates.address.state)) {
+          throw new ValidationError('Invalid US state abbreviation or name');
+        }
+        // Normalize state to 2-letter code
+        updates.address.state = normalizeState(updates.address.state);
       }
       if (updates.address.zipCode && !validateZipCode(updates.address.zipCode)) {
         throw new ValidationError('Invalid ZIP code format');

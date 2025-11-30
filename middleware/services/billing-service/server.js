@@ -69,8 +69,8 @@ const TOPICS = {
 };
 
 const EVENT_TYPES = {
-    BOOKING_CREATED: 'BookingCreated',
-    BOOKING_CANCELLED: 'BookingCancelled',
+    BOOKING_CREATED: 'booking.created',
+    BOOKING_CANCELLED: 'booking.cancelled',
 };
 
 const connectKafka = async () => {
@@ -109,17 +109,22 @@ connectKafka();
 // ==================== EVENT HANDLERS ====================
 
 async function handleBookingCreated(bookingData) {
+    console.log('👉 handleBookingCreated called with:', bookingData);
     const { bookingId, userId, totalPrice } = bookingData;
     const invoiceId = uuidv4();
 
     try {
-        // Simulate payment processing... success!
+        console.log('👉 Attempting to insert invoice:', invoiceId);
+
+        // Create a simple line item from the total price
+        const lineItems = JSON.stringify([{ description: 'Booking Charge', amount: totalPrice }]);
+
         // Create Invoice record
         await pool.execute(
             `INSERT INTO invoices (
-        invoiceId, bookingId, userId, amount, status, issuedAt, paidAt, createdAt, updatedAt
-      ) VALUES (?, ?, ?, ?, 'paid', NOW(), NOW(), NOW(), NOW())`,
-            [invoiceId, bookingId, userId, totalPrice]
+        invoiceId, bookingId, userId, amount, status, issuedAt, paidAt, lineItems, createdAt, updatedAt
+      ) VALUES (?, ?, ?, ?, 'paid', NOW(), NOW(), ?, NOW(), NOW())`,
+            [invoiceId, bookingId, userId, totalPrice, lineItems]
         );
         console.log(`💰 Invoice created for booking ${bookingId}: ${invoiceId}`);
     } catch (err) {
