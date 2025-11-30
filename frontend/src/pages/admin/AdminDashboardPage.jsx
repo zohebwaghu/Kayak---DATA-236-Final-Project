@@ -38,7 +38,7 @@ const AdminDashboardPage = () => {
   const [userSearch, setUserSearch] = useState('');
   const [billDate, setBillDate] = useState('');
   const [billMonth, setBillMonth] = useState('');
-  const [billYear, setBillYear] = useState(new Date().getFullYear());
+  const [billYear, setBillYear] = useState('');
 
   // Form states for adding/editing
   const [showListingForm, setShowListingForm] = useState(false);
@@ -201,7 +201,13 @@ const AdminDashboardPage = () => {
     setLoading(true);
     setError(null);
     try {
-      await api.put(`/admin/users/${selectedUser.user_id}`, selectedUser);
+      await api.put(`/admin/users/${selectedUser.user_id}`, {
+        firstName: selectedUser.first_name,
+        lastName: selectedUser.last_name,
+        email: selectedUser.email,
+        phone: selectedUser.phone_number,
+        role: selectedUser.role
+      });
       setStatusMessage('User updated successfully!');
       setSelectedUser(null);
       loadUsers();
@@ -585,6 +591,147 @@ const AdminDashboardPage = () => {
               </tbody>
             </table>
           </div>
+
+          {selectedListing && (
+            <div className="modal-backdrop show" style={{ opacity: 0.5 }}></div>
+          )}
+          {selectedListing && (
+            <div className="modal show d-block" tabIndex="-1">
+              <div className="modal-dialog">
+                <div className="modal-content">
+                  <div className="modal-header">
+                    <h5 className="modal-title">Edit {listingType.charAt(0).toUpperCase() + listingType.slice(1)}</h5>
+                    <button type="button" className="btn-close" onClick={() => setSelectedListing(null)}></button>
+                  </div>
+                  <div className="modal-body">
+                    <form id="editListingForm" onSubmit={(e) => { e.preventDefault(); handleUpdateListing(selectedListing._id); }}>
+                      {listingType === 'hotels' && (
+                        <>
+                          <div className="mb-3">
+                            <label className="form-label">Hotel Name</label>
+                            <input
+                              type="text"
+                              className="form-control"
+                              value={selectedListing.name || ''}
+                              onChange={(e) => setSelectedListing({ ...selectedListing, name: e.target.value })}
+                              required
+                            />
+                          </div>
+                          <div className="mb-3">
+                            <label className="form-label">City</label>
+                            <input
+                              type="text"
+                              className="form-control"
+                              value={selectedListing.address?.city || ''}
+                              onChange={(e) => setSelectedListing({
+                                ...selectedListing,
+                                address: { ...selectedListing.address, city: e.target.value }
+                              })}
+                              required
+                            />
+                          </div>
+                          <div className="mb-3">
+                            <label className="form-label">Price per Night</label>
+                            <input
+                              type="number"
+                              className="form-control"
+                              value={selectedListing.price || ''}
+                              onChange={(e) => setSelectedListing({ ...selectedListing, price: parseFloat(e.target.value) })}
+                              required
+                            />
+                          </div>
+                        </>
+                      )}
+                      {listingType === 'flights' && (
+                        <>
+                          <div className="mb-3">
+                            <label className="form-label">Airline</label>
+                            <input
+                              type="text"
+                              className="form-control"
+                              value={selectedListing.airline || ''}
+                              onChange={(e) => setSelectedListing({ ...selectedListing, airline: e.target.value })}
+                              required
+                            />
+                          </div>
+                          <div className="mb-3">
+                            <label className="form-label">Origin</label>
+                            <input
+                              type="text"
+                              className="form-control"
+                              value={selectedListing.origin || ''}
+                              onChange={(e) => setSelectedListing({ ...selectedListing, origin: e.target.value })}
+                              required
+                            />
+                          </div>
+                          <div className="mb-3">
+                            <label className="form-label">Destination</label>
+                            <input
+                              type="text"
+                              className="form-control"
+                              value={selectedListing.destination || ''}
+                              onChange={(e) => setSelectedListing({ ...selectedListing, destination: e.target.value })}
+                              required
+                            />
+                          </div>
+                          <div className="mb-3">
+                            <label className="form-label">Price</label>
+                            <input
+                              type="number"
+                              className="form-control"
+                              value={selectedListing.price || ''}
+                              onChange={(e) => setSelectedListing({ ...selectedListing, price: parseFloat(e.target.value) })}
+                              required
+                            />
+                          </div>
+                        </>
+                      )}
+                      {listingType === 'cars' && (
+                        <>
+                          <div className="mb-3">
+                            <label className="form-label">Car Name</label>
+                            <input
+                              type="text"
+                              className="form-control"
+                              value={selectedListing.name || ''}
+                              onChange={(e) => setSelectedListing({ ...selectedListing, name: e.target.value })}
+                              required
+                            />
+                          </div>
+                          <div className="mb-3">
+                            <label className="form-label">Location</label>
+                            <input
+                              type="text"
+                              className="form-control"
+                              value={selectedListing.location || ''}
+                              onChange={(e) => setSelectedListing({ ...selectedListing, location: e.target.value })}
+                              required
+                            />
+                          </div>
+                          <div className="mb-3">
+                            <label className="form-label">Price per Day</label>
+                            <input
+                              type="number"
+                              className="form-control"
+                              value={selectedListing.price || ''}
+                              onChange={(e) => setSelectedListing({ ...selectedListing, price: parseFloat(e.target.value) })}
+                              required
+                            />
+                          </div>
+                        </>
+                      )}
+                    </form>
+                  </div>
+                  <div className="modal-footer">
+                    <button type="button" className="btn btn-secondary" onClick={() => setSelectedListing(null)}>Cancel</button>
+                    <button type="submit" form="editListingForm" className="btn btn-primary" disabled={loading}>
+                      {loading ? 'Updating...' : 'Update Listing'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -637,61 +784,64 @@ const AdminDashboardPage = () => {
           </div>
 
           {selectedUser && (
-            <div className="card mt-3">
-              <div className="card-header">Edit User</div>
-              <div className="card-body">
-                <div className="mb-3">
-                  <label className="form-label">First Name</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={selectedUser.first_name || ''}
-                    onChange={(e) => setSelectedUser({ ...selectedUser, first_name: e.target.value })}
-                  />
-                </div>
-                <div className="mb-3">
-                  <label className="form-label">Last Name</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={selectedUser.last_name || ''}
-                    onChange={(e) => setSelectedUser({ ...selectedUser, last_name: e.target.value })}
-                  />
-                </div>
-                <div className="mb-3">
-                  <label className="form-label">Email</label>
-                  <input
-                    type="email"
-                    className="form-control"
-                    value={selectedUser.email || ''}
-                    onChange={(e) => setSelectedUser({ ...selectedUser, email: e.target.value })}
-                  />
-                </div>
-                <div className="mb-3">
-                  <label className="form-label">Role</label>
-                  <select
-                    className="form-select"
-                    value={selectedUser.role || 'user'}
-                    onChange={(e) => setSelectedUser({ ...selectedUser, role: e.target.value })}
-                  >
-                    <option value="user">User</option>
-                    <option value="admin">Admin</option>
-                  </select>
-                </div>
-                <div className="d-flex gap-2">
-                  <button
-                    className="btn btn-primary"
-                    onClick={handleUpdateUser}
-                    disabled={loading}
-                  >
-                    {loading ? 'Updating...' : 'Update User'}
-                  </button>
-                  <button
-                    className="btn btn-secondary"
-                    onClick={() => setSelectedUser(null)}
-                  >
-                    Cancel
-                  </button>
+            <div className="modal-backdrop show" style={{ opacity: 0.5 }}></div>
+          )}
+          {selectedUser && (
+            <div className="modal show d-block" tabIndex="-1">
+              <div className="modal-dialog">
+                <div className="modal-content">
+                  <div className="modal-header">
+                    <h5 className="modal-title">Edit User</h5>
+                    <button type="button" className="btn-close" onClick={() => setSelectedUser(null)}></button>
+                  </div>
+                  <div className="modal-body">
+                    <form id="editUserForm" onSubmit={(e) => { e.preventDefault(); handleUpdateUser(); }}>
+                      <div className="mb-3">
+                        <label className="form-label">First Name</label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          value={selectedUser.first_name || ''}
+                          onChange={(e) => setSelectedUser({ ...selectedUser, first_name: e.target.value })}
+                        />
+                      </div>
+                      <div className="mb-3">
+                        <label className="form-label">Last Name</label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          value={selectedUser.last_name || ''}
+                          onChange={(e) => setSelectedUser({ ...selectedUser, last_name: e.target.value })}
+                        />
+                      </div>
+                      <div className="mb-3">
+                        <label className="form-label">Email</label>
+                        <input
+                          type="email"
+                          className="form-control"
+                          value={selectedUser.email || ''}
+                          onChange={(e) => setSelectedUser({ ...selectedUser, email: e.target.value })}
+                        />
+                      </div>
+                      <div className="mb-3">
+                        <label className="form-label">Role</label>
+                        <select
+                          className="form-select"
+                          value={selectedUser.role || 'user'}
+                          onChange={(e) => setSelectedUser({ ...selectedUser, role: e.target.value })}
+                        >
+                          <option value="user">User</option>
+                          <option value="admin">Admin</option>
+                        </select>
+                      </div>
+                    </form>
+                  </div>
+                  <div className="modal-footer">
+                    <button type="button" className="btn btn-secondary" onClick={() => setSelectedUser(null)}>Cancel</button>
+                    <button type="submit" form="editUserForm" className="btn btn-primary" disabled={loading}>
+                      {loading ? 'Updating...' : 'Update User'}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -702,7 +852,7 @@ const AdminDashboardPage = () => {
       {/* Billing Tab */}
       {activeTab === 'billing' && (
         <div className="billing-tab">
-          <div className="mb-3 d-flex gap-2">
+          <div className="mb-3 d-flex gap-2 align-items-center">
             <input
               type="date"
               className="form-control"
@@ -729,6 +879,16 @@ const AdminDashboardPage = () => {
               onChange={(e) => setBillYear(e.target.value)}
               style={{ width: '120px' }}
             />
+            <button
+              className="btn btn-outline-secondary"
+              onClick={() => {
+                setBillDate('');
+                setBillMonth('');
+                setBillYear('');
+              }}
+            >
+              Clear Filters
+            </button>
           </div>
 
           <div className="table-responsive">
@@ -766,21 +926,33 @@ const AdminDashboardPage = () => {
           </div>
 
           {selectedBill && (
-            <div className="card mt-3">
-              <div className="card-header">Bill Details</div>
-              <div className="card-body">
-                <p><strong>Billing ID:</strong> {selectedBill.invoiceId}</p>
-                <p><strong>User:</strong> {selectedBill.first_name} {selectedBill.last_name}</p>
-                <p><strong>Email:</strong> {selectedBill.email}</p>
-                <p><strong>Amount:</strong> ${selectedBill.amount}</p>
-                <p><strong>Status:</strong> {selectedBill.status}</p>
-                <p><strong>Date:</strong> {new Date(selectedBill.createdAt).toLocaleString()}</p>
-                <button
-                  className="btn btn-secondary"
-                  onClick={() => setSelectedBill(null)}
-                >
-                  Close
-                </button>
+            <div className="modal-backdrop show" style={{ opacity: 0.5 }}></div>
+          )}
+          {selectedBill && (
+            <div className="modal show d-block" tabIndex="-1">
+              <div className="modal-dialog">
+                <div className="modal-content">
+                  <div className="modal-header">
+                    <h5 className="modal-title">Bill Details</h5>
+                    <button type="button" className="btn-close" onClick={() => setSelectedBill(null)}></button>
+                  </div>
+                  <div className="modal-body">
+                    <p><strong>Billing ID:</strong> {selectedBill.invoiceId}</p>
+                    <p><strong>User:</strong> {selectedBill.first_name} {selectedBill.last_name}</p>
+                    <p><strong>Email:</strong> {selectedBill.email}</p>
+                    <p><strong>Phone:</strong> {selectedBill.phone_number}</p>
+                    <hr />
+                    <p><strong>Booking Type:</strong> {selectedBill.booking_type}</p>
+                    <p><strong>Booking Status:</strong> {selectedBill.booking_status}</p>
+                    <hr />
+                    <p><strong>Amount:</strong> ${selectedBill.amount}</p>
+                    <p><strong>Status:</strong> <span className={`badge bg-${selectedBill.status === 'paid' ? 'success' : 'warning'}`}>{selectedBill.status}</span></p>
+                    <p><strong>Date:</strong> {new Date(selectedBill.createdAt).toLocaleString()}</p>
+                  </div>
+                  <div className="modal-footer">
+                    <button type="button" className="btn btn-secondary" onClick={() => setSelectedBill(null)}>Close</button>
+                  </div>
+                </div>
               </div>
             </div>
           )}
