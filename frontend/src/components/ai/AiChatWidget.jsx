@@ -7,6 +7,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useSelector } from 'react-redux';
+import { useNavigate } from 'react-router-dom';
 import { sendChatMessage, createEventsWebSocket } from '../../api/aiService';
 import { selectUser, selectIsAuthenticated } from '../../store/slices/authSlice';
 import './ai.css';
@@ -20,9 +21,12 @@ const AiChatWidget = () => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [notifications, setNotifications] = useState([]);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [pendingQuote, setPendingQuote] = useState(null);
   
   const messagesEndRef = useRef(null);
   const wsRef = useRef(null);
+  const lastQuoteRef = useRef(null);
+  const navigate = useNavigate();
   
   const user = useSelector(selectUser);
   const isAuthenticated = useSelector(selectIsAuthenticated);
@@ -104,11 +108,59 @@ const AiChatWidget = () => {
     }]);
 
     try {
+      // Check if user is confirming a booking using the ref (immediate access)
+      const confirmKeywords = ['yes', 'confirm', 'proceed', 'go ahead', 'book now'];
+      const lowerMessage = userMessage.toLowerCase();
+      const isConfirming = confirmKeywords.some(kw => lowerMessage.includes(kw));
+      
+      console.log('User message:', userMessage);
+      console.log('Is confirming:', isConfirming);
+      console.log('Last quote ref:', lastQuoteRef.current);
+      
+      if (isConfirming && lastQuoteRef.current) {
+        // Navigate to booking page with the quote data
+        const bookingData = {
+          quote: lastQuoteRef.current,
+          sessionId: sessionId,
+          userId: userId
+        };
+        console.log('Navigating to booking with data:', bookingData);
+        localStorage.setItem('aiBookingData', JSON.stringify(bookingData));
+        
+        // Add confirmation message
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: 'Great! Redirecting you to complete your booking...',
+          timestamp: new Date().toISOString()
+        }]);
+        
+        setTimeout(() => {
+          navigate('/booking/summary');
+          setIsOpen(false);
+        }, 500);
+        
+        setSending(false);
+        return;
+      }
+      
       const response = await sendChatMessage(userMessage, userId, sessionId);
       
       // Update session ID
       if (response.session_id) {
         setSessionId(response.session_id);
+      }
+      
+      // Check if this is a quote response and save it
+      if (response.type === 'quote' || response.response?.includes('Grand Total')) {
+        const quoteData = {
+          response: response.response,
+          bundles: response.bundles,
+          quote: response.quote,
+          timestamp: new Date().toISOString()
+        };
+        lastQuoteRef.current = quoteData;
+        setPendingQuote(quoteData);
+        console.log('Quote saved:', quoteData);
       }
 
       // Add AI response
@@ -252,11 +304,11 @@ const AiChatWidget = () => {
                 <h4>Hi! I'm your travel assistant</h4>
                 <p>Ask me anything about flights, hotels, or travel planning.</p>
                 <div className="ai-chat-suggestions">
-                  <button onClick={() => handleSuggestionClick('Find me a trip to Miami')}>
-                    Trip to Miami
+                  <button onClick={() => handleSuggestionClick('Find me a trip to Mumbai')}>
+                    Trip to Mumbai
                   </button>
-                  <button onClick={() => handleSuggestionClick('Hotels under $200 in NYC')}>
-                    Hotels in NYC
+                  <button onClick={() => handleSuggestionClick('Hotels under $200 in Delhi')}>
+                    Hotels in Delhi
                   </button>
                   <button onClick={() => handleSuggestionClick('Weekend getaway ideas')}>
                     Weekend getaway
