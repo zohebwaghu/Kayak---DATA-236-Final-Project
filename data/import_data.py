@@ -6,14 +6,23 @@ With Deal Score fields: avg_30d_price, discount_percent, has_promo, promo_end_da
 
 import pandas as pd
 from pymongo import MongoClient
-from datetime import datetime, timedelta
-import random
+import mysql.connector
 import os
 import sys
+import random
+import string
+from datetime import datetime, timedelta
 
 # MongoDB connection
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
 MONGO_DB = os.getenv("MONGO_DB", "kayak_doc")
+
+# MySQL connection
+MYSQL_HOST = os.getenv("DB_HOST", "localhost")
+MYSQL_PORT = int(os.getenv("DB_PORT", 3306))
+MYSQL_USER = os.getenv("DB_USER", "root")
+MYSQL_PASSWORD = os.getenv("DB_PASSWORD", "password")
+MYSQL_DB = os.getenv("DB_NAME_USERS", "kayak_users")
 
 # Data directory
 DATA_DIR = os.getenv("DATA_DIR", "./data")
@@ -24,6 +33,22 @@ def connect_mongo():
     db = client[MONGO_DB]
     print(f"Connected to MongoDB: {MONGO_URI}/{MONGO_DB}")
     return db
+
+def connect_mysql():
+    """Connect to MySQL"""
+    try:
+        conn = mysql.connector.connect(
+            host=MYSQL_HOST,
+            port=MYSQL_PORT,
+            user=MYSQL_USER,
+            password=MYSQL_PASSWORD,
+            database=MYSQL_DB
+        )
+        print(f"Connected to MySQL: {MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DB}")
+        return conn
+    except Exception as e:
+        print(f"MySQL Connection Error: {e}")
+        return None
 
 def import_airports(db, filepath):
     """Import airports data"""
@@ -277,14 +302,94 @@ def import_hotels(db, filepath, limit=10000):
     print(f"Imported {len(hotels)} hotels")
     return len(hotels)
 
+def generate_ssn():
+    """Generate fake SSN"""
+    return f"{random.randint(100,999)}-{random.randint(10,99)}-{random.randint(1000,9999)}"
+
+def import_users(mysql_conn, filepath, limit=10000):
+    """Import users from hotel bookings CSV"""
+    print(f"\n=== Importing Users from {filepath} ===")
+    
+    if not mysql_conn:
+        print("Skipping user import (No MySQL connection)")
+        return 0
+        
+    df = pd.read_csv(filepath, nrows=limit)
+    print(f"Loaded {len(df)} rows for user extraction")
+    
+    cursor = mysql_conn.cursor()
+    
+    # Clear existing users (optional, but good for clean state)
+    # cursor.execute("DELETE FROM users WHERE role='user'")
+    # mysql_conn.commit()
+    
+    count = 0
+    seen_emails = set()
+    
+    sql = """
+    INSERT IGNORE INTO users (
+        user_id, first_name, last_name, 
+        address_line1, city, state_code, zip_code,
+        phone_number, email, password_hash, role,
+        created_at_utc, updated_at_utc
+    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'user', NOW(), NOW())
+    """
+    
+    for _, row in df.iterrows():
+        name = row.get("name", "")
+        email = row.get("email", "")
+        phone = row.get("phone-number", "")
+        
+        if not name or not email or email in seen_emails:
+            continue
+            
+        seen_emails.add(email)
+        
+        # Split name
+        parts = name.split(" ")
+        first_name = parts[0]
+        last_name = " ".join(parts[1:]) if len(parts) > 1 else "Doe"
+        
+        # Fake SSN
+        user_id = generate_ssn()
+        
+        # Fake Address (based on country code if possible, but defaulting to US for validation)
+        country = row.get("country", "USA")
+        
+        # Default password hash (bcrypt for 'password')
+        # $2b$10$X7.
+        password_hash = "$2b$10$X7.X7.X7.X7.X7.X7.X7.X7.X7.X7.X7.X7.X7.X7.X7.X7.X7." # Dummy hash
+        
+        values = (
+            user_id, first_name, last_name,
+            "123 Main St", "San Francisco", "CA", "94105",
+            phone, email, password_hash
+        )
+        
+        try:
+            cursor.execute(sql, values)
+            count += 1
+        except Exception as e:
+            print(f"Error inserting user {email}: {e}")
+            
+        if count >= limit:
+            break
+            
+    mysql_conn.commit()
+    cursor.close()
+    
+    print(f"Imported {count} users into MySQL")
+    return count
+
 def main():
     """Main import function"""
     print("=" * 60)
     print("Kayak Data Import Script")
     print("=" * 60)
     
-    # Connect to MongoDB
-    db = connect_mongo()
+    # Connect to Databases
+    mongo_db = connect_mongo()
+    mysql_conn = connect_mysql()
     
     # File paths
     airports_file = os.path.join(DATA_DIR, "airports.csv")
@@ -295,37 +400,42 @@ def main():
     total = 0
     
     if os.path.exists(airports_file):
-        total += import_airports(db, airports_file)
+        total += import_airports(mongo_db, airports_file)
     else:
         print(f"Warning: {airports_file} not found")
     
     if os.path.exists(flights_file):
-        total += import_flights(db, flights_file, limit=10000)
+        total += import_flights(mongo_db, flights_file, limit=10000)
     else:
         print(f"Warning: {flights_file} not found")
     
     if os.path.exists(hotels_file):
-        total += import_hotels(db, hotels_file, limit=10000)
+        total += import_hotels(mongo_db, hotels_file, limit=10000)
+        # Import users from same file
+        total += import_users(mysql_conn, hotels_file, limit=10000)
     else:
         print(f"Warning: {hotels_file} not found")
     
+    if mysql_conn:
+        mysql_conn.close()
+    
     print("\n" + "=" * 60)
-    print(f"Import Complete! Total records: {total}")
+    print(f"Import Complete! Total records processed: {total}")
     print("=" * 60)
     
     # Show sample data
     print("\n=== Sample Data ===")
     
     print("\nAirports (first 3):")
-    for doc in db["airports"].find().limit(3):
+    for doc in mongo_db["airports"].find().limit(3):
         print(f"  {doc.get('iata')}: {doc.get('name')} - {doc.get('city')}, {doc.get('country')}")
     
     print("\nFlights (first 5):")
-    for doc in db["flights"].find().limit(5):
+    for doc in mongo_db["flights"].find().limit(5):
         print(f"  {doc.get('flight_id')}: {doc.get('origin')} -> {doc.get('destination')} | ${doc.get('price')} | {doc.get('discount_percent')}% off | Score: {doc.get('deal_score')} | Promo: {doc.get('has_promo')}")
     
     print("\nHotels (first 5):")
-    for doc in db["hotels"].find().limit(5):
+    for doc in mongo_db["hotels"].find().limit(5):
         print(f"  {doc.get('hotel_id')}: {doc.get('name')} | ${doc.get('price_per_night')}/night | {doc.get('discount_percent')}% off | Score: {doc.get('deal_score')} | Rooms: {doc.get('available_rooms')}")
 
 if __name__ == "__main__":

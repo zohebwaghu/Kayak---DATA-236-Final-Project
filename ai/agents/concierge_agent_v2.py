@@ -21,6 +21,7 @@ import uuid
 from datetime import datetime
 from typing import Dict, Any, Optional, List, Tuple
 from loguru import logger
+import httpx
 
 # LLM
 try:
@@ -107,7 +108,46 @@ Your role is to:
 
 Be concise and helpful. When you have specific recommendations, present them clearly.
 If you need more information, ask ONE clarifying question at most.
+If you need more information, ask ONE clarifying question at most.
 Always be friendly and professional."""
+
+    async def _fetch_from_search_service(self, destination: str, origin: str) -> Dict[str, List]:
+        """Fetch real flights and hotels from Search Service"""
+        flights = []
+        hotels = []
+        
+        try:
+            async with httpx.AsyncClient() as client:
+                # Fetch Flights
+                logger.info(f"Fetching flights: {origin} -> {destination}")
+                flight_res = await client.get(
+                    "http://search-service:3003/api/v1/search/flights",
+                    params={"origin": origin, "destination": destination}
+                )
+                if flight_res.status_code == 200:
+                    flights = flight_res.json().get("data", [])
+                    # Normalize for bundle builder
+                    for f in flights:
+                        f["current_price"] = f.get("price", 0)
+                        f["deal_score"] = 80 # Default score for live data
+                
+                # Fetch Hotels
+                logger.info(f"Fetching hotels in {destination}")
+                hotel_res = await client.get(
+                    "http://search-service:3003/api/v1/search/hotels",
+                    params={"city": destination}
+                )
+                if hotel_res.status_code == 200:
+                    hotels = hotel_res.json().get("data", [])
+                    # Normalize
+                    for h in hotels:
+                        h["current_price"] = h.get("pricePerNight", h.get("price", 0))
+                        h["deal_score"] = 80
+                        
+        except Exception as e:
+            logger.error(f"Search Service error: {e}")
+            
+        return {"flights": flights, "hotels": hotels}
     
     async def process_message(
         self,
@@ -434,13 +474,19 @@ Quote valid for 30 minutes. Ready to book?"""
         budget = params.get("budget")
         constraints = params.get("constraints", [])
         
-        # Get matching deals
-        deals = get_deals_for_bundle(
+        # Get matching deals (from Search Service)
+        # deals = get_deals_for_bundle(
+        #     destination=destination,
+        #     origin=origin,
+        #     max_flight_price=budget * 0.4 if budget else None,
+        #     max_hotel_price=budget * 0.6 / 3 if budget else None,  # Assume 3 nights
+        #     tags=constraints
+        # )
+        
+        # FETCH LIVE DATA
+        deals = await self._fetch_from_search_service(
             destination=destination,
-            origin=origin,
-            max_flight_price=budget * 0.4 if budget else None,
-            max_hotel_price=budget * 0.6 / 3 if budget else None,  # Assume 3 nights
-            tags=constraints
+            origin=origin
         )
         
         # Build bundles

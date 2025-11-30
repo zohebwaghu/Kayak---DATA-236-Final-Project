@@ -206,11 +206,32 @@ class IntentParser:
     
     def _extract_destination(self, query: str) -> Optional[str]:
         """Extract destination airport/city"""
-        # First, directly check if any known city/airport is in the query
-        for name, code in self.airport_codes.items():
-            if name in query:
-                return code
-
+        # Pattern: "to Miami", "going to NYC"
+        patterns = [
+            r"to\s+(\w+(?:\s+\w+)?)",
+            r"going\s+(?:to\s+)?(\w+(?:\s+\w+)?)",
+            r"visiting\s+(\w+(?:\s+\w+)?)",
+            r"trip\s+to\s+(\w+(?:\s+\w+)?)",
+            r"fly\s+to\s+(\w+(?:\s+\w+)?)",
+            r"in\s+(\w+(?:\s+\w+)?)",
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, query)
+            if match:
+                location = match.group(1).lower().strip()
+                # Skip common words
+                if location in ["the", "a", "an", "anywhere", "somewhere"]:
+                    continue
+                
+                # Check full match
+                if location in self.airport_codes:
+                    return self.airport_codes[location]
+                
+                # Check first word (fix for "to JFK next week" where "JFK next" is matched)
+                first_word = location.split()[0]
+                if first_word in self.airport_codes:
+                    return self.airport_codes[first_word]
         # Check for keyword destinations ("anywhere warm")
         for keyword, destinations in self.destination_keywords.items():
             if keyword in query:
