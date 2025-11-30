@@ -54,6 +54,12 @@ def seed_transactions(count=500):
     (invoiceId, bookingId, userId, amount, status, issuedAt, paidAt, createdAt)
     VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
     """
+
+    payments_sql = """
+    INSERT INTO kayak_billing.payments
+    (paymentId, bookingId, userId, amount, currency, paymentMethod, status, transactionId, createdAt)
+    VALUES (%s, %s, %s, %s, 'USD', %s, %s, %s, %s)
+    """
     
     for i in range(count):
         user_id = random.choice(users)
@@ -72,6 +78,8 @@ def seed_transactions(count=500):
             
         booking_id = str(uuid.uuid4())
         invoice_id = str(uuid.uuid4())
+        payment_id = str(uuid.uuid4())
+        transaction_id = f"txn_{random.randint(100000, 999999)}"
         
         # Random date in 2024-2025
         start_date = datetime(2025, 1, 1) + timedelta(days=random.randint(0, 365))
@@ -79,7 +87,9 @@ def seed_transactions(count=500):
         created_at = start_date - timedelta(days=random.randint(1, 30))
         
         status = random.choice(['confirmed', 'confirmed', 'confirmed', 'cancelled'])
-        payment_status = 'paid' if status == 'confirmed' else 'cancelled'
+        payment_status = 'completed' if status == 'confirmed' else 'failed'
+        invoice_status = 'paid' if status == 'confirmed' else 'cancelled'
+        payment_method = random.choice(['credit_card', 'paypal', 'debit_card'])
         
         # Insert Booking
         cursor.execute(bookings_sql, (
@@ -87,11 +97,16 @@ def seed_transactions(count=500):
             start_date, end_date, total_price, status, created_at
         ))
         
-        # Insert Invoice
+        # Insert Invoice and Payment
         if status == 'confirmed':
             cursor.execute(invoices_sql, (
                 invoice_id, booking_id, user_id, total_price, 
-                payment_status, created_at, created_at, created_at
+                invoice_status, created_at, created_at, created_at
+            ))
+            
+            cursor.execute(payments_sql, (
+                payment_id, booking_id, user_id, total_price,
+                payment_method, payment_status, transaction_id, created_at
             ))
             
     conn.commit()
