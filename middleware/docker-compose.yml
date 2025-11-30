@@ -210,6 +210,33 @@ services:
       - kayak-network
     restart: unless-stopped
 
+  billing-service:
+    build:
+      context: .
+      dockerfile: ./services/billing-service/Dockerfile
+    container_name: kayak-billing-service
+    ports:
+      - "3005:3005"
+    environment:
+      BILLING_SERVICE_PORT: 3005
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: password
+      MYSQL_DB_BILLING: kayak_billing
+      MYSQL_DB_BOOKINGS: kayak_bookings
+      KAFKA_BROKER: kafka:9093
+      KAFKA_CLIENT_ID: billing-service
+      NODE_ENV: production
+    depends_on:
+      mysql:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - kayak-network
+    restart: unless-stopped
+
   # ==================== AI SERVICE ====================
 
   ai-service:
