@@ -154,7 +154,7 @@ app.get('/listings', async (req, res) => {
     }
 
     let collection, query = {};
-    
+
     if (type === 'hotels' || !type) {
       collection = mongoDb.collection('hotels');
       if (search) {
@@ -393,8 +393,8 @@ app.get('/users', async (req, res) => {
       params.push(searchPattern, searchPattern, searchPattern, searchPattern);
     }
 
-    query += ' ORDER BY created_at_utc DESC LIMIT ? OFFSET ?';
-    params.push(limitNum, skip);
+    query += ` ORDER BY created_at_utc DESC LIMIT ${limitNum} OFFSET ${skip}`;
+    // params.push(limitNum, skip); // Removed params for LIMIT/OFFSET
 
     const [rows] = await usersPool.execute(query, params);
 
@@ -513,50 +513,50 @@ app.get('/billing', async (req, res) => {
     const skip = (pageNum - 1) * limitNum;
 
     let query = `
-      SELECT b.*, u.first_name, u.last_name, u.email, bk.booking_type, bk.status as booking_status
-      FROM billing b
-      JOIN users u ON b.user_id = u.user_id
-      JOIN bookings bk ON b.booking_id = bk.booking_id
+      SELECT b.*, u.first_name, u.last_name, u.email, bk.listingType as booking_type, bk.status as booking_status
+      FROM invoices b
+      JOIN kayak_users.users u ON b.userId = u.user_id
+      JOIN kayak_bookings.bookings bk ON b.bookingId = bk.bookingId
       WHERE 1=1
     `;
     const params = [];
 
     if (date) {
-      query += ' AND DATE(b.transaction_ts_utc) = ?';
+      query += ' AND DATE(b.createdAt) = ?';
       params.push(date);
     }
 
     if (month && year) {
-      query += ' AND YEAR(b.transaction_ts_utc) = ? AND MONTH(b.transaction_ts_utc) = ?';
+      query += ' AND YEAR(b.createdAt) = ? AND MONTH(b.createdAt) = ?';
       params.push(year, month);
     } else if (year) {
-      query += ' AND YEAR(b.transaction_ts_utc) = ?';
+      query += ' AND YEAR(b.createdAt) = ?';
       params.push(year);
     }
 
     if (userId) {
-      query += ' AND b.user_id = ?';
+      query += ' AND b.userId = ?';
       params.push(userId);
     }
 
     if (status) {
-      query += ' AND b.transaction_status = ?';
+      query += ' AND b.status = ?';
       params.push(status);
     }
 
-    query += ' ORDER BY b.transaction_ts_utc DESC LIMIT ? OFFSET ?';
-    params.push(limitNum, skip);
+    query += ` ORDER BY b.createdAt DESC LIMIT ${limitNum} OFFSET ${skip}`;
+    // params.push(limitNum, skip); // Removed params for LIMIT/OFFSET
 
     const [rows] = await billingPool.execute(query, params);
 
     // Get total count
-    let countQuery = 'SELECT COUNT(*) as total FROM billing b WHERE 1=1';
+    let countQuery = 'SELECT COUNT(*) as total FROM invoices b WHERE 1=1';
     const countParams = [];
-    if (date) { countQuery += ' AND DATE(b.transaction_ts_utc) = ?'; countParams.push(date); }
-    if (month && year) { countQuery += ' AND YEAR(b.transaction_ts_utc) = ? AND MONTH(b.transaction_ts_utc) = ?'; countParams.push(year, month); }
-    else if (year) { countQuery += ' AND YEAR(b.transaction_ts_utc) = ?'; countParams.push(year); }
-    if (userId) { countQuery += ' AND b.user_id = ?'; countParams.push(userId); }
-    if (status) { countQuery += ' AND b.transaction_status = ?'; countParams.push(status); }
+    if (date) { countQuery += ' AND DATE(b.createdAt) = ?'; countParams.push(date); }
+    if (month && year) { countQuery += ' AND YEAR(b.createdAt) = ? AND MONTH(b.createdAt) = ?'; countParams.push(year, month); }
+    else if (year) { countQuery += ' AND YEAR(b.createdAt) = ?'; countParams.push(year); }
+    if (userId) { countQuery += ' AND b.userId = ?'; countParams.push(userId); }
+    if (status) { countQuery += ' AND b.status = ?'; countParams.push(status); }
 
     const [countRows] = await billingPool.execute(countQuery, countParams);
     const total = countRows[0].total;
@@ -586,11 +586,11 @@ app.get('/billing/:billingId', async (req, res) => {
 
     const [rows] = await billingPool.execute(
       `SELECT b.*, u.first_name, u.last_name, u.email, u.phone_number,
-              bk.booking_type, bk.status as booking_status, bk.created_at_utc as booking_created
-       FROM billing b
-       JOIN users u ON b.user_id = u.user_id
-       JOIN bookings bk ON b.booking_id = bk.booking_id
-       WHERE b.billing_id = ?`,
+              bk.listingType as booking_type, bk.status as booking_status, bk.createdAt as booking_created
+       FROM invoices b
+       JOIN kayak_users.users u ON b.userId = u.user_id
+       JOIN kayak_bookings.bookings bk ON b.bookingId = bk.bookingId
+       WHERE b.invoiceId = ?`,
       [billingId]
     );
 
@@ -617,15 +617,15 @@ app.get('/analytics/revenue/top-properties', async (req, res) => {
 
     const [rows] = await billingPool.execute(
       `SELECT 
-        bk.listing_id,
-        bk.booking_type,
-        COUNT(*) as booking_count,
-        SUM(b.total_amount_paid) as total_revenue
-       FROM billing b
-       JOIN bookings bk ON b.booking_id = bk.booking_id
-       WHERE YEAR(b.transaction_ts_utc) = ? 
-         AND b.transaction_status = 'succeeded'
-       GROUP BY bk.listing_id, bk.booking_type
+         bk.listingId as listing_id,
+         bk.listingType as booking_type,
+         COUNT(*) as booking_count,
+         SUM(b.amount) as total_revenue
+        FROM invoices b
+        JOIN kayak_bookings.bookings bk ON b.bookingId = bk.bookingId
+        WHERE YEAR(b.createdAt) = ? 
+          AND b.status = 'paid'
+        GROUP BY bk.listingId, bk.listingType
        ORDER BY total_revenue DESC
        LIMIT 10`,
       [year]
@@ -653,14 +653,14 @@ app.get('/analytics/revenue/city-wise', async (req, res) => {
     // For now, using a simplified version
     const [rows] = await billingPool.execute(
       `SELECT 
-        u.city,
-        COUNT(*) as transaction_count,
-        SUM(b.total_amount_paid) as total_revenue
-       FROM billing b
-       JOIN users u ON b.user_id = u.user_id
-       WHERE YEAR(b.transaction_ts_utc) = ? 
-         AND b.transaction_status = 'succeeded'
-       GROUP BY u.city
+         u.city,
+         COUNT(*) as transaction_count,
+         SUM(b.amount) as total_revenue
+        FROM invoices b
+        JOIN kayak_users.users u ON b.userId = u.user_id
+        WHERE YEAR(b.createdAt) = ? 
+          AND b.status = 'paid'
+        GROUP BY u.city
        ORDER BY total_revenue DESC`,
       [year]
     );
@@ -686,16 +686,16 @@ app.get('/analytics/providers/top-sellers', async (req, res) => {
 
     const [rows] = await billingPool.execute(
       `SELECT 
-        bk.listing_id,
-        bk.booking_type,
-        COUNT(*) as properties_sold,
-        SUM(b.total_amount_paid) as revenue
-       FROM billing b
-       JOIN bookings bk ON b.booking_id = bk.booking_id
-       WHERE MONTH(b.transaction_ts_utc) = MONTH(?)
-         AND YEAR(b.transaction_ts_utc) = YEAR(?)
-         AND b.transaction_status = 'succeeded'
-       GROUP BY bk.listing_id, bk.booking_type
+         bk.listingId as listing_id,
+         bk.listingType as booking_type,
+         COUNT(*) as properties_sold,
+         SUM(b.amount) as revenue
+        FROM invoices b
+        JOIN kayak_bookings.bookings bk ON b.bookingId = bk.bookingId
+        WHERE MONTH(b.createdAt) = MONTH(?)
+          AND YEAR(b.createdAt) = YEAR(?)
+          AND b.status = 'paid'
+        GROUP BY bk.listingId, bk.listingType
        ORDER BY properties_sold DESC, revenue DESC
        LIMIT 10`,
       [lastMonth, lastMonth]
@@ -725,7 +725,7 @@ app.get('/analytics/clicks/page', async (req, res) => {
     }
 
     const logsCollection = mongoDb.collection('logs');
-    
+
     // Aggregate clicks by page
     const pipeline = [
       { $match: { type: 'page_view' } },
@@ -768,7 +768,7 @@ app.get('/analytics/clicks/listings', async (req, res) => {
     }
 
     const logsCollection = mongoDb.collection('logs');
-    
+
     const pipeline = [
       { $match: { type: 'listing_click', listingId: { $exists: true } } },
       {
@@ -811,7 +811,7 @@ app.get('/analytics/least-seen', async (req, res) => {
     }
 
     const logsCollection = mongoDb.collection('logs');
-    
+
     const pipeline = [
       { $match: { type: 'page_view' } },
       {
@@ -852,7 +852,7 @@ app.get('/analytics/reviews', async (req, res) => {
     }
 
     const reviewsCollection = mongoDb.collection('reviews');
-    
+
     const pipeline = [
       {
         $group: {

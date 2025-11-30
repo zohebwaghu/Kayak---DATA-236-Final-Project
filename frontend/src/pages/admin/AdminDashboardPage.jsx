@@ -61,7 +61,7 @@ const AdminDashboardPage = () => {
     setError(null);
     try {
       const currentYear = new Date().getFullYear();
-      
+
       const [topPropsRes, cityRes, sellersRes, pageRes, listingRes, leastRes, reviewsRes] = await Promise.all([
         api.get(`/admin/analytics/revenue/top-properties?year=${currentYear}`),
         api.get(`/admin/analytics/revenue/city-wise?year=${currentYear}`),
@@ -93,7 +93,7 @@ const AdminDashboardPage = () => {
     try {
       const params = { type: listingType, limit: 50 };
       if (listingSearch) params.search = listingSearch;
-      
+
       const res = await api.get('/admin/listings', { params });
       setListings(res.data.data || []);
     } catch (err) {
@@ -110,7 +110,7 @@ const AdminDashboardPage = () => {
     try {
       const params = { limit: 50 };
       if (userSearch) params.search = userSearch;
-      
+
       const res = await api.get('/admin/users', { params });
       setUsers(res.data.data || []);
     } catch (err) {
@@ -129,7 +129,7 @@ const AdminDashboardPage = () => {
       if (billDate) params.date = billDate;
       if (billMonth) params.month = billMonth;
       if (billYear) params.year = billYear;
-      
+
       const res = await api.get('/admin/billing', { params });
       setBills(res.data.data || []);
     } catch (err) {
@@ -182,7 +182,7 @@ const AdminDashboardPage = () => {
 
   const handleDeleteListing = async (id) => {
     if (!window.confirm('Are you sure you want to delete this listing?')) return;
-    
+
     setLoading(true);
     setError(null);
     try {
@@ -288,7 +288,7 @@ const AdminDashboardPage = () => {
       {activeTab === 'analytics' && (
         <div className="analytics-tab">
           {loading && <div className="text-center"><div className="spinner-border" role="status"></div></div>}
-          
+
           <div className="row mb-4">
             <div className="col-md-6">
               <h3>Top 10 Properties by Revenue (Year {new Date().getFullYear()})</h3>
@@ -745,16 +745,16 @@ const AdminDashboardPage = () => {
               </thead>
               <tbody>
                 {bills.map((bill) => (
-                  <tr key={bill.billing_id}>
-                    <td>{bill.billing_id}</td>
+                  <tr key={bill.invoiceId}>
+                    <td>{bill.invoiceId}</td>
                     <td>{bill.first_name} {bill.last_name}</td>
-                    <td>${bill.total_amount_paid}</td>
-                    <td>{bill.transaction_status}</td>
-                    <td>{new Date(bill.transaction_ts_utc).toLocaleDateString()}</td>
+                    <td>${bill.amount}</td>
+                    <td>{bill.status}</td>
+                    <td>{new Date(bill.createdAt).toLocaleDateString()}</td>
                     <td>
                       <button
                         className="btn btn-sm btn-primary"
-                        onClick={() => handleViewBill(bill.billing_id)}
+                        onClick={() => handleViewBill(bill.invoiceId)}
                       >
                         View Details
                       </button>
@@ -769,13 +769,12 @@ const AdminDashboardPage = () => {
             <div className="card mt-3">
               <div className="card-header">Bill Details</div>
               <div className="card-body">
-                <p><strong>Billing ID:</strong> {selectedBill.billing_id}</p>
+                <p><strong>Billing ID:</strong> {selectedBill.invoiceId}</p>
                 <p><strong>User:</strong> {selectedBill.first_name} {selectedBill.last_name}</p>
                 <p><strong>Email:</strong> {selectedBill.email}</p>
-                <p><strong>Amount:</strong> ${selectedBill.total_amount_paid}</p>
-                <p><strong>Payment Method:</strong> {selectedBill.payment_method}</p>
-                <p><strong>Status:</strong> {selectedBill.transaction_status}</p>
-                <p><strong>Date:</strong> {new Date(selectedBill.transaction_ts_utc).toLocaleString()}</p>
+                <p><strong>Amount:</strong> ${selectedBill.amount}</p>
+                <p><strong>Status:</strong> {selectedBill.status}</p>
+                <p><strong>Date:</strong> {new Date(selectedBill.createdAt).toLocaleString()}</p>
                 <button
                   className="btn btn-secondary"
                   onClick={() => setSelectedBill(null)}
