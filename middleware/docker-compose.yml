@@ -67,7 +67,7 @@ services:
     image: mysql:8.0
     container_name: kayak-mysql
     ports:
-      - "3306:3306"
+      - "3307:3306"
     environment:
       MYSQL_ROOT_PASSWORD: password
       MYSQL_DATABASE: kayak_users
@@ -117,7 +117,7 @@ services:
       BILLING_SERVICE_PORT: 3005
       ADMIN_SERVICE_PORT: 3006
       RATE_LIMIT_WINDOW_MS: 900000
-      RATE_LIMIT_MAX_REQUESTS: 100
+      RATE_LIMIT_MAX_REQUESTS: 100000
       NODE_ENV: production
     depends_on:
       - user-service
@@ -246,6 +246,8 @@ services:
       - API_PORT=8000
       - API_ENV=production
       - CORS_ORIGINS=http://localhost:3000,http://localhost:3001
+    volumes:
+      - ../data:/data
     depends_on:
       mysql:
         condition: service_healthy

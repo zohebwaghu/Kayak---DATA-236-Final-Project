@@ -11,9 +11,10 @@ import './MyBookingsPage.css';
  *
  * - Fetches the current user's bookings via API Gateway:
  *     GET /api/v1/bookings/user/:userId  (gateway → booking service)
+ * - Supports time filters: All / Upcoming / Ongoing / Past
  * - Shows tabs for Flights / Hotels / Cars
  * - Each tab shows only that category of bookings
- * - Default tab when page opens: Flights
+ * - Default tab when page opens: Flights + All trips
  */
 const MyBookingsPage = () => {
   const user = useSelector(selectUser);
@@ -22,6 +23,7 @@ const MyBookingsPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState('flight'); // 'flight' | 'hotel' | 'car'
+  const [timeFilter, setTimeFilter] = useState('all'); // 'all' | 'upcoming' | 'ongoing' | 'past'
 
   const formatType = (t) =>
     t ? t.charAt(0).toUpperCase() + t.slice(1).toLowerCase() : '';
@@ -90,8 +92,22 @@ const MyBookingsPage = () => {
           return;
         }
 
+        // Map local timeFilter to backend timeFrame
+        const params = {};
+        if (timeFilter !== 'all') {
+          if (timeFilter === 'upcoming') {
+            params.timeFrame = 'future';
+          } else if (timeFilter === 'ongoing') {
+            params.timeFrame = 'current';
+          } else if (timeFilter === 'past') {
+            params.timeFrame = 'past';
+          }
+        }
+
         // Full URL = http://localhost:3000/api/v1/bookings/user/:userId
-        const res = await api.get(`/bookings/user/${user.userId}`);
+        const res = await api.get(`/bookings/user/${user.userId}`, {
+          params,
+        });
 
         const raw = res.data;
 
@@ -127,7 +143,7 @@ const MyBookingsPage = () => {
     return () => {
       cancelled = true;
     };
-  }, [user]);
+  }, [user, timeFilter]);
 
   const greetingName = user
     ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email
@@ -143,10 +159,10 @@ const MyBookingsPage = () => {
   return (
     <div className="container py-4 mytrips-root">
       <h1 className="mb-2">My trips</h1>
-      <p className="text-muted mb-4">Hi {greetingName}</p>
+      <p className="text-muted mb-4">Hi {greetingName}, your bookings</p>
 
       {/* Kayak-ish tabs: Flights / Hotels / Cars */}
-      <div className="mytrips-tabs mb-4">
+      <div className="mytrips-tabs mb-3">
         <button
           type="button"
           className={`mytrips-tab-btn ${
@@ -176,6 +192,46 @@ const MyBookingsPage = () => {
         </button>
       </div>
 
+      {/* Time filter chips: All / Upcoming / Ongoing / Past */}
+      <div className="mytrips-time-filters mb-4">
+        <button
+          type="button"
+          className={`mytrips-time-chip ${
+            timeFilter === 'all' ? 'mytrips-time-chip-active' : ''
+          }`}
+          onClick={() => setTimeFilter('all')}
+        >
+          All trips
+        </button>
+        <button
+          type="button"
+          className={`mytrips-time-chip ${
+            timeFilter === 'upcoming' ? 'mytrips-time-chip-active' : ''
+          }`}
+          onClick={() => setTimeFilter('upcoming')}
+        >
+          Upcoming
+        </button>
+        <button
+          type="button"
+          className={`mytrips-time-chip ${
+            timeFilter === 'ongoing' ? 'mytrips-time-chip-active' : ''
+          }`}
+          onClick={() => setTimeFilter('ongoing')}
+        >
+          Ongoing
+        </button>
+        <button
+          type="button"
+          className={`mytrips-time-chip ${
+            timeFilter === 'past' ? 'mytrips-time-chip-active' : ''
+          }`}
+          onClick={() => setTimeFilter('past')}
+        >
+          Past trips
+        </button>
+      </div>
+
       {loading && <p className="text-muted">Loading your bookings…</p>}
 
       {!loading && error && (
@@ -184,13 +240,12 @@ const MyBookingsPage = () => {
         </div>
       )}
 
-      {/* Global empty state: no bookings at all */}
+      {/* Global empty state: no bookings for this time filter */}
       {!loading && !error && !hasAnyBookings && (
         <>
           <p className="mb-3">
-            Your booking flow completed successfully. This page is a placeholder
-            for your upcoming &amp; past trips. You can safely continue using
-            search and payment without any impact.
+            You don&apos;t have any trips in this view yet. Once you book a
+            flight, hotel, or car, it will show up here.
           </p>
           <Link to="/" className="mytrips-back-btn">
             Back to search
@@ -198,7 +253,7 @@ const MyBookingsPage = () => {
         </>
       )}
 
-      {/* Category-specific empty state: some bookings exist but not in this tab */}
+      {/* Category-specific empty state: some bookings exist (for this time filter) but not in this tab */}
       {!loading &&
         !error &&
         hasAnyBookings &&
@@ -211,7 +266,7 @@ const MyBookingsPage = () => {
                 : activeTab === 'hotel'
                 ? 'hotel'
                 : 'car'}{' '}
-              bookings yet. Try another tab or make a new booking.
+              bookings yet in this view. Try another tab or make a new booking.
             </p>
             <Link to="/" className="mytrips-back-btn">
               Back to search
@@ -226,8 +281,7 @@ const MyBookingsPage = () => {
         filteredBookings.length > 0 && (
           <>
             <p className="mb-3">
-              Here&apos;s a summary of your recent trips. Future labs could
-              extend this page with cancellation, filters, and more details.
+              Here&apos;s a summary of your trips for the selected filters.
             </p>
 
             <div className="row g-3">

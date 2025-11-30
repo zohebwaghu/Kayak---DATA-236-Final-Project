@@ -84,8 +84,8 @@ const authenticateJWT = (req, res, next) => {
       createErrorResponse(
         401,
         'Unauthorized',
-        err.name === 'TokenExpiredError' 
-          ? 'Token has expired. Please login again.' 
+        err.name === 'TokenExpiredError'
+          ? 'Token has expired. Please login again.'
           : 'Invalid token.',
         req.path
       )
@@ -269,6 +269,15 @@ app.use('/api/v1/admin', authenticateJWT, requireAdmin, (req, res) => {
     process.env.ADMIN_SERVICE_URL ||
     `http://admin-service:${process.env.ADMIN_SERVICE_PORT || 3006}`;
   proxyToService(req, res, 'Admin Service', serviceUrl);
+});
+
+// ==================== AI SERVICE ROUTES (PUBLIC) ====================
+
+app.use('/api/v1/ai', (req, res) => {
+  const serviceUrl =
+    process.env.AI_SERVICE_URL ||
+    `http://ai-service:${process.env.AI_SERVICE_PORT || 8000}/api/ai`;
+  proxyToService(req, res, 'AI Service', serviceUrl);
 });
 
 // ==================== ERROR HANDLING ====================

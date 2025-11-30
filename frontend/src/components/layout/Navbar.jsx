@@ -19,6 +19,10 @@ const Navbar = () => {
 
   const [menuOpen, setMenuOpen] = useState(false);
 
+  // NEW: avatar URL loaded from localStorage
+  const [avatarUrl, setAvatarUrl] = useState('');
+  const userId = user?.userId || null;
+
   const handleBrandClick = (e) => {
     e.preventDefault();
     navigate('/');
@@ -52,6 +56,35 @@ const Navbar = () => {
   useEffect(() => {
     setMenuOpen(false);
   }, [location.pathname]);
+
+  // Initial read + lightweight polling to stay in sync with local profile image
+  useEffect(() => {
+    if (!userId) {
+      setAvatarUrl('');
+      return;
+    }
+
+    const storageKey = `kayak_avatar_${userId}`;
+
+    const readAvatar = () => {
+      try {
+        const raw = localStorage.getItem(storageKey);
+        setAvatarUrl(raw || '');
+      } catch {
+        setAvatarUrl('');
+      }
+    };
+
+    // Initial load
+    readAvatar();
+
+    // Poll every 1.5s while this user is logged in
+    const intervalId = window.setInterval(readAvatar, 1500);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [userId]);
 
   const firstInitial =
     (user?.firstName && user.firstName.trim().charAt(0).toUpperCase()) ||
@@ -91,7 +124,15 @@ const Navbar = () => {
                   aria-expanded={menuOpen}
                   aria-haspopup="true"
                 >
-                  <span className="kayak-avatar-initial">{firstInitial}</span>
+                  {avatarUrl ? (
+                    <img
+                      src={avatarUrl}
+                      alt="Profile"
+                      className="kayak-avatar-image"
+                    />
+                  ) : (
+                    <span className="kayak-avatar-initial">{firstInitial}</span>
+                  )}
                 </button>
 
                 {menuOpen && (

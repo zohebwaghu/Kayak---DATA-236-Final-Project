@@ -36,6 +36,38 @@
   transform: translateY(-1px);
 }
 
+/* Time filter chips row */
+.mytrips-time-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* Individual time filter chip */
+.mytrips-time-chip {
+  border-radius: 999px;
+  padding: 0.3rem 0.9rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  border: 1px solid #e5e7eb;
+  background-color: #ffffff;
+  color: #4b5563;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.mytrips-time-chip:hover {
+  background-color: #f3f4f6;
+}
+
+/* Active state for the time filter chip */
+.mytrips-time-chip-active {
+  border-color: #ff6900;
+  color: #ff6900;
+  background-color: #fff7ed; /* subtle warm background */
+}
+
 /* Back to search – Kayak primary CTA style */
 .mytrips-back-btn {
   display: inline-flex;

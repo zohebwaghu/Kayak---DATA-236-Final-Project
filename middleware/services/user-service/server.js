@@ -18,6 +18,7 @@ const express = require('express');
 const mysql = require('mysql2/promise');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const { randomUUID } = require('crypto');
 
 const {
   createKafkaClient,
@@ -112,7 +113,7 @@ app.post('/api/v1/auth/register', async (req, res) => {
     let { userId, firstName, lastName, address, phone, email, password } = req.body;
 
     // ===== VALIDATION =====
-    
+
     if (!userId || !firstName || !lastName || !email || !password) {
       throw new ValidationError('Missing required fields: userId, firstName, lastName, email, password');
     }
@@ -166,7 +167,7 @@ app.post('/api/v1/auth/register', async (req, res) => {
     }
 
     // ===== HASH PASSWORD =====
-    
+
     const passwordHash = await bcrypt.hash(password, 10);
 
     // ===== INSERT USER =====
@@ -194,7 +195,7 @@ app.post('/api/v1/auth/register', async (req, res) => {
     );
 
     // ===== PUBLISH EVENT TO KAFKA =====
-    
+
     if (kafkaProducer) {
       await publishEvent(kafkaProducer, TOPICS.USER_EVENTS, userId, {
         eventType: EVENT_TYPES.USER_CREATED,
@@ -208,7 +209,7 @@ app.post('/api/v1/auth/register', async (req, res) => {
     }
 
     // ===== RETURN SUCCESS RESPONSE =====
-    
+
     res.status(201).json({
       userId,
       firstName,
@@ -230,7 +231,7 @@ app.post('/api/v1/auth/register', async (req, res) => {
       sqlState: error.sqlState,
       sqlMessage: error.sqlMessage
     });
-    
+
     if (error instanceof ValidationError || error instanceof ConflictError) {
       return res.status(error.status).json(
         createErrorResponse(error.status, error.error, error.message, req.path)
@@ -254,7 +255,7 @@ app.post('/api/v1/auth/login', async (req, res) => {
     const { email, password } = req.body;
 
     // ===== VALIDATION =====
-    
+
     if (!email || !password) {
       throw new ValidationError('Email and password are required');
     }
@@ -273,7 +274,7 @@ app.post('/api/v1/auth/login', async (req, res) => {
     const user = users[0];
 
     // ===== VERIFY PASSWORD =====
-    
+
     const passwordMatch = await bcrypt.compare(password, user.password_hash);
 
     if (!passwordMatch) {
@@ -281,7 +282,7 @@ app.post('/api/v1/auth/login', async (req, res) => {
     }
 
     // ===== GENERATE JWT TOKEN =====
-    
+
     const token = jwt.sign(
       {
         userId: user.user_id,  // Use snake_case from DB
@@ -293,7 +294,7 @@ app.post('/api/v1/auth/login', async (req, res) => {
     );
 
     // ===== RETURN TOKEN =====
-    
+
     res.status(200).json({
       accessToken: token,
       tokenType: 'Bearer',
@@ -309,7 +310,7 @@ app.post('/api/v1/auth/login', async (req, res) => {
 
   } catch (error) {
     console.error('Error in user login:', error);
-    
+
     if (error instanceof ValidationError || error instanceof AuthenticationError) {
       return res.status(error.status).json(
         createErrorResponse(error.status, error.error, error.message, req.path)
@@ -372,7 +373,7 @@ app.get('/:userId', async (req, res) => {
 
   } catch (error) {
     console.error('Error fetching user:', error);
-    
+
     if (error instanceof NotFoundError) {
       return res.status(error.status).json(
         createErrorResponse(error.status, error.error, error.message, req.path)
@@ -397,7 +398,7 @@ app.put('/:userId', async (req, res) => {
     const updates = req.body;
 
     // ===== VALIDATE UPDATES =====
-    
+
     if (updates.address) {
       if (updates.address.state && !validateState(updates.address.state)) {
         throw new ValidationError('Invalid US state abbreviation');
@@ -419,7 +420,7 @@ app.put('/:userId', async (req, res) => {
       'phone': 'phone_number',
       'email': 'email'
     };
-    
+
     const updateFields = [];
     const updateValues = [];
 
@@ -472,7 +473,7 @@ app.put('/:userId', async (req, res) => {
     }
 
     // ===== PUBLISH EVENT TO KAFKA =====
-    
+
     if (kafkaProducer) {
       await publishEvent(kafkaProducer, TOPICS.USER_EVENTS, userId, {
         eventType: EVENT_TYPES.USER_UPDATED,
@@ -518,7 +519,7 @@ app.put('/:userId', async (req, res) => {
 
   } catch (error) {
     console.error('Error updating user:', error);
-    
+
     if (error instanceof ValidationError || error instanceof NotFoundError) {
       return res.status(error.status).json(
         createErrorResponse(error.status, error.error, error.message, req.path)
@@ -552,7 +553,7 @@ app.delete('/:userId', async (req, res) => {
     }
 
     // ===== PUBLISH EVENT TO KAFKA =====
-    
+
     if (kafkaProducer) {
       await publishEvent(kafkaProducer, TOPICS.USER_EVENTS, userId, {
         eventType: EVENT_TYPES.USER_DELETED,
@@ -564,7 +565,7 @@ app.delete('/:userId', async (req, res) => {
 
   } catch (error) {
     console.error('Error deleting user:', error);
-    
+
     if (error instanceof NotFoundError) {
       return res.status(error.status).json(
         createErrorResponse(error.status, error.error, error.message, req.path)
@@ -573,6 +574,141 @@ app.delete('/:userId', async (req, res) => {
 
     res.status(500).json(
       createErrorResponse(500, 'Internal Server Error', 'Failed to delete user', req.path)
+    );
+  }
+});
+
+// ==================== PAYMENT METHOD ENDPOINTS ====================
+
+/**
+ * GET /:userId/payment-methods
+ * Retrieve all payment methods for a user
+ */
+app.get('/:userId/payment-methods', async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const [methods] = await pool.execute(
+      `SELECT method_id, card_type, last_four, expiry_month, expiry_year, 
+              card_holder_name, is_default, created_at_utc
+       FROM payment_methods 
+       WHERE user_id = ?
+       ORDER BY is_default DESC, created_at_utc DESC`,
+      [userId]
+    );
+
+    // Map to camelCase
+    const paymentMethods = methods.map(row => ({
+      methodId: row.method_id,
+      cardType: row.card_type,
+      lastFour: row.last_four,
+      expiryMonth: row.expiry_month,
+      expiryYear: row.expiry_year,
+      cardHolderName: row.card_holder_name,
+      isDefault: !!row.is_default,
+      createdAt: row.created_at_utc
+    }));
+
+    res.status(200).json(paymentMethods);
+
+  } catch (error) {
+    console.error('Error fetching payment methods:', error);
+    res.status(500).json(
+      createErrorResponse(500, 'Internal Server Error', 'Failed to fetch payment methods', req.path)
+    );
+  }
+});
+
+/**
+ * POST /:userId/payment-methods
+ * Add a new payment method
+ */
+app.post('/:userId/payment-methods', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { cardType, cardNumber, expiryMonth, expiryYear, cardHolderName, isDefault } = req.body;
+
+    // Basic validation
+    if (!cardType || !cardNumber || !expiryMonth || !expiryYear || !cardHolderName) {
+      throw new ValidationError('Missing required payment fields');
+    }
+
+    // Simple card validation (luhn check would be better but keeping it simple)
+    if (cardNumber.length < 13) {
+      throw new ValidationError('Invalid card number');
+    }
+
+    const lastFour = cardNumber.slice(-4);
+    const methodId = randomUUID();
+
+    // If setting as default, unset other defaults first
+    if (isDefault) {
+      await pool.execute(
+        'UPDATE payment_methods SET is_default = FALSE WHERE user_id = ?',
+        [userId]
+      );
+    }
+
+    await pool.execute(
+      `INSERT INTO payment_methods (
+        method_id, user_id, card_type, last_four, 
+        expiry_month, expiry_year, card_holder_name, is_default
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [methodId, userId, cardType, lastFour, expiryMonth, expiryYear, cardHolderName, isDefault || false]
+    );
+
+    res.status(201).json({
+      methodId,
+      cardType,
+      lastFour,
+      expiryMonth,
+      expiryYear,
+      cardHolderName,
+      isDefault: !!isDefault,
+      message: 'Payment method added successfully'
+    });
+
+  } catch (error) {
+    console.error('Error adding payment method:', error);
+    if (error instanceof ValidationError) {
+      return res.status(error.status).json(
+        createErrorResponse(error.status, error.error, error.message, req.path)
+      );
+    }
+    res.status(500).json(
+      createErrorResponse(500, 'Internal Server Error', 'Failed to add payment method', req.path)
+    );
+  }
+});
+
+/**
+ * DELETE /:userId/payment-methods/:methodId
+ * Remove a payment method
+ */
+app.delete('/:userId/payment-methods/:methodId', async (req, res) => {
+  try {
+    const { userId, methodId } = req.params;
+
+    const [result] = await pool.execute(
+      'DELETE FROM payment_methods WHERE method_id = ? AND user_id = ?',
+      [methodId, userId]
+    );
+
+    if (result.affectedRows === 0) {
+      throw new NotFoundError('Payment method not found');
+    }
+
+    res.status(204).send();
+
+  } catch (error) {
+    console.error('Error deleting payment method:', error);
+    if (error instanceof NotFoundError) {
+      return res.status(error.status).json(
+        createErrorResponse(error.status, error.error, error.message, req.path)
+      );
+    }
+    res.status(500).json(
+      createErrorResponse(500, 'Internal Server Error', 'Failed to delete payment method', req.path)
     );
   }
 });
