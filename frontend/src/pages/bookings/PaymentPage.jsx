@@ -1,5 +1,5 @@
 // src/pages/bookings/PaymentPage.jsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useSelector } from 'react-redux';
 import api from '../../api/axios';
@@ -34,6 +34,135 @@ const PaymentPage = () => {
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
+
+  const userId = user?.userId;
+  const paymentStorageKey = userId ? `kayak_payment_${userId}` : null;
+
+  // ========= PREFILL PAYMENT FORM FROM LOCALSTORAGE / BACKEND =========
+  useEffect(() => {
+    if (!userId) return;
+
+    const prefillFromLocalStorage = () => {
+      if (!paymentStorageKey) return null;
+
+      try {
+        const raw = localStorage.getItem(paymentStorageKey);
+        if (!raw) return null;
+
+        const stored = JSON.parse(raw);
+
+        // Build expiry as MM/YY from stored expiryMonth/expiryYear
+        let expiry = '';
+        if (stored.expiryMonth && stored.expiryYear) {
+          const mm = String(stored.expiryMonth).padStart(2, '0');
+          const yy = String(stored.expiryYear).slice(-2);
+          expiry = `${mm}/${yy}`;
+        }
+
+        // Build billing address
+        let billingAddress = '';
+        const profileAddress = user?.address || {};
+        if (stored.sameAsProfile) {
+          const parts = [
+            profileAddress.street || profileAddress.line1,
+            profileAddress.city,
+            profileAddress.state,
+            profileAddress.zipCode,
+          ].filter(Boolean);
+          billingAddress = parts.join(', ');
+        } else {
+          const parts = [
+            stored.billingStreet,
+            stored.billingCity,
+            stored.billingState,
+            stored.billingZip,
+          ].filter(Boolean);
+          billingAddress = parts.join(', ');
+        }
+
+        const prefill = {
+          nameOnCard: stored.cardholderName || '',
+          // We only know last4, so mask the number – this is enough for the UI
+          cardNumber: stored.last4
+            ? `**** **** **** ${stored.last4}`
+            : '',
+          expiry,
+          cvv: '',
+          billingAddress,
+        };
+
+        return prefill;
+      } catch {
+        return null;
+      }
+    };
+
+    const prefillFromBackend = async () => {
+      try {
+        const res = await api.get(`/users/${userId}/payment-methods`);
+        const methods = Array.isArray(res.data) ? res.data : [];
+        if (!methods.length) return;
+
+        const primary =
+          methods.find((m) => m.isDefault) || methods[0];
+
+        // expiryMonth / expiryYear from backend
+        let expiry = '';
+        if (primary.expiryMonth && primary.expiryYear) {
+          const mm = String(primary.expiryMonth).padStart(2, '0');
+          const yy = String(primary.expiryYear).slice(-2);
+          expiry = `${mm}/${yy}`;
+        }
+
+        // Build a best-effort billing address from profile, if available
+        let billingAddress = '';
+        const addr = user?.address || {};
+        const parts = [
+          addr.street || addr.line1,
+          addr.city,
+          addr.state,
+          addr.zipCode,
+        ].filter(Boolean);
+        if (parts.length > 0) {
+          billingAddress = parts.join(', ');
+        }
+
+        const fromServer = {
+          nameOnCard: primary.cardHolderName || '',
+          cardNumber: primary.lastFour
+            ? `**** **** **** ${primary.lastFour}`
+            : '',
+          expiry,
+          cvv: '',
+          billingAddress,
+        };
+
+        setFormData((prev) => ({
+          ...prev,
+          ...fromServer,
+        }));
+      } catch (err) {
+        console.error(
+          'Failed to prefill payment method:',
+          err?.response?.status,
+          err?.response?.data || err?.message
+        );
+      }
+    };
+
+    // 1) Try localStorage (keeps behaviour consistent with ProfilePage)
+    const localPrefill = prefillFromLocalStorage();
+    if (localPrefill) {
+      setFormData((prev) => ({
+        ...prev,
+        ...localPrefill,
+      }));
+      return;
+    }
+
+    // 2) Fallback to backend /payment-methods table
+    prefillFromBackend();
+  }, [userId, paymentStorageKey, user]);
 
   if (!bookingType || !listing) {
     return (
@@ -256,7 +385,7 @@ const PaymentPage = () => {
 
       const payload = {
         userId: user.userId,
-        listingType: bookingType.toLowerCase(),   // ✅ ONLY CHANGE
+        listingType: bookingType.toLowerCase(), // ✅ matches booking-service expectations
         listingId,
         startDate: startDateStr,
         endDate: endDateStr,
@@ -272,7 +401,57 @@ const PaymentPage = () => {
         },
       };
 
+      // 1) Create booking (existing behaviour)
       await api.post('/bookings', payload);
+
+      // 2) Best-effort: save payment method to user-service
+      try {
+        const digitsOnlyCard = (formData.cardNumber || '').replace(/\D/g, '');
+
+        if (digitsOnlyCard.length >= 13) {
+          // Simple card type inference (not critical for UI)
+          let cardType = 'card';
+          if (/^4/.test(digitsOnlyCard)) {
+            cardType = 'visa';
+          } else if (/^5[1-5]/.test(digitsOnlyCard)) {
+            cardType = 'mastercard';
+          } else if (/^3[47]/.test(digitsOnlyCard)) {
+            cardType = 'amex';
+          }
+
+          let expiryMonth = '';
+          let expiryYear = '';
+          if (formData.expiry) {
+            const parts = formData.expiry.split('/');
+            if (parts.length >= 1) {
+              expiryMonth = parts[0].trim();
+            }
+            if (parts.length >= 2) {
+              expiryYear = parts[1].trim();
+              if (expiryYear.length === 2) {
+                expiryYear = `20${expiryYear}`;
+              }
+            }
+          }
+
+          await api.post(`/users/${user.userId}/payment-methods`, {
+            cardType,
+            cardNumber: digitsOnlyCard,
+            expiryMonth,
+            expiryYear,
+            cardHolderName: formData.nameOnCard,
+            isDefault: true,
+          });
+        }
+      } catch (saveErr) {
+        console.error(
+          'Failed to save payment method:',
+          saveErr?.response?.status,
+          saveErr?.response?.data || saveErr?.message
+        );
+        // Intentionally do not surface this to the user –
+        // booking should still look successful.
+      }
 
       navigate('/my-bookings');
     } catch (err) {
