@@ -207,24 +207,50 @@ def supervisor_node(state: TravelState) -> TravelState:
                       "wifi", "baggage", "check-in", "check-out", "policy"]
     watch_keywords = ["watch", "alert", "notify", "track", "monitor",
                      "let me know", "tell me if", "drops below"]
-    analysis_keywords = ["good deal", "good price", "worth it", "actually good",
-                        "compare", "vs", "versus", "better deal"]
+    analysis_keywords = ["analyze", "analysis", "good deal", "good price", "worth it", 
+                        "actually good", "compare", "vs", "versus", "better deal",
+                        "is this good", "tell me about", "details", "more info"]
     quote_keywords = ["book", "reserve", "quote", "total cost", "full price",
                      "complete", "proceed", "checkout"]
+    confirm_keywords = ["yes", "confirm", "sure", "ok", "okay", "go ahead", 
+                       "do it", "let's do it", "sounds good", "perfect"]
+    refinement_keywords = ["show", "find", "want", "need", "prefer", "like", 
+                          "cheaper", "different", "another", "more options"]
     
-    # If user has previous recommendations and is refining search, stay in recommendation
-    if prev_recs and any(kw in query for kw in ["option", "show", "find", "want", "need", "prefer", "like"]):
-        intent = "recommendation"
-    elif any(kw in query for kw in policy_keywords) and not prev_recs:
-        intent = "policy"
+    # Get last response type from session to handle confirmations
+    last_response_type = ""
+    if session_store:
+        try:
+            session_data = session_store.get_session(session_id)
+            if session_data:
+                last_response_type = session_data.get("last_response_type", "")
+        except Exception:
+            # Fallback: check if we have a quote in previous state
+            pass
+    
+    # Check for confirmation (user saying "yes" after a quote)
+    if any(kw in query for kw in confirm_keywords) and last_response_type == "quote" and prev_recs:
+        intent = "booking_confirmation"
+    # Also check if simple "yes" with prev_recs (likely confirming something)
+    elif query.strip() in ["yes", "ok", "okay", "sure", "confirm", "yes please", "yeah"] and prev_recs:
+        intent = "booking_confirmation"
+    # Check analysis/watch/quote FIRST (higher priority) - these are specific intents
+    elif any(kw in query for kw in analysis_keywords) and prev_recs:
+        intent = "price_analysis"
     elif any(kw in query for kw in watch_keywords):
         intent = "watch"
-    elif any(kw in query for kw in analysis_keywords):
-        intent = "price_analysis"
-    elif any(kw in query for kw in quote_keywords):
+    elif any(kw in query for kw in quote_keywords) and prev_recs:
         intent = "quote"
+    elif any(kw in query for kw in policy_keywords):
+        intent = "policy"
+    # Then check refinement (user refining their search)
+    elif prev_recs and any(kw in query for kw in refinement_keywords):
+        intent = "recommendation"
     elif parsed_intent and hasattr(parsed_intent, 'needs_clarification') and parsed_intent.needs_clarification:
         if prev_recs:
+            intent = "recommendation"
+        elif search_params.get("destination"):
+            # If we have destination, go to recommendation even if clarification suggested
             intent = "recommendation"
         else:
             intent = "clarification"
@@ -415,6 +441,36 @@ def quote_agent_node(state: TravelState) -> TravelState:
         **state,
         "agent_output": output,
         "response_type": "quote"
+    }
+
+
+def booking_confirmation_agent_node(state: TravelState) -> TravelState:
+    """
+    BOOKING CONFIRMATION AGENT (Worker)
+    Handles user confirmation after quote - redirects to booking page.
+    """
+    prev_recs = state.get("previous_recommendations", [])
+    
+    if not prev_recs:
+        output = {
+            "success": False,
+            "message": "No booking to confirm. Please search for options first."
+        }
+    else:
+        bundle = prev_recs[0]
+        output = {
+            "success": True,
+            "bundle": bundle,
+            "action": "redirect_to_booking",
+            "message": "Great! Redirecting you to complete your booking..."
+        }
+    
+    logger.info(f"[BookingConfirmationAgent] Confirmed booking")
+    
+    return {
+        **state,
+        "agent_output": output,
+        "response_type": "booking_confirmation"
     }
 
 
@@ -630,7 +686,7 @@ def _build_bundles(deals: Dict[str, List], params: Dict) -> List[Dict]:
                 "policy": {"refundable": "refundable" in hotel_tags}
             } if hotel else {},
             "has_promo": (flight.get("has_promo", False) if flight else False) or (hotel.get("has_promo", False) if hotel else False),
-            "promo_end_date": flight.get("promo_end_date") or hotel.get("promo_end_date") if hotel else None
+            "promo_end_date": (flight.get("promo_end_date") if flight else None) or (hotel.get("promo_end_date") if hotel else None)
         })
         
         bundle = {
@@ -708,6 +764,12 @@ Quote valid for 30 minutes. Ready to book?"""
         else:
             response = output.get("message", "Couldn't generate quote.")
     
+    elif response_type == "booking_confirmation":
+        if output.get("success"):
+            response = "Great! Redirecting you to complete your booking..."
+        else:
+            response = output.get("message", "Couldn't confirm booking.")
+    
     elif response_type == "recommendations":
         if output.get("needs_clarification"):
             response = output.get("question", "Could you tell me more about your trip?")
@@ -736,6 +798,17 @@ Quote valid for 30 minutes. Ready to book?"""
     
     logger.info(f"[Synthesizer] Response type: {response_type}, length: {len(response)}")
     
+    # Save last_response_type to session for confirmation handling
+    if session_store and session_id:
+        try:
+            # Try to update last_response_type if method exists
+            if hasattr(session_store, 'update_last_response_type'):
+                session_store.update_last_response_type(session_id, response_type)
+            elif hasattr(session_store, 'update_session'):
+                session_store.update_session(session_id, {"last_response_type": response_type})
+        except Exception as e:
+            logger.warning(f"Could not save last_response_type: {e}")
+    
     return {
         **state,
         "response": response,
@@ -763,6 +836,7 @@ def route_to_agent(state: TravelState) -> str:
         "watch": "watch_agent",
         "price_analysis": "price_analysis_agent",
         "quote": "quote_agent",
+        "booking_confirmation": "booking_confirmation_agent",
         "recommendation": "recommendation_agent",
         "clarification": "recommendation_agent"
     }
@@ -789,6 +863,7 @@ def build_travel_graph() -> StateGraph:
     workflow.add_node("watch_agent", watch_agent_node)
     workflow.add_node("price_analysis_agent", price_analysis_agent_node)
     workflow.add_node("quote_agent", quote_agent_node)
+    workflow.add_node("booking_confirmation_agent", booking_confirmation_agent_node)
     workflow.add_node("recommendation_agent", recommendation_agent_node)
     workflow.add_node("synthesizer", synthesizer_node)
     
@@ -804,6 +879,7 @@ def build_travel_graph() -> StateGraph:
             "watch_agent": "watch_agent",
             "price_analysis_agent": "price_analysis_agent",
             "quote_agent": "quote_agent",
+            "booking_confirmation_agent": "booking_confirmation_agent",
             "recommendation_agent": "recommendation_agent"
         }
     )
@@ -813,6 +889,7 @@ def build_travel_graph() -> StateGraph:
     workflow.add_edge("watch_agent", "synthesizer")
     workflow.add_edge("price_analysis_agent", "synthesizer")
     workflow.add_edge("quote_agent", "synthesizer")
+    workflow.add_edge("booking_confirmation_agent", "synthesizer")
     workflow.add_edge("recommendation_agent", "synthesizer")
     
     # Synthesizer goes to END

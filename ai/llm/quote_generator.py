@@ -267,7 +267,7 @@ class QuoteGenerator:
         hotel = bundle.get("hotel", {})
         
         # Calculate nights from dates
-        date_from = bundle.get("date_from") or flight.get("departure_time", "")[:10]
+        date_from = bundle.get("date_from") or (flight.get("departure_time", "")[:10] if flight else "")
         date_to = bundle.get("date_to") or ""
         
         nights = 3  # Default

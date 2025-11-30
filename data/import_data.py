@@ -187,7 +187,7 @@ def import_hotels(db, filepath, limit=10000):
     """Import hotels data with Deal Score fields"""
     print(f"\n=== Importing Hotels from {filepath} ===")
     
-    df = pd.read_csv(filepath, nrows=limit)
+    df = pd.read_csv(filepath, nrows=limit * 2)  # Load more to filter
     print(f"Loaded {len(df)} hotel bookings")
     
     # Set random seed for reproducibility
@@ -196,6 +196,7 @@ def import_hotels(db, filepath, limit=10000):
     # Transform booking data into hotel listings
     hotels = []
     seen_hotels = set()
+    skipped_zero_price = 0
     
     for idx, row in df.iterrows():
         hotel_type = row.get("hotel", "Hotel")
@@ -207,11 +208,17 @@ def import_hotels(db, filepath, limit=10000):
             continue
         seen_hotels.add(hotel_key)
         
-        # Base price
-        adr = float(row.get("adr", 100)) if pd.notna(row.get("adr")) else 100
+        # Base price - FIX: Skip hotels with adr <= 0
+        raw_adr = row.get("adr")
+        if pd.isna(raw_adr) or float(raw_adr) <= 0:
+            skipped_zero_price += 1
+            continue  # Skip this record
+        
+        adr = float(raw_adr)
         
         # Generate Deal Score fields based on hotel_id hash for consistency
-        hash_val = hash(f"HT{idx:06d}") % 100
+        hotel_idx = len(hotels)  # Use actual hotel index for consistent IDs
+        hash_val = hash(f"HT{hotel_idx:06d}") % 100
         
         # 1. Discount: 5% to 35% (作业要求: >=15% below 30-day avg)
         discount_percent = 5 + (hash_val % 31)  # 5% to 35%
@@ -261,7 +268,7 @@ def import_hotels(db, filepath, limit=10000):
         deal_score = min(95, max(30, 15 + discount_score + scarcity_score + promo_score + star_score + refund_score))
         
         hotel = {
-            "hotel_id": f"HT{idx:06d}",
+            "hotel_id": f"HT{hotel_idx:06d}",
             "name": f"{hotel_type} - {country}",
             "hotel_type": hotel_type,
             "city": country,  # Using country as city for this dataset
@@ -287,6 +294,8 @@ def import_hotels(db, filepath, limit=10000):
         
         if len(hotels) >= limit:
             break
+    
+    print(f"Skipped {skipped_zero_price} hotels with zero/null price")
     
     # Insert to MongoDB
     collection = db["hotels"]

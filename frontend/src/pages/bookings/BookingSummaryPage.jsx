@@ -1,5 +1,5 @@
 // src/pages/bookings/BookingSummaryPage.jsx
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import './BookingSummaryPage.css';
 
@@ -9,6 +9,7 @@ import './BookingSummaryPage.css';
  * UI-only step for this phase:
  *  - Shows a Kayak-style summary card
  *  - Supports flights / hotels / cars via location.state
+ *  - Also supports AI chat booking via localStorage
  *
  * Navigation:
  *  navigate('/booking/summary', { state: { bookingType, listing } });
@@ -16,12 +17,30 @@ import './BookingSummaryPage.css';
 const BookingSummaryPage = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  
+  const [bookingData, setBookingData] = useState(null);
 
-  const bookingType = location.state?.bookingType || null;
+  // Check for AI booking data in localStorage
+  useEffect(() => {
+    const aiBookingData = localStorage.getItem('aiBookingData');
+    if (aiBookingData) {
+      try {
+        const parsed = JSON.parse(aiBookingData);
+        setBookingData(parsed);
+        // Clear after reading
+        localStorage.removeItem('aiBookingData');
+      } catch (e) {
+        console.error('Failed to parse AI booking data:', e);
+      }
+    }
+  }, []);
+
+  const bookingType = location.state?.bookingType || (bookingData ? 'bundle' : null);
   const listing = location.state?.listing || null;
+  const aiQuote = bookingData?.quote || null;
 
-  // If user somehow opens the page directly without state
-  if (!bookingType || !listing) {
+  // If user somehow opens the page directly without state and no AI data
+  if (!bookingType && !aiQuote) {
     return (
       <div className="booking-summary-page">
         <div className="booking-summary-inner">
@@ -44,7 +63,118 @@ const BookingSummaryPage = () => {
     );
   }
 
-  // ---------- Helpers to build UI per type ----------
+  // Handle AI booking data
+  if (aiQuote) {
+    // Parse the quote response to extract details
+    const quoteText = aiQuote.response || '';
+    
+    // Extract title (first line after **)
+    const titleMatch = quoteText.match(/\*\*Complete Quote: (.+?)\*\*/);
+    const title = titleMatch ? titleMatch[1] : 'AI Travel Package';
+    
+    // Extract grand total
+    const totalMatch = quoteText.match(/\*\*Grand Total: \$(\d+)\*\*/);
+    const grandTotal = totalMatch ? parseInt(totalMatch[1]) : 0;
+    
+    // Extract flight info
+    const flightMatch = quoteText.match(/\*\*Flight:\*\*[\s\S]*?Total: \$(\d+)/);
+    const flightTotal = flightMatch ? parseInt(flightMatch[1]) : 0;
+    
+    // Extract hotel info
+    const hotelMatch = quoteText.match(/\*\*Hotel:\*\*[\s\S]*?Total: \$(\d+)/);
+    const hotelTotal = hotelMatch ? parseInt(hotelMatch[1]) : 0;
+
+    const handleContinueToPayment = () => {
+      navigate('/booking/payment', {
+        state: {
+          bookingType: 'bundle',
+          listing: {
+            name: title,
+            totalPrice: grandTotal,
+            flightPrice: flightTotal,
+            hotelPrice: hotelTotal,
+            source: 'ai-assistant'
+          },
+        },
+      });
+    };
+
+    const handleBackToSearch = () => {
+      navigate('/');
+    };
+
+    return (
+      <div className="booking-summary-page">
+        <div className="booking-summary-inner">
+          <div className="booking-summary-card">
+            <header className="booking-summary-header">
+              <div>
+                <div className="booking-summary-chip">AI Travel Package</div>
+                <h1 className="booking-summary-title">Review your booking</h1>
+                <p className="booking-summary-subtitle">
+                  Package recommended by AI Travel Assistant
+                </p>
+              </div>
+            </header>
+
+            <div className="booking-summary-body">
+              {/* Left: details */}
+              <div className="booking-summary-details">
+                <h2 className="booking-summary-item-title">{title}</h2>
+                
+                <div className="booking-summary-breakdown">
+                  <div className="booking-summary-breakdown-item">
+                    <span className="booking-summary-breakdown-label">✈️ Flight</span>
+                    <span className="booking-summary-breakdown-value">${flightTotal} USD</span>
+                  </div>
+                  <div className="booking-summary-breakdown-item">
+                    <span className="booking-summary-breakdown-label">🏨 Hotel</span>
+                    <span className="booking-summary-breakdown-value">${hotelTotal} USD</span>
+                  </div>
+                </div>
+
+                <div className="booking-summary-actions-secondary">
+                  <button
+                    type="button"
+                    className="booking-summary-link-btn"
+                    onClick={handleBackToSearch}
+                  >
+                    ← Back to search
+                  </button>
+                </div>
+              </div>
+
+              {/* Right: price + CTA */}
+              <aside className="booking-summary-side">
+                <div className="booking-summary-price-card">
+                  <div className="booking-summary-price-row">
+                    <span className="booking-summary-price-label">
+                      Package total
+                    </span>
+                    <span className="booking-summary-price-value">
+                      ${grandTotal} USD
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="booking-summary-primary-btn"
+                    onClick={handleContinueToPayment}
+                  >
+                    Continue to payment
+                  </button>
+                  <p className="booking-summary-price-note">
+                    You won&apos;t be charged until the booking is confirmed.
+                  </p>
+                </div>
+              </aside>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ---------- Original code for non-AI bookings ----------
 
   const typeLabel =
     bookingType === 'flight'
