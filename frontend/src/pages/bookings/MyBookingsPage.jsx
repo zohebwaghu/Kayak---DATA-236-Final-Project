@@ -25,6 +25,12 @@ const MyBookingsPage = () => {
   const [activeTab, setActiveTab] = useState('flight'); // 'flight' | 'hotel' | 'car'
   const [timeFilter, setTimeFilter] = useState('all'); // 'all' | 'upcoming' | 'ongoing' | 'past'
 
+  // 🔹 New billing-related state
+  const [showInvoiceModal, setShowInvoiceModal] = useState(false);
+  const [billingLoading, setBillingLoading] = useState(false);
+  const [billingError, setBillingError] = useState('');
+  const [selectedBookingInvoices, setSelectedBookingInvoices] = useState(null); // { booking, invoices: [] }
+
   const formatType = (t) =>
     t ? t.charAt(0).toUpperCase() + t.slice(1).toLowerCase() : '';
 
@@ -36,6 +42,19 @@ const MyBookingsPage = () => {
       year: 'numeric',
       month: 'short',
       day: 'numeric',
+    });
+  };
+
+  const formatDateTime = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    return d.toLocaleString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
     });
   };
 
@@ -155,6 +174,63 @@ const MyBookingsPage = () => {
     const type = (b.listingType || '').toLowerCase();
     return type === activeTab;
   });
+
+  // 🔹 New: load invoices for a given booking & show modal
+  const handleViewReceipt = async (booking) => {
+    if (!user || !user.userId) return;
+
+    const bookingKey = booking.bookingId || booking.id;
+    if (!bookingKey) {
+      setBillingError('Missing booking ID for this trip.');
+      setSelectedBookingInvoices({ booking, invoices: [] });
+      setShowInvoiceModal(true);
+      return;
+    }
+
+    setBillingLoading(true);
+    setBillingError('');
+    setShowInvoiceModal(true);
+
+    try {
+      // API Gateway → Billing service:
+      // GET /api/v1/billing/users/:userId/invoices
+      const res = await api.get(`/billing/users/${user.userId}/invoices`);
+      const raw = res.data;
+
+      const allInvoices = Array.isArray(raw?.invoices)
+        ? raw.invoices
+        : Array.isArray(raw)
+        ? raw
+        : [];
+
+      const invoicesForBooking = allInvoices.filter(
+        (inv) => inv.bookingId === bookingKey
+      );
+
+      setSelectedBookingInvoices({
+        booking,
+        invoices: invoicesForBooking,
+      });
+    } catch (err) {
+      const msg =
+        err?.response?.data?.message ||
+        err?.response?.data?.error ||
+        'Failed to load invoice for this booking.';
+      setBillingError(msg);
+      setSelectedBookingInvoices({
+        booking,
+        invoices: [],
+      });
+    } finally {
+      setBillingLoading(false);
+    }
+  };
+
+  const closeInvoiceModal = () => {
+    setShowInvoiceModal(false);
+    setBillingError('');
+    setSelectedBookingInvoices(null);
+  };
 
   return (
     <div className="container py-4 mytrips-root">
@@ -335,9 +411,18 @@ const MyBookingsPage = () => {
                             : 'N/A'}
                         </p>
 
-                        <p className="text-muted small mt-auto">
+                        <p className="text-muted small mt-auto mb-2">
                           Booking ID: {bookingId || id || 'N/A'}
                         </p>
+
+                        {/* 🔹 New: View receipt / invoice button */}
+                        <button
+                          type="button"
+                          className="mytrips-receipt-link"
+                          onClick={() => handleViewReceipt(booking)}
+                        >
+                          View receipt
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -352,6 +437,109 @@ const MyBookingsPage = () => {
             </div>
           </>
         )}
+
+      {/* 🔹 Invoice modal */}
+      {showInvoiceModal && (
+        <div className="mytrips-invoice-backdrop" onClick={closeInvoiceModal}>
+          <div
+            className="mytrips-invoice-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mytrips-invoice-header">
+              <h5 className="mytrips-invoice-title">Receipt &amp; invoices</h5>
+              <button
+                type="button"
+                className="mytrips-invoice-close"
+                onClick={closeInvoiceModal}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="mytrips-invoice-body">
+              {billingLoading && (
+                <p className="text-muted mb-0">Loading invoice…</p>
+              )}
+
+              {!billingLoading && billingError && (
+                <p className="text-danger mb-0">{billingError}</p>
+              )}
+
+              {!billingLoading &&
+                !billingError &&
+                selectedBookingInvoices && (
+                  <>
+                    {(!selectedBookingInvoices.invoices ||
+                      selectedBookingInvoices.invoices.length === 0) && (
+                      <p className="text-muted mb-0">
+                        No invoice has been generated yet for this booking.
+                      </p>
+                    )}
+
+                    {selectedBookingInvoices.invoices &&
+                      selectedBookingInvoices.invoices.length > 0 && (
+                        <ul className="mytrips-invoice-list">
+                          {selectedBookingInvoices.invoices.map((inv) => (
+                            <li
+                              key={inv.invoiceId}
+                              className="mytrips-invoice-item"
+                            >
+                              <div className="mytrips-invoice-row">
+                                <span className="mytrips-invoice-label">
+                                  Invoice ID
+                                </span>
+                                <span className="mytrips-invoice-value">
+                                  {inv.invoiceId}
+                                </span>
+                              </div>
+                              <div className="mytrips-invoice-row">
+                                <span className="mytrips-invoice-label">
+                                  Amount
+                                </span>
+                                <span className="mytrips-invoice-value">
+                                  {typeof inv.amount === 'number'
+                                    ? `$${inv.amount.toFixed(2)} ${
+                                        inv.currency || 'USD'
+                                      }`
+                                    : `${inv.amount} ${inv.currency || 'USD'}`}
+                                </span>
+                              </div>
+                              <div className="mytrips-invoice-row">
+                                <span className="mytrips-invoice-label">
+                                  Status
+                                </span>
+                                <span className="mytrips-invoice-value">
+                                  {inv.status}
+                                </span>
+                              </div>
+                              <div className="mytrips-invoice-row">
+                                <span className="mytrips-invoice-label">
+                                  Issued at
+                                </span>
+                                <span className="mytrips-invoice-value">
+                                  {formatDateTime(inv.issuedAt)}
+                                </span>
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                  </>
+                )}
+            </div>
+
+            <div className="mytrips-invoice-footer">
+              <button
+                type="button"
+                className="mytrips-invoice-close-btn"
+                onClick={closeInvoiceModal}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

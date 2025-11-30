@@ -401,10 +401,47 @@ const PaymentPage = () => {
         },
       };
 
-      // 1) Create booking (existing behaviour)
-      await api.post('/bookings', payload);
+      // 1) Create booking (now capturing bookingId from backend)
+      const bookingResponse = await api.post('/bookings', payload);
+      const createdBookingId = bookingResponse?.data?.bookingId || null;
 
-      // 2) Best-effort: save payment method to user-service
+      // 2) Best-effort: create invoice + payment via billing-service
+      try {
+        const digitsOnlyCardForBilling = (formData.cardNumber || '').replace(
+          /\D/g,
+          ''
+        );
+        const last4ForBilling = digitsOnlyCardForBilling.slice(-4) || '';
+
+        // Simple card brand label for receipts
+        let cardTypeForBilling = 'Card';
+        if (/^4/.test(digitsOnlyCardForBilling)) {
+          cardTypeForBilling = 'Visa';
+        } else if (/^5[1-5]/.test(digitsOnlyCardForBilling)) {
+          cardTypeForBilling = 'Mastercard';
+        } else if (/^3[47]/.test(digitsOnlyCardForBilling)) {
+          cardTypeForBilling = 'Amex';
+        }
+
+        if (createdBookingId) {
+          await api.post('/billing/charge', {
+            bookingId: createdBookingId,
+            userId: user.userId,
+            paymentMethod: 'credit_card', // for this lab, treat as card
+            cardType: cardTypeForBilling,
+            cardLast4: last4ForBilling || undefined,
+          });
+        }
+      } catch (billingErr) {
+        console.error(
+          'Failed to create billing records:',
+          billingErr?.response?.status,
+          billingErr?.response?.data || billingErr?.message
+        );
+        // Do NOT throw – booking is already created and should still show in My Bookings
+      }
+
+      // 3) Best-effort: save payment method to user-service
       try {
         const digitsOnlyCard = (formData.cardNumber || '').replace(/\D/g, '');
 
@@ -450,7 +487,7 @@ const PaymentPage = () => {
           saveErr?.response?.data || saveErr?.message
         );
         // Intentionally do not surface this to the user –
-        // booking should still look successful.
+        // booking + billing should still look successful.
       }
 
       navigate('/my-bookings');

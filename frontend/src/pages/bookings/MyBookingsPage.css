@@ -96,3 +96,126 @@
   transform: translateY(0);
   box-shadow: 0 3px 8px rgba(0, 0, 0, 0.16);
 }
+
+/* 🔹 New: "View receipt" button on each card */
+.mytrips-receipt-link {
+  margin-top: 0.25rem;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #2563eb;
+  font-size: 0.9rem;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mytrips-receipt-link:hover {
+  text-decoration: underline;
+}
+
+/* 🔹 New: invoice modal overlay */
+.mytrips-invoice-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1050;
+}
+
+/* Modal card */
+.mytrips-invoice-modal {
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 1.25rem 1.5rem;
+  max-width: 520px;
+  width: 100%;
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.35);
+}
+
+/* Header */
+.mytrips-invoice-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.mytrips-invoice-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.mytrips-invoice-close {
+  border: none;
+  background: none;
+  font-size: 1.1rem;
+  cursor: pointer;
+  color: #4b5563;
+}
+
+/* Body */
+.mytrips-invoice-body {
+  font-size: 0.9rem;
+  color: #111827;
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+/* Footer */
+.mytrips-invoice-footer {
+  margin-top: 0.9rem;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.mytrips-invoice-close-btn {
+  border-radius: 999px;
+  padding: 0.4rem 1.2rem;
+  border: 1px solid #e5e7eb;
+  background-color: #f9fafb;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.mytrips-invoice-close-btn:hover {
+  background-color: #f3f4f6;
+}
+
+/* Invoice list */
+.mytrips-invoice-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.mytrips-invoice-item {
+  border-radius: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  background-color: #f9fafb;
+  border: 1px solid #e5e7eb;
+}
+
+.mytrips-invoice-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.85rem;
+  margin-bottom: 0.15rem;
+}
+
+.mytrips-invoice-label {
+  color: #6b7280;
+}
+
+.mytrips-invoice-value {
+  font-weight: 500;
+  color: #111827;
+}
