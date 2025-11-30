@@ -1,414 +1,198 @@
-// BILLING SERVICE
-//
-// Purpose: Records invoices & payments for completed bookings.
-// Databases:
-//   - kayak_billing  → invoices, payments
-//   - kayak_bookings → bookings (to read amount & listing info)
+/**
+ * BILLING SERVICE
+ *
+ * Purpose: Manages invoices and payments
+ * Responsibilities:
+ *  - Listen to booking events (Created/Cancelled)
+ *  - Generate Invoices
+ *  - Process Refunds
+ *  - Serve invoice data to frontend
+ */
 
 require('dotenv').config();
 const express = require('express');
 const mysql = require('mysql2/promise');
-const { randomUUID } = require('crypto');
-
-const {
-  createErrorResponse,
-  ValidationError,
-  NotFoundError,
-} = require('../../shared/errorHandler');
+const { v4: uuidv4 } = require('uuid');
+const { Kafka } = require('kafkajs');
 
 const app = express();
 const PORT = process.env.BILLING_SERVICE_PORT || 3005;
 
 app.use(express.json());
 
-// ==================== DATABASE CONNECTIONS ====================
+// ==================== DATABASE CONNECTION ====================
 
 const MYSQL_HOST = process.env.MYSQL_HOST || 'localhost';
 const MYSQL_PORT = process.env.MYSQL_PORT || 3306;
 const MYSQL_USER = process.env.MYSQL_USER || 'root';
 const MYSQL_PASSWORD = process.env.MYSQL_PASSWORD || '';
+const MYSQL_DB = process.env.MYSQL_DB_BILLING || 'kayak_billing';
 
-const BILLING_DB = process.env.MYSQL_DB_BILLING || 'kayak_billing';
-const BOOKINGS_DB = process.env.MYSQL_DB_BOOKINGS || 'kayak_bookings';
-
-// Pool for billing DB (invoices + payments)
-const billingPool = mysql.createPool({
-  host: MYSQL_HOST,
-  port: MYSQL_PORT,
-  user: MYSQL_USER,
-  password: MYSQL_PASSWORD,
-  database: BILLING_DB,
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0,
-  enableKeepAlive: true,
-  keepAliveInitialDelay: 0,
+const pool = mysql.createPool({
+    host: MYSQL_HOST,
+    port: MYSQL_PORT,
+    user: MYSQL_USER,
+    password: MYSQL_PASSWORD,
+    database: MYSQL_DB,
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
 });
 
-// Pool for bookings DB (to read bookings)
-const bookingsPool = mysql.createPool({
-  host: MYSQL_HOST,
-  port: MYSQL_PORT,
-  user: MYSQL_USER,
-  password: MYSQL_PASSWORD,
-  database: BOOKINGS_DB,
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0,
-  enableKeepAlive: true,
-  keepAliveInitialDelay: 0,
-});
-
-// Test both connections on startup
+// Test DB connection
 (async () => {
-  try {
-    const bConn = await billingPool.getConnection();
-    console.log(`✅ MySQL billing database connected: ${BILLING_DB}`);
-    bConn.release();
-
-    const bkConn = await bookingsPool.getConnection();
-    console.log(`✅ MySQL bookings database connected: ${BOOKINGS_DB}`);
-    bkConn.release();
-  } catch (err) {
-    console.error('❌ MySQL connection failed:', err);
-    process.exit(1);
-  }
+    try {
+        const conn = await pool.getConnection();
+        console.log(`✅ MySQL billing database connected: ${MYSQL_DB}`);
+        conn.release();
+    } catch (err) {
+        console.error('❌ MySQL connection failed:', err);
+        process.exit(1);
+    }
 })();
 
-// ==================== HEALTH CHECK ====================
+// ==================== KAFKA SETUP ====================
 
-app.get('/health', (req, res) => {
-  res.status(200).json({
-    status: 'UP',
-    service: 'Billing Service',
-    timestamp: new Date().toISOString(),
-    billingDb: BILLING_DB,
-    bookingsDb: BOOKINGS_DB,
-  });
+const kafka = new Kafka({
+    clientId: 'billing-service',
+    brokers: (process.env.KAFKA_BROKER || 'localhost:9092').split(','),
+    retry: {
+        initialRetryTime: 100,
+        retries: 8,
+    },
 });
 
-// ==================== BILLING ENDPOINTS ====================
+const consumer = kafka.consumer({ groupId: 'billing-service-group' });
 
-/**
- * POST /api/v1/billing/charge
- *
- * Body:
- * {
- *   bookingId: string,
- *   userId: string,           // SSN-style user id
- *   paymentMethod: "credit_card" | "debit_card" | "paypal" | "stripe",
- *   cardType?: string,        // "Visa", "Mastercard", etc. (for record only)
- *   cardLast4?: string        // last 4 digits for receipts
- * }
- *
- * Behaviour:
- *  - Looks up booking in kayak_bookings.bookings
- *  - Uses booking.totalPrice as amount
- *  - Inserts invoice (status = 'paid')
- *  - Inserts payment  (status = 'completed')
- */
-app.post('/api/v1/billing/charge', async (req, res) => {
-  const billingConn = await billingPool.getConnection();
+const TOPICS = {
+    BOOKING_EVENTS: 'booking.events',
+};
 
-  try {
-    const {
-      bookingId,
-      userId,
-      paymentMethod,
-      cardType,
-      cardLast4,
-    } = req.body;
+const EVENT_TYPES = {
+    BOOKING_CREATED: 'BookingCreated',
+    BOOKING_CANCELLED: 'BookingCancelled',
+};
 
-    // ===== BASIC VALIDATION =====
-    if (!bookingId || !userId || !paymentMethod) {
-      throw new ValidationError(
-        'Missing required fields: bookingId, userId, paymentMethod'
-      );
+const connectKafka = async () => {
+    try {
+        await consumer.connect();
+        console.log('✅ Kafka Consumer connected');
+
+        await consumer.subscribe({ topic: TOPICS.BOOKING_EVENTS, fromBeginning: false });
+
+        await consumer.run({
+            eachMessage: async ({ topic, partition, message }) => {
+                try {
+                    const value = JSON.parse(message.value.toString());
+                    const { eventType, data } = value;
+
+                    console.log(`📥 Received event: ${eventType}`, data.bookingId);
+
+                    if (eventType === EVENT_TYPES.BOOKING_CREATED) {
+                        await handleBookingCreated(data);
+                    } else if (eventType === EVENT_TYPES.BOOKING_CANCELLED) {
+                        await handleBookingCancelled(data);
+                    }
+                } catch (err) {
+                    console.error('❌ Error processing Kafka message:', err);
+                }
+            },
+        });
+    } catch (err) {
+        console.error('❌ Failed to connect to Kafka:', err);
+        // Retry logic could go here
     }
+};
 
-    if (!['credit_card', 'debit_card', 'paypal', 'stripe'].includes(paymentMethod)) {
-      throw new ValidationError(
-        "paymentMethod must be one of: 'credit_card', 'debit_card', 'paypal', 'stripe'"
-      );
-    }
+connectKafka();
 
-    // ===== LOOK UP BOOKING (read-only, from bookings DB) =====
-    const [bookings] = await bookingsPool.execute(
-      `SELECT bookingId, userId, listingType, listingId,
-              startDate, endDate, guests, totalPrice, status
-       FROM bookings
-       WHERE bookingId = ?`,
-      [bookingId]
-    );
+// ==================== EVENT HANDLERS ====================
 
-    if (bookings.length === 0) {
-      throw new NotFoundError('Booking not found');
-    }
-
-    const booking = bookings[0];
-
-    if (booking.userId !== userId) {
-      throw new ValidationError('Booking does not belong to this user');
-    }
-
-    if (booking.status === 'cancelled') {
-      throw new ValidationError('Cannot charge a cancelled booking');
-    }
-
-    const amount = parseFloat(booking.totalPrice);
-    const currency = 'USD';
-
-    // ===== START TRANSACTION ON BILLING DB =====
-    await billingConn.beginTransaction();
-    console.log('💳 Billing transaction started');
-
-    const invoiceId = randomUUID();
-    const paymentId = randomUUID();
-    const now = new Date();
-
-    const lineItems = JSON.stringify([
-      {
-        bookingId: booking.bookingId,
-        listingType: booking.listingType,
-        listingId: booking.listingId,
-        startDate: booking.startDate,
-        endDate: booking.endDate,
-        guests: booking.guests,
-        amount,
-      },
-    ]);
-
-    // Simulated processor response
-    const transactionId = `SIM-${Date.now()}`;
-    const processorResponse = JSON.stringify({
-      simulated: true,
-      message: 'Payment approved',
-      cardType: cardType || null,
-      cardLast4: cardLast4 || null,
-    });
-
-    // ----- Insert invoice -----
-    await billingConn.execute(
-      `INSERT INTO invoices (
-        invoiceId, bookingId, userId,
-        amount, currency, status,
-        issuedAt, paidAt, dueAt, lineItems
-      ) VALUES (?, ?, ?, ?, ?, 'paid', ?, ?, ?, ?)`,
-      [
-        invoiceId,
-        bookingId,
-        userId,
-        amount,
-        currency,
-        now,
-        now,
-        now,         // dueAt (for this lab, same as paidAt)
-        lineItems,
-      ]
-    );
-
-    // ----- Insert payment -----
-    await billingConn.execute(
-      `INSERT INTO payments (
-        paymentId, bookingId, userId,
-        amount, currency, paymentMethod,
-        status, transactionId, processorResponse
-      ) VALUES (?, ?, ?, ?, ?, ?, 'completed', ?, ?)`,
-      [
-        paymentId,
-        bookingId,
-        userId,
-        amount,
-        currency,
-        paymentMethod,
-        transactionId,
-        processorResponse,
-      ]
-    );
-
-    await billingConn.commit();
-    console.log('✅ Billing transaction committed');
-
-    res.status(201).json({
-      invoiceId,
-      paymentId,
-      bookingId,
-      userId,
-      amount,
-      currency,
-      status: 'completed',
-      transactionId,
-      cardLast4: cardLast4 || null,
-      cardType: cardType || null,
-      message: 'Payment processed and invoice created',
-    });
-  } catch (error) {
-    console.error('Error in /billing/charge:', error);
+async function handleBookingCreated(bookingData) {
+    const { bookingId, userId, totalPrice } = bookingData;
+    const invoiceId = uuidv4();
 
     try {
-      await billingConn.rollback();
-      console.log('↩️ Billing transaction rolled back');
-    } catch (rollbackErr) {
-      console.error('Error during rollback:', rollbackErr);
-    }
-
-    if (error instanceof ValidationError || error instanceof NotFoundError) {
-      return res
-        .status(error.status)
-        .json(
-          createErrorResponse(
-            error.status,
-            error.error,
-            error.message,
-            req.path
-          )
+        // Simulate payment processing... success!
+        // Create Invoice record
+        await pool.execute(
+            `INSERT INTO invoices (
+        invoiceId, bookingId, userId, amount, status, issuedAt, paidAt, createdAt, updatedAt
+      ) VALUES (?, ?, ?, ?, 'paid', NOW(), NOW(), NOW(), NOW())`,
+            [invoiceId, bookingId, userId, totalPrice]
         );
+        console.log(`💰 Invoice created for booking ${bookingId}: ${invoiceId}`);
+    } catch (err) {
+        console.error(`❌ Failed to create invoice for booking ${bookingId}:`, err);
     }
+}
 
-    return res.status(500).json(
-      createErrorResponse(
-        500,
-        'Internal Server Error',
-        'Payment processing failed',
-        req.path
-      )
-    );
-  } finally {
-    billingConn.release();
-  }
+async function handleBookingCancelled(bookingData) {
+    const { bookingId } = bookingData;
+
+    try {
+        // Find the invoice and mark as refunded
+        // In a real system, we'd trigger a refund via Stripe/PayPal here
+        const [result] = await pool.execute(
+            `UPDATE invoices 
+       SET status = 'cancelled', updatedAt = NOW() 
+       WHERE bookingId = ?`,
+            [bookingId]
+        );
+
+        if (result.affectedRows > 0) {
+            console.log(`💸 Refund processed for booking ${bookingId}`);
+        } else {
+            console.warn(`⚠️ No invoice found to refund for booking ${bookingId}`);
+        }
+    } catch (err) {
+        console.error(`❌ Failed to process refund for booking ${bookingId}:`, err);
+    }
+}
+
+// ==================== API ENDPOINTS ====================
+
+app.get('/health', (req, res) => {
+    res.status(200).json({ status: 'UP', service: 'Billing Service' });
 });
 
-/**
- * GET /api/v1/billing/users/:userId/invoices
- * List all invoices for a given user
- */
-app.get('/api/v1/billing/users/:userId/invoices', async (req, res) => {
-  try {
-    const { userId } = req.params;
+// Get invoice by Booking ID
+app.get('/api/v1/billing/invoices/:bookingId', async (req, res) => {
+    try {
+        const { bookingId } = req.params;
+        const [rows] = await pool.execute(
+            'SELECT * FROM invoices WHERE bookingId = ?',
+            [bookingId]
+        );
 
-    const [rows] = await billingPool.execute(
-      `SELECT invoiceId, bookingId, userId,
-              amount, currency, status,
-              issuedAt, paidAt, dueAt, lineItems,
-              createdAt, updatedAt
-       FROM invoices
-       WHERE userId = ?
-       ORDER BY issuedAt DESC`,
-      [userId]
-    );
+        if (rows.length === 0) {
+            return res.status(404).json({ error: 'Invoice not found' });
+        }
 
-    const invoices = rows.map((row) => ({
-      invoiceId: row.invoiceId,
-      bookingId: row.bookingId,
-      userId: row.userId,
-      amount: parseFloat(row.amount),
-      currency: row.currency,
-      status: row.status,
-      issuedAt: row.issuedAt,
-      paidAt: row.paidAt,
-      dueAt: row.dueAt,
-      lineItems: row.lineItems,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-    }));
-
-    res.status(200).json({ userId, count: invoices.length, invoices });
-  } catch (error) {
-    console.error('Error fetching invoices:', error);
-    res.status(500).json(
-      createErrorResponse(
-        500,
-        'Internal Server Error',
-        'Failed to fetch invoices',
-        req.path
-      )
-    );
-  }
+        res.json(rows[0]);
+    } catch (err) {
+        console.error('Error fetching invoice:', err);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
 });
 
-/**
- * GET /api/v1/billing/users/:userId/payments
- * List all payments for a given user
- */
-app.get('/api/v1/billing/users/:userId/payments', async (req, res) => {
-  try {
-    const { userId } = req.params;
-
-    const [rows] = await billingPool.execute(
-      `SELECT paymentId, bookingId, userId,
-              amount, currency, paymentMethod,
-              status, transactionId, processorResponse,
-              createdAt, updatedAt
-       FROM payments
-       WHERE userId = ?
-       ORDER BY createdAt DESC`,
-      [userId]
-    );
-
-    const payments = rows.map((row) => ({
-      paymentId: row.paymentId,
-      bookingId: row.bookingId,
-      userId: row.userId,
-      amount: parseFloat(row.amount),
-      currency: row.currency,
-      paymentMethod: row.paymentMethod,
-      status: row.status,
-      transactionId: row.transactionId,
-      processorResponse: row.processorResponse,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-    }));
-
-    res.status(200).json({ userId, count: payments.length, payments });
-  } catch (error) {
-    console.error('Error fetching payments:', error);
-    res.status(500).json(
-      createErrorResponse(
-        500,
-        'Internal Server Error',
-        'Failed to fetch payments',
-        req.path
-      )
-    );
-  }
+// Get all invoices for a User
+app.get('/api/v1/billing/user/:userId', async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const [rows] = await pool.execute(
+            'SELECT * FROM invoices WHERE userId = ? ORDER BY createdAt DESC',
+            [userId]
+        );
+        res.json(rows);
+    } catch (err) {
+        console.error('Error fetching user invoices:', err);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
 });
 
-// ==================== FALLBACKS & STARTUP ====================
-
-app.use((req, res) => {
-  res
-    .status(404)
-    .json(
-      createErrorResponse(
-        404,
-        'Not Found',
-        `Endpoint ${req.method} ${req.path} not found`,
-        req.path
-      )
-    );
-});
-
-app.use((err, req, res, next) => {
-  console.error('Unhandled error in Billing Service:', err);
-  res.status(500).json(
-    createErrorResponse(
-      500,
-      'Internal Server Error',
-      'An unexpected error occurred',
-      req.path
-    )
-  );
-});
+// ==================== SERVER START ====================
 
 app.listen(PORT, () => {
-  console.log(`
-╔═══════════════════════════════════════════════════════╗
-║          💳 BILLING SERVICE STARTED                   ║
-╠═══════════════════════════════════════════════════════╣
-║  Port:        ${PORT}                                 
-║  Billing DB:  MySQL (${BILLING_DB})
-║  Bookings DB: MySQL (${BOOKINGS_DB})
-║  Time:        ${new Date().toISOString()}
-╚═══════════════════════════════════════════════════════╝
-  `);
+    console.log(`📦 Billing Service running on port ${PORT}`);
 });

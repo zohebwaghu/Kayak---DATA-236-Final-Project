@@ -43,6 +43,20 @@ services:
       timeout: 10s
       retries: 3
 
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kayak-kafka-ui
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9093
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+    depends_on:
+      - kafka
+    networks:
+      - kayak-network
+
   # ==================== CACHE ====================
 
   redis:
@@ -212,8 +226,8 @@ services:
 
   billing-service:
     build:
-      context: .
-      dockerfile: ./services/billing-service/Dockerfile
+      context: ./services/billing-service
+      dockerfile: Dockerfile
     container_name: kayak-billing-service
     ports:
       - "3005:3005"
@@ -224,7 +238,6 @@ services:
       MYSQL_USER: root
       MYSQL_PASSWORD: password
       MYSQL_DB_BILLING: kayak_billing
-      MYSQL_DB_BOOKINGS: kayak_bookings
       KAFKA_BROKER: kafka:9093
       KAFKA_CLIENT_ID: billing-service
       NODE_ENV: production

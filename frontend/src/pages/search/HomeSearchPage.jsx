@@ -6,7 +6,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useSelector } from 'react-redux';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import './HomeSearchPage.css';
 
 import FlightsSearchForm from './FlightsSearchForm';
@@ -26,13 +26,42 @@ import AiPriceAnalysis from '../../components/ai/AiPriceAnalysis';
 import AiQuoteModal from '../../components/ai/AiQuoteModal';
 
 const HomeSearchPage = () => {
-  const [activeTab, setActiveTab] = useState('flights');
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  // Determine active tab from URL
+  const getTabFromUrl = () => {
+    const path = location.pathname;
+    if (path.includes('/hotels')) return 'stays';
+    if (path.includes('/cars')) return 'cars';
+    if (path.includes('/ai')) return 'ai';
+    return 'flights';
+  };
+
+  const activeTab = getTabFromUrl();
+
+  const handleTabChange = (tab) => {
+    switch (tab) {
+      case 'stays':
+        navigate('/search/hotels');
+        break;
+      case 'cars':
+        navigate('/search/cars');
+        break;
+      case 'ai':
+        navigate('/search/ai');
+        break;
+      case 'flights':
+      default:
+        navigate('/search/flights');
+        break;
+    }
+  };
 
   // Redux auth state
   const isAuthenticated = useSelector(selectIsAuthenticated);
   const user = useSelector(selectUser);
   const userId = user?.userId || 'guest_user';
-  const navigate = useNavigate();
 
   // ===== FLIGHTS STATE =====
   const [flightFilters, setFlightFilters] = useState({
@@ -253,7 +282,7 @@ const HomeSearchPage = () => {
     } catch (err) {
       console.error('AI search error:', err);
       setAiError('Failed to get AI recommendations. Please try again.');
-      
+
       // Add error message to conversation
       setAiConversation(prev => [...prev, {
         role: 'assistant',
@@ -376,7 +405,7 @@ const HomeSearchPage = () => {
               <button
                 type="button"
                 className={`home-tab ${activeTab === 'flights' ? 'home-tab--active' : ''}`}
-                onClick={() => setActiveTab('flights')}
+                onClick={() => handleTabChange('flights')}
               >
                 <span className="home-tab-icon" aria-hidden="true">
                   <i className="bi bi-airplane-fill" />
@@ -387,7 +416,7 @@ const HomeSearchPage = () => {
               <button
                 type="button"
                 className={`home-tab ${activeTab === 'stays' ? 'home-tab--active' : ''}`}
-                onClick={() => setActiveTab('stays')}
+                onClick={() => handleTabChange('stays')}
               >
                 <span className="home-tab-icon" aria-hidden="true">
                   <i className="bi bi-building" />
@@ -398,7 +427,7 @@ const HomeSearchPage = () => {
               <button
                 type="button"
                 className={`home-tab ${activeTab === 'cars' ? 'home-tab--active' : ''}`}
-                onClick={() => setActiveTab('cars')}
+                onClick={() => handleTabChange('cars')}
               >
                 <span className="home-tab-icon" aria-hidden="true">
                   <i className="bi bi-car-front-fill" />
@@ -409,7 +438,7 @@ const HomeSearchPage = () => {
               <button
                 type="button"
                 className={`home-tab ${activeTab === 'ai' ? 'home-tab--active' : ''}`}
-                onClick={() => setActiveTab('ai')}
+                onClick={() => handleTabChange('ai')}
               >
                 <span className="home-tab-icon" aria-hidden="true">
                   <i className="bi bi-stars" />
@@ -448,8 +477,8 @@ const HomeSearchPage = () => {
               )}
 
               {activeTab === 'ai' && (
-                <AiModePanel 
-                  onPromptSubmit={handleAiPromptSubmit} 
+                <AiModePanel
+                  onPromptSubmit={handleAiPromptSubmit}
                   conversationHistory={aiConversation}
                 />
               )}
@@ -493,9 +522,20 @@ const HomeSearchPage = () => {
               }
               renderItem={(flight) => {
                 const title = `${flight.origin} → ${flight.destination}`;
-                const departText = flight.departureTime
-                  ? `Depart: ${new Date(flight.departureTime).toLocaleString()}`
-                  : null;
+                // Calculate date from days_left
+                const today = new Date();
+                const flightDate = new Date(today);
+                if (typeof flight.days_left === 'number') {
+                  flightDate.setDate(today.getDate() + flight.days_left);
+                }
+
+                const dateOptions = { month: 'short', day: 'numeric', weekday: 'short' };
+                const dateStr = flightDate.toLocaleDateString('en-US', dateOptions);
+
+                const departText = flight.departure_time
+                  ? `${dateStr} · ${flight.departure_time}`
+                  : dateStr;
+
                 const metaParts = [
                   flight.airline || null,
                   typeof flight.stops === 'number'

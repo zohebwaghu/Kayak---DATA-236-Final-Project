@@ -447,8 +447,10 @@ if not CHAT_AVAILABLE:
 # ============================================
 
 if EVENTS_AVAILABLE and ENABLE_WEBSOCKET:
+    from fastapi import Query
+
     @app.websocket("/api/ai/events")
-    async def websocket_events(websocket: WebSocket):
+    async def websocket_events(websocket: WebSocket, user_id: str = Query(...)):
         """
         WebSocket endpoint for real-time events.
         
@@ -460,7 +462,7 @@ if EVENTS_AVAILABLE and ENABLE_WEBSOCKET:
         - deal_found: New deal discovered
         - watch_triggered: User's watch triggered
         """
-        await websocket_endpoint(websocket)
+        await websocket_endpoint(websocket, user_id=user_id)
 else:
     @app.websocket("/api/ai/events")
     async def websocket_events_disabled(websocket: WebSocket):
