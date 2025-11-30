@@ -225,23 +225,23 @@ const handleHotelsSearch = async (req, res) => {
 
     // ===== BUILD MONGODB QUERY =====
     const query = {};
-    
+
     if (city) {
-      query['address.city'] = new RegExp(city, 'i');
+      query['address.city'] = new RegExp(city.trim(), 'i');
     }
-    
+
     if (minStarRating || maxStarRating) {
       query.starRating = {};
       if (minStarRating) query.starRating.$gte = parseFloat(minStarRating);
       if (maxStarRating) query.starRating.$lte = parseFloat(maxStarRating);
     }
-    
+
     if (minPrice || maxPrice) {
       query['roomTypes.price'] = {};
       if (minPrice) query['roomTypes.price'].$gte = parseFloat(minPrice);
       if (maxPrice) query['roomTypes.price'].$lte = parseFloat(maxPrice);
     }
-    
+
     if (amenities) {
       const amenityList = amenities.split(',').map(a => a.trim());
       query.amenities = { $all: amenityList };
@@ -377,24 +377,36 @@ const handleFlightsSearch = async (req, res) => {
 
     // ===== BUILD MONGODB QUERY =====
     const query = {};
-    
-    if (origin) query.origin = origin.toUpperCase();
-    if (destination) query.destination = destination.toUpperCase();
-    
+
+    if (origin) query.origin = origin.trim().toUpperCase();
+    if (destination) query.destination = destination.trim().toUpperCase();
+
     if (departureDate) {
-      const date = new Date(departureDate);
-      const nextDay = new Date(date);
-      nextDay.setDate(date.getDate() + 1);
-      query.departureTime = { $gte: date, $lt: nextDay };
+      // Calculate days_left based on today
+      const today = new Date();
+      const targetDate = new Date(departureDate);
+
+      // Reset times to midnight for accurate day diff
+      today.setHours(0, 0, 0, 0);
+      targetDate.setHours(0, 0, 0, 0);
+
+      const diffTime = targetDate - today;
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+      // The dataset uses 'days_left' starting from 1
+      // If diffDays is 0 (today) or 1 (tomorrow), we map to 1
+      const searchDays = Math.max(1, diffDays);
+
+      query.days_left = searchDays;
     }
-    
+
     if (minPrice || maxPrice) {
       query.price = {};
       if (minPrice) query.price.$gte = parseFloat(minPrice);
       if (maxPrice) query.price.$lte = parseFloat(maxPrice);
     }
-    
-    if (airline) query.airline = new RegExp(airline, 'i');
+
+    if (airline) query.airline = new RegExp(airline.trim(), 'i');
     if (maxStops !== undefined) query.stops = { $lte: parseInt(maxStops) };
 
     // ===== EXECUTE QUERY =====
@@ -487,10 +499,10 @@ const handleCarsSearch = async (req, res) => {
 
     // ===== BUILD MONGODB QUERY =====
     const query = {};
-    
-    if (location) query.location = new RegExp(location, 'i');
-    if (carType) query.carType = new RegExp(carType, 'i');
-    
+
+    if (location) query.location = new RegExp(location.trim(), 'i');
+    if (carType) query.carType = new RegExp(carType.trim(), 'i');
+
     if (minPrice || maxPrice) {
       query.pricePerDay = {};
       if (minPrice) query.pricePerDay.$gte = parseFloat(minPrice);

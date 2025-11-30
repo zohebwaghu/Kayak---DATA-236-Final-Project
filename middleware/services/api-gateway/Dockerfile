@@ -3,7 +3,7 @@ FROM node:18-alpine
 WORKDIR /app
 
 # Copy shared utilities
-COPY shared /app/shared
+COPY shared ./shared
 
 # Copy package files
 COPY services/api-gateway/package*.json ./
@@ -12,7 +12,10 @@ COPY services/api-gateway/package*.json ./
 RUN npm install --production
 
 # Copy application code
-COPY services/api-gateway .
+COPY services/api-gateway ./services/api-gateway
+
+#Move into the api-gateway folder to run the server
+WORKDIR /app/services/api-gateway
 
 # Expose port
 EXPOSE 3000

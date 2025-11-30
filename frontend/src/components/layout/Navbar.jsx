@@ -5,6 +5,7 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   selectIsAuthenticated,
   selectUser,
+  selectUserRole,
   logout,
 } from '../../store/slices/authSlice';
 import './Navbar.css';
@@ -16,6 +17,7 @@ const Navbar = () => {
 
   const isAuthenticated = useSelector(selectIsAuthenticated);
   const user = useSelector(selectUser);
+  const userRole = useSelector(selectUserRole);
 
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -44,6 +46,11 @@ const Navbar = () => {
   const handleGoBookings = () => {
     setMenuOpen(false);
     navigate('/my-bookings');
+  };
+
+  const handleGoAdmin = () => {
+    setMenuOpen(false);
+    navigate('/admin');
   };
 
   const handleLogout = () => {
@@ -151,6 +158,19 @@ const Navbar = () => {
                     >
                       My bookings
                     </button>
+                    {userRole === 'admin' && (
+                      <>
+                        <div className="dropdown-divider" />
+                        <button
+                          type="button"
+                          className="dropdown-item"
+                          onClick={handleGoAdmin}
+                          style={{ fontWeight: 'bold', color: '#ff5a00' }}
+                        >
+                          ⚙️ Admin Dashboard
+                        </button>
+                      </>
+                    )}
                     <div className="dropdown-divider" />
                     <button
                       type="button"

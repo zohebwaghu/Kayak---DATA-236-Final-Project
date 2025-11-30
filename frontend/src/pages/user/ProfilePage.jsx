@@ -64,12 +64,13 @@ const ProfilePage = () => {
   // Avatar
   const [avatarDataUrl, setAvatarDataUrl] = useState('');
 
-  // Payment (local only)
+  // Payment
   const [paymentForm, setPaymentForm] = useState(initialPaymentState);
   const [isEditingPayment, setIsEditingPayment] = useState(false);
   const [paymentSaving, setPaymentSaving] = useState(false);
   const [paymentError, setPaymentError] = useState('');
   const [paymentSuccess, setPaymentSuccess] = useState('');
+  const [paymentMethodId, setPaymentMethodId] = useState(null);
 
   // Delete account
   const [deleting, setDeleting] = useState(false);
@@ -208,6 +209,65 @@ const ProfilePage = () => {
       // ignore
     }
   }, [paymentStorageKey]);
+
+  // ========= LOAD PAYMENT METHODS FROM BACKEND (IF ANY) =========
+  useEffect(() => {
+    const fetchPaymentMethods = async () => {
+      if (!userId) return;
+
+      try {
+        const res = await api.get(`/users/${userId}/payment-methods`);
+        const methods = Array.isArray(res.data) ? res.data : [];
+
+        if (methods.length === 0) {
+          setPaymentMethodId(null);
+          return;
+        }
+
+        const primary =
+          methods.find((m) => m.isDefault) || methods[0];
+
+        setPaymentMethodId(primary.methodId);
+
+        const nextForm = {
+          ...initialPaymentState,
+          methodType: primary.cardType ? 'credit_card' : '',
+          cardholderName: primary.cardHolderName || '',
+          last4: primary.lastFour || '',
+          brand: primary.cardType || '',
+          expiryMonth: primary.expiryMonth || '',
+          expiryYear: primary.expiryYear || '',
+          sameAsProfile: true,
+          billingStreet: '',
+          billingCity: '',
+          billingState: '',
+          billingZip: '',
+        };
+
+        setPaymentForm((prev) => ({
+          ...prev,
+          ...nextForm,
+        }));
+
+        if (paymentStorageKey) {
+          try {
+            localStorage.setItem(paymentStorageKey, JSON.stringify(nextForm));
+          } catch {
+            // ignore storage errors
+          }
+        }
+      } catch (err) {
+        console.error(
+          'Error fetching payment methods:',
+          err?.response?.status,
+          err?.response?.data || err?.message
+        );
+        // Non-critical: we still allow local-only behaviour
+      }
+    };
+
+    fetchPaymentMethods();
+  }, [userId, paymentStorageKey]);
 
   // ========= FORM HANDLERS =========
 
@@ -371,7 +431,7 @@ const ProfilePage = () => {
     setAvatarDataUrl('');
   };
 
-  // ========= PAYMENT HANDLERS (LOCAL ONLY) =========
+  // ========= PAYMENT HANDLERS =========
 
   const handlePaymentChange = (field) => (e) => {
     const value = e.target.value;
@@ -389,9 +449,10 @@ const ProfilePage = () => {
     }));
   };
 
-  const handlePaymentSubmit = (e) => {
+  const handlePaymentSubmit = async (e) => {
     e.preventDefault();
-    if (!paymentStorageKey) {
+
+    if (!paymentStorageKey || !userId) {
       setPaymentError('Unable to save payment details. Please log in again.');
       return;
     }
@@ -401,7 +462,88 @@ const ProfilePage = () => {
     setPaymentSaving(true);
 
     try {
-      localStorage.setItem(paymentStorageKey, JSON.stringify(paymentForm));
+      // Basic front-end validation similar to previous behaviour
+      if (
+        !paymentForm.methodType ||
+        !paymentForm.cardholderName ||
+        !paymentForm.last4 ||
+        !paymentForm.expiryMonth ||
+        !paymentForm.expiryYear
+      ) {
+        setPaymentError('Please fill in all required payment fields.');
+        setPaymentSaving(false);
+        return;
+      }
+
+      // Sanitize last4 and construct a synthetic full card number
+      const sanitizedLast4 = (paymentForm.last4 || '')
+        .replace(/\D/g, '')
+        .slice(-4);
+
+      if (!sanitizedLast4 || sanitizedLast4.length !== 4) {
+        setPaymentError('Please enter the last 4 digits of your card.');
+        setPaymentSaving(false);
+        return;
+      }
+
+      // Backend expects a full card number (>=13 digits); we only store last4,
+      // so use a synthetic number that preserves the last four.
+      const fakeCardNumber = `000000000000${sanitizedLast4}`; // 12 zeros + last4
+
+      const cardType =
+        (paymentForm.brand || '').toLowerCase() ||
+        paymentForm.methodType ||
+        'card';
+
+      // Persist to backend payment_methods table
+      try {
+        await api.post(`/users/${userId}/payment-methods`, {
+          cardType,
+          cardNumber: fakeCardNumber,
+          expiryMonth: paymentForm.expiryMonth,
+          expiryYear: paymentForm.expiryYear,
+          cardHolderName: paymentForm.cardholderName,
+          isDefault: true,
+        });
+
+        // Refresh to capture the methodId (best-effort)
+        try {
+          const res = await api.get(`/users/${userId}/payment-methods`);
+          const methods = Array.isArray(res.data) ? res.data : [];
+          if (methods.length > 0) {
+            const primary =
+              methods.find((m) => m.isDefault) || methods[0];
+            setPaymentMethodId(primary.methodId);
+          }
+        } catch (refreshErr) {
+          console.error(
+            'Error refreshing payment methods after save:',
+            refreshErr?.response?.status,
+            refreshErr?.response?.data || refreshErr?.message
+          );
+        }
+      } catch (apiErr) {
+        console.error(
+          'Error saving payment details to backend:',
+          apiErr?.response?.status,
+          apiErr?.response?.data || apiErr?.message
+        );
+        const msg =
+          apiErr?.response?.data?.message ||
+          apiErr?.response?.data?.error ||
+          'Failed to save payment details. Please try again.';
+        setPaymentError(msg);
+        setPaymentSaving(false);
+        return;
+      }
+
+      // Preserve previous localStorage behaviour for consistency
+      try {
+        localStorage.setItem(paymentStorageKey, JSON.stringify(paymentForm));
+      } catch {
+        // ignore local storage errors
+      }
+
       setPaymentSuccess('Payment details saved on this device.');
       setIsEditingPayment(false);
     } catch {
@@ -411,17 +553,48 @@ const ProfilePage = () => {
     }
   };
 
-  const handleClearPayment = () => {
-    if (!paymentStorageKey) return;
-    try {
-      localStorage.removeItem(paymentStorageKey);
-    } catch {
-      // ignore
-    }
-    setPaymentForm(initialPaymentState);
+  const handleClearPayment = async () => {
+    if (!paymentStorageKey && !userId) return;
+
     setPaymentError('');
-    setPaymentSuccess('Payment details cleared.');
-    setIsEditingPayment(false);
+    setPaymentSuccess('');
+
+    try {
+      // Best-effort: delete from backend if we know the methodId
+      if (userId && paymentMethodId) {
+        try {
+          await api.delete(
+            `/users/${userId}/payment-methods/${paymentMethodId}`
+          );
+        } catch (err) {
+          console.error(
+            'Error deleting payment method from backend:',
+            err?.response?.status,
+            err?.response?.data || err?.message
+          );
+          setPaymentError(
+            err?.response?.data?.message ||
+              err?.response?.data?.error ||
+              'Failed to clear saved payment method from server.'
+          );
+        }
+      }
+
+      if (paymentStorageKey) {
+        try {
+          localStorage.removeItem(paymentStorageKey);
+        } catch {
+          // ignore
+        }
+      }
+
+      setPaymentForm(initialPaymentState);
+      setPaymentMethodId(null);
+      setPaymentSuccess('Payment details cleared.');
+      setIsEditingPayment(false);
+    } catch {
+      setPaymentError('Failed to clear payment details. Please try again.');
+    }
   };
 
   // ========= DELETE ACCOUNT HANDLER =========

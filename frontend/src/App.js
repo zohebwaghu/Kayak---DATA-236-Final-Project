@@ -22,6 +22,10 @@ function App() {
       <Routes>
         {/* Home / main search hero (flights/stays/cars/AI tabs) */}
         <Route path="/" element={<HomeSearchPage />} />
+        <Route path="/search/flights" element={<HomeSearchPage />} />
+        <Route path="/search/hotels" element={<HomeSearchPage />} />
+        <Route path="/search/cars" element={<HomeSearchPage />} />
+        <Route path="/search/ai" element={<HomeSearchPage />} />
         {/* Auth */}
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />

@@ -193,14 +193,14 @@ const proxyToService = async (req, res, serviceName, serviceUrl) => {
 app.post('/api/v1/auth/register', (req, res) => {
   const serviceUrl =
     process.env.USER_SERVICE_URL ||
-    `http://localhost:${process.env.USER_SERVICE_PORT || 3001}`;
+    `http://user-service:${process.env.USER_SERVICE_PORT || 3001}`;
   proxyToService(req, res, 'User Service', serviceUrl);
 });
 
 app.post('/api/v1/auth/login', (req, res) => {
   const serviceUrl =
     process.env.USER_SERVICE_URL ||
-    `http://localhost:${process.env.USER_SERVICE_PORT || 3001}`;
+    `http://user-service:${process.env.USER_SERVICE_PORT || 3001}`;
   proxyToService(req, res, 'User Service', serviceUrl);
 });
 
@@ -209,7 +209,7 @@ app.post('/api/v1/auth/login', (req, res) => {
 app.use('/api/v1/users', authenticateJWT, (req, res) => {
   const serviceUrl =
     process.env.USER_SERVICE_URL ||
-    `http://localhost:${process.env.USER_SERVICE_PORT || 3001}`;
+    `http://user-service:${process.env.USER_SERVICE_PORT || 3001}`;
   proxyToService(req, res, 'User Service', serviceUrl);
 });
 
@@ -218,7 +218,7 @@ app.use('/api/v1/users', authenticateJWT, (req, res) => {
 app.use('/api/v1/search', (req, res) => {
   const serviceUrl =
     process.env.SEARCH_SERVICE_URL ||
-    `http://localhost:${process.env.SEARCH_SERVICE_PORT || 3003}`;
+    `http://search-service:${process.env.SEARCH_SERVICE_PORT || 3003}`;
   proxyToService(req, res, 'Search Service', serviceUrl);
 });
 
@@ -246,10 +246,14 @@ app.use('/api/v1/bookings', authenticateJWT, (req, res) => {
 // ==================== BILLING SERVICE ROUTES ====================
 
 app.use('/api/v1/billing', authenticateJWT, (req, res) => {
-  // Assuming billing-service also exposes /api/v1/billing...
-  const serviceUrl =
+  // Base host (from env or Docker service name)
+  const baseUrl =
     process.env.BILLING_SERVICE_URL ||
-    `http://billing-service:${process.env.BILLING_SERVICE_PORT || 3005}/api/v1/billing`;
+    `http://billing-service:${process.env.BILLING_SERVICE_PORT || 3005}`;
+
+  // Always append the correct API prefix
+  const serviceUrl = `${baseUrl}/api/v1/billing`;
+
   proxyToService(req, res, 'Billing Service', serviceUrl);
 });
 

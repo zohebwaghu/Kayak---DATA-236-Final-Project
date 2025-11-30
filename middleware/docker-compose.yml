@@ -30,7 +30,7 @@ services:
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9093,PLAINTEXT_HOST://localhost:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9093,PLAINTEXT_HOST://localhost:9094
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
@@ -42,6 +42,20 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kayak-kafka-ui
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9093
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+    depends_on:
+      - kafka
+    networks:
+      - kayak-network
 
   # ==================== CACHE ====================
 
@@ -203,6 +217,64 @@ services:
       NODE_ENV: production
     depends_on:
       mysql:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - kayak-network
+    restart: unless-stopped
+
+  billing-service:
+    build:
+      context: ./services/billing-service
+      dockerfile: Dockerfile
+    container_name: kayak-billing-service
+    ports:
+      - "3005:3005"
+    environment:
+      BILLING_SERVICE_PORT: 3005
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: password
+      MYSQL_DB_BILLING: kayak_billing
+      KAFKA_BROKER: kafka:9093
+      KAFKA_CLIENT_ID: billing-service
+      NODE_ENV: production
+    depends_on:
+      mysql:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - kayak-network
+    restart: unless-stopped
+
+  admin-service:
+    build:
+      context: .
+      dockerfile: ./services/admin-service/Dockerfile
+    container_name: kayak-admin-service
+    ports:
+      - "3006:3006"
+    environment:
+      ADMIN_SERVICE_PORT: 3006
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: password
+      MYSQL_DB_USERS: kayak_users
+      MYSQL_DB_BOOKINGS: kayak_bookings
+      MYSQL_DB_BILLING: kayak_billing
+      MONGO_URI: mongodb://mongodb:27017
+      MONGO_DB_SEARCH: kayak_doc
+      KAFKA_BROKER: kafka:9093
+      KAFKA_CLIENT_ID: admin-service
+      NODE_ENV: production
+    depends_on:
+      mysql:
+        condition: service_healthy
+      mongodb:
         condition: service_healthy
       kafka:
         condition: service_healthy
