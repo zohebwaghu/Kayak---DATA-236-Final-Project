@@ -18,7 +18,7 @@
 require('dotenv').config();
 const express = require('express');
 const mysql = require('mysql2/promise');
-const { MongoClient } = require('mongodb');
+const { MongoClient, ObjectId } = require('mongodb');
 const { randomUUID } = require('crypto');
 
 const {
@@ -118,8 +118,8 @@ let kafkaProducer;
 (async () => {
   try {
     const kafka = createKafkaClient();
-    kafkaProducer = createProducer(kafka);
-    await kafkaProducer.connect();
+    kafkaProducer = await createProducer(kafka);
+    // await kafkaProducer.connect(); // Connected inside createProducer
     console.log('✅ Kafka producer connected');
   } catch (error) {
     console.error('❌ Kafka connection failed:', error);
@@ -294,12 +294,28 @@ app.put('/listings/:id', async (req, res) => {
       return res.status(400).json(createErrorResponse(400, 'Bad Request', 'Invalid listing type', req.path));
     }
 
+    // Remove _id from data if present to avoid immutable field error
+    delete data._id;
     data.updated_at = new Date();
 
+    const cleanId = id.trim();
+    let query = { _id: cleanId };
+    try {
+      console.log(`[DEBUG] ObjectId type: ${typeof ObjectId}`);
+      query = { _id: new ObjectId(cleanId) };
+    } catch (e) {
+      // If id is not a valid ObjectId, try as string (for legacy/seeded data)
+      console.log(`ID ${cleanId} is not a valid ObjectId, trying as string. Error:`, e.message);
+    }
+
+    console.log(`[DEBUG] Updating listing. ID: ${id}, Type: ${type}, Query:`, query);
+
     const result = await collection.updateOne(
-      { _id: id },
+      query,
       { $set: data }
     );
+
+    console.log(`[DEBUG] Update result:`, result);
 
     if (result.matchedCount === 0) {
       return res.status(404).json(createErrorResponse(404, 'Not Found', 'Listing not found', req.path));
@@ -346,7 +362,14 @@ app.delete('/listings/:id', async (req, res) => {
       return res.status(400).json(createErrorResponse(400, 'Bad Request', 'Invalid listing type', req.path));
     }
 
-    const result = await collection.deleteOne({ _id: id });
+    let query = { _id: id };
+    try {
+      query = { _id: new ObjectId(id) };
+    } catch (e) {
+      // If id is not a valid ObjectId, try as string
+    }
+
+    const result = await collection.deleteOne(query);
 
     if (result.deletedCount === 0) {
       return res.status(404).json(createErrorResponse(404, 'Not Found', 'Listing not found', req.path));
