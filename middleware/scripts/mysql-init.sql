@@ -43,6 +43,21 @@ CREATE TABLE IF NOT EXISTS users (
     INDEX idx_role (role)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Payment Methods table
+CREATE TABLE IF NOT EXISTS payment_methods (
+    method_id VARCHAR(36) PRIMARY KEY,
+    user_id VARCHAR(11) NOT NULL,
+    card_type VARCHAR(50) NOT NULL,
+    last_four VARCHAR(4) NOT NULL,
+    expiry_month VARCHAR(2) NOT NULL,
+    expiry_year VARCHAR(4) NOT NULL,
+    card_holder_name VARCHAR(255) NOT NULL,
+    is_default BOOLEAN DEFAULT FALSE,
+    created_at_utc TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    INDEX idx_user_id (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ==========================================
 -- BOOKING DATABASE
 -- ==========================================
