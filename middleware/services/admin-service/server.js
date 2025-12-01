@@ -233,9 +233,24 @@ app.post('/listings', async (req, res) => {
       }
     } else if (type === 'flights') {
       collection = mongoDb.collection('flights');
-      if (!data.airline || !data.origin || !data.destination) {
-        return res.status(400).json(createErrorResponse(400, 'Bad Request', 'Missing required flight fields', req.path));
+      if (!data.airline || !data.origin || !data.destination || !data.price || !data.departureTime || !data.arrivalTime || !data.duration) {
+        return res.status(400).json(createErrorResponse(400, 'Bad Request', 'Missing required flight fields (airline, origin, destination, price, departureTime, arrivalTime, duration)', req.path));
       }
+
+      // Normalize data for search compatibility
+      data.origin = data.origin.trim().toUpperCase();
+      data.destination = data.destination.trim().toUpperCase();
+      data.price = parseFloat(data.price);
+      data.stops = parseInt(data.stops || 0);
+
+      // Calculate days_left for search filtering
+      const today = new Date();
+      const departure = new Date(data.departureTime);
+      today.setHours(0, 0, 0, 0);
+      departure.setHours(0, 0, 0, 0);
+      const diffTime = departure - today;
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      data.days_left = Math.max(1, diffDays);
     } else if (type === 'cars') {
       collection = mongoDb.collection('cars');
       if (!data.name || !data.location) {
@@ -297,6 +312,25 @@ app.put('/listings/:id', async (req, res) => {
     // Remove _id from data if present to avoid immutable field error
     delete data._id;
     data.updated_at = new Date();
+
+    // Normalize data for flights
+    if (type === 'flights') {
+      if (data.origin) data.origin = data.origin.trim().toUpperCase();
+      if (data.destination) data.destination = data.destination.trim().toUpperCase();
+      if (data.price) data.price = parseFloat(data.price);
+      if (data.stops) data.stops = parseInt(data.stops);
+
+      // Recalculate days_left if departureTime is present
+      if (data.departureTime) {
+        const today = new Date();
+        const departure = new Date(data.departureTime);
+        today.setHours(0, 0, 0, 0);
+        departure.setHours(0, 0, 0, 0);
+        const diffTime = departure - today;
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        data.days_left = Math.max(1, diffDays);
+      }
+    }
 
     const cleanId = id.trim();
     let query = { _id: cleanId };
