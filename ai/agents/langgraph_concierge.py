@@ -1,54 +1,67 @@
 # agents/langgraph_concierge.py
 """
-LangGraph-based Concierge Agent
-Implements Orchestrator-Workers pattern with graph-based workflow
+Concierge Agent with MRKL Tools Pattern
 
-Architecture (matches DATA 236 course material):
-┌─────────────────┐
-│   supervisor    │  (Parse intent, route to worker)
-└────────┬────────┘
-         │
-    ┌────┴────┬──────────┬──────────┬──────────┐
-    ▼         ▼          ▼          ▼          ▼
-┌────────┐┌────────┐┌──────────┐┌────────┐┌──────────┐
-│ policy ││ watch  ││  price   ││ quote  ││ recommend│
-│ agent  ││ agent  ││ analysis ││ agent  ││  agent   │
-└────┬───┘└───┬────┘└────┬─────┘└───┬────┘└────┬─────┘
-     └────────┴──────────┴──────────┴──────────┘
-                         │
-                ┌────────▼────────┐
-                │   synthesizer   │  (Format final response)
-                └────────┬────────┘
-                         ▼
-                        END
+Single LLM Agent that decides which tool to call based on user intent.
+Replaces LangGraph multi-agent with simpler tool-based approach.
 
-This follows:
-- Orchestrator-Workers Pattern (from Multi-Agent Design Patterns slides)
-- LangGraph StateGraph (from LangGraph lecture)
-- ReAct-style tool usage
+Drop-in replacement for the original langgraph_concierge.py.
+Exports the same interfaces: LangGraphConciergeAgent, langgraph_concierge_agent, process_chat
+
+Architecture:
+┌─────────────────────────────────────────────────────────────┐
+│                    Concierge Agent                          │
+│                    (Single LLM Agent)                       │
+│                          │                                  │
+│            ┌─────────────┼─────────────┐                   │
+│            │    Tool Selection (LLM)    │                   │
+│            └─────────────┬─────────────┘                   │
+│                          │                                  │
+│    ┌──────────┬──────────┼──────────┬──────────┬─────────┐ │
+│    ▼          ▼          ▼          ▼          ▼         ▼ │
+│ ┌──────┐ ┌────────┐ ┌────────┐ ┌───────┐ ┌───────┐ ┌─────┐│
+│ │Intent│ │Bundle  │ │Price   │ │Watch  │ │Quote  │ │Policy│
+│ │Parser│ │Matcher │ │Analyzer│ │Creator│ │Gen    │ │Lookup││
+│ └──────┘ └────────┘ └────────┘ └───────┘ └───────┘ └─────┘│
+└─────────────────────────────────────────────────────────────┘
+
+Tools (MRKL Pattern):
+1. intent_parser - Extract destination, dates, budget, constraints
+2. bundle_matcher - Find flight+hotel bundles from cached deals
+3. price_analyzer - Compare price to 30-day average, verdict
+4. watch_creator - Create price/inventory threshold alerts
+5. quote_generator - Generate booking quote with breakdown
+6. policy_lookup - Answer policy questions (cancellation, pets, etc.)
 """
 
 import os
-import re
+import json
 import uuid
 from datetime import datetime
-from typing import Dict, Any, Optional, List, TypedDict, Literal
+from typing import Dict, Any, Optional, List
 from loguru import logger
+import httpx
 
 # ============================================
-# LangGraph Imports
-# ============================================
-from langgraph.graph import StateGraph, END
-
-# ============================================
-# Reuse existing modules (no changes needed)
+# LLM Imports
 # ============================================
 try:
     from openai import OpenAI
     OPENAI_AVAILABLE = True
 except ImportError:
     OPENAI_AVAILABLE = False
+    OpenAI = None
 
+try:
+    import ollama
+    OLLAMA_AVAILABLE = True
+except ImportError:
+    OLLAMA_AVAILABLE = False
+    ollama = None
+
+# ============================================
+# Internal Module Imports
+# ============================================
 try:
     from llm.intent_parser import intent_parser, ParsedIntent
 except ImportError:
@@ -99,946 +112,1127 @@ except ImportError:
 # ============================================
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+
+# Prefer OpenAI, fallback to Ollama
 USE_OPENAI = bool(OPENAI_API_KEY) and not OPENAI_API_KEY.startswith("sk-your")
 
-# Initialize OpenAI client
-openai_client = None
-if USE_OPENAI and OPENAI_AVAILABLE:
-    try:
-        openai_client = OpenAI(api_key=OPENAI_API_KEY)
-    except Exception as e:
-        logger.warning(f"OpenAI init failed: {e}")
-
 
 # ============================================
-# State Definition (TypedDict for LangGraph)
+# MRKL Tool Definitions (OpenAI Function Calling Format)
 # ============================================
-class TravelState(TypedDict):
-    """
-    Shared state passed between all nodes in the graph.
-    This is the 'blackboard' that all agents read/write.
-    """
-    # Input
-    query: str
-    user_id: str
-    session_id: str
-    
-    # Routing
-    intent: str  # policy | watch | price_analysis | quote | recommendation | clarification
-    
-    # Context from session
-    search_params: Dict
-    previous_recommendations: List[Dict]
-    parsed_intent: Optional[Dict]
-    
-    # Agent outputs (only one will be populated based on routing)
-    agent_output: Dict
-    
-    # Final response
-    response: str
-    response_type: str
-    metadata: Dict
-
-
-# ============================================
-# Helper Functions
-# ============================================
-def get_llm_response(prompt: str, system_prompt: str = None) -> str:
-    """Get response from OpenAI"""
-    if not system_prompt:
-        system_prompt = """You are a helpful travel concierge. Be concise and helpful."""
-    
-    if openai_client:
-        try:
-            response = openai_client.chat.completions.create(
-                model=OPENAI_MODEL,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=500,
-                temperature=0.7
-            )
-            return response.choices[0].message.content
-        except Exception as e:
-            logger.error(f"OpenAI error: {e}")
-    
-    return "I'd be happy to help you find great travel deals. Could you tell me where you'd like to go?"
-
-
-# ============================================
-# Node Functions (Worker Agents)
-# ============================================
-
-def supervisor_node(state: TravelState) -> TravelState:
-    """
-    SUPERVISOR NODE (Orchestrator)
-    - Parses user intent
-    - Loads session context
-    - Routes to appropriate worker agent
-    """
-    query = state.get("query", "").lower()
-    user_id = state.get("user_id", "")
-    session_id = state.get("session_id", "")
-    
-    # Get or create session
-    if session_store:
-        session_id = session_store.get_or_create_session(user_id, session_id)
-        search_params = session_store.get_search_params(session_id) or {}
-        prev_recs = session_store.get_previous_recommendations(session_id) or []
-    else:
-        session_id = session_id or f"sess_{user_id}_{uuid.uuid4().hex[:8]}"
-        search_params = {}
-        prev_recs = []
-    
-    # Parse intent using LLM
-    parsed_intent = None
-    if intent_parser:
-        parsed_intent = intent_parser.parse(query, search_params)
-        if session_store and parsed_intent:
-            session_store.merge_intent(session_id, parsed_intent.to_dict())
-            # Re-fetch merged search params
-            search_params = session_store.get_search_params(session_id) or {}
-    
-    # Determine routing based on keywords
-    intent = "recommendation"  # default
-    
-    policy_keywords = ["cancel", "refund", "pet", "parking", "breakfast",
-                      "wifi", "baggage", "check-in", "check-out", "policy"]
-    watch_keywords = ["watch", "alert", "notify", "track", "monitor",
-                     "let me know", "tell me if", "drops below"]
-    analysis_keywords = ["analyze", "analysis", "good deal", "good price", "worth it", 
-                        "actually good", "compare", "vs", "versus", "better deal",
-                        "is this good", "tell me about", "details", "more info"]
-    quote_keywords = ["book", "reserve", "quote", "total cost", "full price",
-                     "complete", "proceed", "checkout"]
-    confirm_keywords = ["yes", "confirm", "sure", "ok", "okay", "go ahead", 
-                       "do it", "let's do it", "sounds good", "perfect"]
-    refinement_keywords = ["show", "find", "want", "need", "prefer", "like", 
-                          "cheaper", "different", "another", "more options"]
-    
-    # Get last response type from session to handle confirmations
-    last_response_type = ""
-    if session_store:
-        try:
-            session_data = session_store.get_session(session_id)
-            if session_data:
-                last_response_type = session_data.get("last_response_type", "")
-        except Exception:
-            # Fallback: check if we have a quote in previous state
-            pass
-    
-    # Check for confirmation (user saying "yes" after a quote)
-    if any(kw in query for kw in confirm_keywords) and last_response_type == "quote" and prev_recs:
-        intent = "booking_confirmation"
-    # Also check if simple "yes" with prev_recs (likely confirming something)
-    elif query.strip() in ["yes", "ok", "okay", "sure", "confirm", "yes please", "yeah"] and prev_recs:
-        intent = "booking_confirmation"
-    # Check analysis/watch/quote FIRST (higher priority) - these are specific intents
-    elif any(kw in query for kw in analysis_keywords) and prev_recs:
-        intent = "price_analysis"
-    elif any(kw in query for kw in watch_keywords):
-        intent = "watch"
-    elif any(kw in query for kw in quote_keywords) and prev_recs:
-        intent = "quote"
-    elif any(kw in query for kw in policy_keywords):
-        intent = "policy"
-    # Then check refinement (user refining their search)
-    elif prev_recs and any(kw in query for kw in refinement_keywords):
-        intent = "recommendation"
-    elif parsed_intent and hasattr(parsed_intent, 'needs_clarification') and parsed_intent.needs_clarification:
-        if prev_recs:
-            intent = "recommendation"
-        elif search_params.get("destination"):
-            # If we have destination, go to recommendation even if clarification suggested
-            intent = "recommendation"
-        else:
-            intent = "clarification"
-    
-    logger.info(f"[Supervisor] Query: '{query[:50]}...' -> Routing to: {intent}")
-    
-    return {
-        **state,
-        "intent": intent,
-        "session_id": session_id,
-        "search_params": search_params,
-        "previous_recommendations": prev_recs,
-        "parsed_intent": parsed_intent.to_dict() if parsed_intent and hasattr(parsed_intent, 'to_dict') else None
-    }
-
-
-def policy_agent_node(state: TravelState) -> TravelState:
-    """
-    POLICY AGENT (Worker)
-    Handles questions about cancellation, pets, parking, etc.
-    """
-    query = state.get("query", "")
-    prev_recs = state.get("previous_recommendations", [])
-    
-    listing_id = None
-    if prev_recs:
-        listing_id = prev_recs[0].get("hotel", {}).get("hotel_id") or \
-                    prev_recs[0].get("flight", {}).get("flight_id")
-    
-    if listing_id and policy_store:
-        answer = answer_policy_question(listing_id, query)
-    else:
-        answer = get_llm_response(f"Answer this travel policy question: {query}")
-    
-    logger.info(f"[PolicyAgent] Answered policy question")
-    
-    return {
-        **state,
-        "agent_output": {"answer": answer},
-        "response_type": "policy_answer"
-    }
-
-
-def watch_agent_node(state: TravelState) -> TravelState:
-    """
-    WATCH AGENT (Worker)
-    Creates price alerts and inventory alerts.
-    """
-    query = state.get("query", "")
-    user_id = state.get("user_id", "")
-    prev_recs = state.get("previous_recommendations", [])
-    
-    # Extract thresholds
-    price_match = re.search(r'\$(\d+)', query)
-    price_threshold = float(price_match.group(1)) if price_match else None
-    
-    inventory_match = re.search(r'(\d+)\s*(rooms?|seats?|left)', query)
-    inventory_threshold = int(inventory_match.group(1)) if inventory_match else None
-    
-    watches_created = []
-    
-    if not prev_recs:
-        output = {
-            "success": False,
-            "message": "I don't have a specific listing to watch. Search first, then ask me to watch it."
-        }
-    else:
-        rec = prev_recs[0]
-        listing_id = rec.get("bundle_id") or rec.get("deal_id")
-        listing_name = rec.get("name") or f"{rec.get('destination', 'Trip')} package"
-        current_price = rec.get("total_price", 0)
-        
-        if watch_store and WatchCreate:
-            if price_threshold:
-                watch_store.create_watch(WatchCreate(
-                    user_id=user_id,
-                    listing_type="bundle",
-                    listing_id=listing_id,
-                    listing_name=listing_name,
-                    watch_type="price",
-                    threshold=price_threshold,
-                    current_value=current_price
-                ))
-                watches_created.append(f"price below ${price_threshold}")
-            
-            if inventory_threshold:
-                watch_store.create_watch(WatchCreate(
-                    user_id=user_id,
-                    listing_type="bundle",
-                    listing_id=listing_id,
-                    listing_name=listing_name,
-                    watch_type="inventory",
-                    threshold=inventory_threshold,
-                    current_value=rec.get("availability", 10)
-                ))
-                watches_created.append(f"availability below {inventory_threshold}")
-        
-        if watches_created:
-            output = {
-                "success": True,
-                "listing_name": listing_name,
-                "watches": watches_created
+MRKL_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "intent_parser",
+            "description": "Parse user query to extract travel intent: destination, dates, budget, preferences. Use this first for any new search request.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The user's natural language query"
+                    },
+                    "context": {
+                        "type": "object",
+                        "description": "Previous search context (optional)"
+                    }
+                },
+                "required": ["query"]
             }
-        else:
-            output = {
-                "success": False,
-                "message": "Specify a price (e.g., 'below $800') or availability (e.g., 'less than 5 rooms')."
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "bundle_matcher",
+            "description": "Find and recommend flight+hotel bundles based on search criteria. Use when user wants to see travel options, recommendations, or search results. Requires origin, destination, departure date, and return date.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "origin": {
+                        "type": "string",
+                        "description": "Departure city or airport code (e.g., 'Delhi' or 'DEL')"
+                    },
+                    "destination": {
+                        "type": "string",
+                        "description": "Destination city or airport code (e.g., 'Mumbai' or 'BOM')"
+                    },
+                    "departure_date": {
+                        "type": "string",
+                        "description": "Departure date (e.g., '2024-12-15' or 'December 15')"
+                    },
+                    "return_date": {
+                        "type": "string",
+                        "description": "Return date (e.g., '2024-12-20' or 'December 20')"
+                    },
+                    "budget": {
+                        "type": "number",
+                        "description": "Maximum total budget in USD (optional)"
+                    },
+                    "constraints": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of constraints like 'pet-friendly', 'breakfast', 'refundable'"
+                    }
+                },
+                "required": ["origin", "destination", "departure_date", "return_date"]
             }
-    
-    logger.info(f"[WatchAgent] Created watches: {watches_created}")
-    
-    return {
-        **state,
-        "agent_output": output,
-        "response_type": "watch_created"
-    }
-
-
-def price_analysis_agent_node(state: TravelState) -> TravelState:
-    """
-    PRICE ANALYSIS AGENT (Worker)
-    Analyzes if a deal is actually good.
-    """
-    prev_recs = state.get("previous_recommendations", [])
-    
-    if not prev_recs:
-        output = {
-            "success": False,
-            "message": "I don't have a listing to analyze. Search first!"
         }
-    else:
-        rec = prev_recs[0]
-        current = rec.get("total_price", rec.get("current_price", 0))
-        avg = rec.get("avg_30d_price", current * 1.15)
-        diff_pct = ((current - avg) / avg) * 100 if avg > 0 else 0
-        
-        if diff_pct <= -15:
-            verdict = "EXCELLENT DEAL"
-        elif diff_pct <= -5:
-            verdict = "GREAT DEAL"
-        elif diff_pct <= 5:
-            verdict = "FAIR PRICE"
-        else:
-            verdict = "ABOVE AVERAGE"
-        
-        output = {
-            "success": True,
-            "name": rec.get("name", "This deal"),
-            "current_price": current,
-            "avg_30d_price": avg,
-            "diff_percent": diff_pct,
-            "verdict": verdict
-        }
-    
-    logger.info(f"[PriceAnalysisAgent] Verdict: {output.get('verdict', 'N/A')}")
-    
-    return {
-        **state,
-        "agent_output": output,
-        "response_type": "price_analysis"
-    }
-
-
-def quote_agent_node(state: TravelState) -> TravelState:
-    """
-    QUOTE AGENT (Worker)
-    Generates complete booking quotes.
-    """
-    prev_recs = state.get("previous_recommendations", [])
-    
-    if not prev_recs:
-        output = {
-            "success": False,
-            "message": "I don't have a package to quote. Search first!"
-        }
-    else:
-        bundle = prev_recs[0]
-        quote = generate_quote(bundle)
-        output = {
-            "success": True,
-            "bundle": bundle,
-            "quote": quote
-        }
-    
-    logger.info(f"[QuoteAgent] Generated quote")
-    
-    return {
-        **state,
-        "agent_output": output,
-        "response_type": "quote"
-    }
-
-
-def booking_confirmation_agent_node(state: TravelState) -> TravelState:
-    """
-    BOOKING CONFIRMATION AGENT (Worker)
-    Handles user confirmation after quote - redirects to booking page.
-    """
-    prev_recs = state.get("previous_recommendations", [])
-    
-    if not prev_recs:
-        output = {
-            "success": False,
-            "message": "No booking to confirm. Please search for options first."
-        }
-    else:
-        bundle = prev_recs[0]
-        output = {
-            "success": True,
-            "bundle": bundle,
-            "action": "redirect_to_booking",
-            "message": "Great! Redirecting you to complete your booking..."
-        }
-    
-    logger.info(f"[BookingConfirmationAgent] Confirmed booking")
-    
-    return {
-        **state,
-        "agent_output": output,
-        "response_type": "booking_confirmation"
-    }
-
-
-def recommendation_agent_node(state: TravelState) -> TravelState:
-    """
-    RECOMMENDATION AGENT (Worker)
-    Generates flight+hotel bundle recommendations.
-    """
-    query = state.get("query", "")
-    session_id = state.get("session_id", "")
-    search_params = state.get("search_params", {})
-    parsed_intent = state.get("parsed_intent")
-    
-    # Get previous recommendations from state
-    prev_recs = state.get("previous_recommendations", [])
-    
-    # Check if we need to re-search (new constraints added)
-    current_constraints = search_params.get("constraints", [])
-    
-    # If we have previous recommendations AND no new constraints, reuse them
-    if prev_recs and not current_constraints:
-        output = {
-            "success": True,
-            "bundles": prev_recs,
-            "destination": search_params.get("destination", ""),
-            "origin": search_params.get("origin", "")
-        }
-    # If we have constraints (new or existing), re-search with filters
-    elif search_params.get("destination"):
-        destination = search_params.get("destination")
-        origin = search_params.get("origin")
-        budget = search_params.get("budget")
-        constraints = current_constraints
-        
-        deals = get_deals_for_bundle(
-            destination=destination,
-            origin=origin,
-            max_flight_price=budget * 0.4 if budget else None,
-            max_hotel_price=budget * 0.6 / 3 if budget else None,
-            tags=constraints
-        )
-        
-        bundles = _build_bundles(deals, search_params)
-        
-        if session_store and bundles:
-            session_store.save_recommendations(session_id, bundles)
-        
-        output = {
-            "success": True,
-            "bundles": bundles,
-            "destination": destination,
-            "origin": origin
-        }
-    # Check if clarification needed - but first check if search_params already has enough info
-    elif parsed_intent is not None and isinstance(parsed_intent, dict) and parsed_intent.get("needs_clarification"):
-        # If we already have destination from session, don't ask for clarification
-        if search_params.get("destination"):
-            destination = search_params.get("destination")
-            origin = search_params.get("origin", "SFO")
-            budget = search_params.get("budget")
-            constraints = search_params.get("constraints", [])
-            deals = get_deals_for_bundle(
-                destination=destination,
-                origin=origin,
-                max_flight_price=budget * 0.4 if budget else None,
-                max_hotel_price=budget * 0.6 / 3 if budget else None,
-                tags=constraints
-            )
-            bundles = _build_bundles(deals, search_params)
-            if session_store and bundles:
-                session_store.save_recommendations(session_id, bundles)
-            output = {
-                "success": True,
-                "bundles": bundles,
-                "destination": destination,
-                "origin": origin
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "price_analyzer",
+            "description": "Analyze if a deal is good by comparing to 30-day average. Use when user asks 'is this a good deal?', 'worth it?', 'analyze this'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "bundle_id": {
+                        "type": "string",
+                        "description": "ID of the bundle to analyze (e.g., 'option 1', 'bundle_1')"
+                    },
+                    "listing_type": {
+                        "type": "string",
+                        "enum": ["flight", "hotel", "bundle"],
+                        "description": "Type of listing to analyze"
+                    }
+                },
+                "required": ["bundle_id"]
             }
-        else:
-            output = {
-                "success": False,
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "watch_creator",
+            "description": "Create a price or inventory alert. Use when user says 'watch', 'alert me', 'notify me', 'track', 'let me know if price drops'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "bundle_id": {
+                        "type": "string",
+                        "description": "ID of the bundle to watch"
+                    },
+                    "price_threshold": {
+                        "type": "number",
+                        "description": "Alert when price drops below this amount (optional)"
+                    },
+                    "watch_type": {
+                        "type": "string",
+                        "enum": ["price", "inventory", "both"],
+                        "description": "Type of alert to create"
+                    }
+                },
+                "required": ["bundle_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "quote_generator",
+            "description": "Generate a complete booking quote with itemized breakdown. Use when user says 'book', 'reserve', 'checkout', 'get quote', 'total cost'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "bundle_id": {
+                        "type": "string",
+                        "description": "ID of the bundle to quote"
+                    },
+                    "travelers": {
+                        "type": "integer",
+                        "description": "Number of travelers (default: 1)"
+                    },
+                    "nights": {
+                        "type": "integer",
+                        "description": "Number of nights (default: 3)"
+                    }
+                },
+                "required": ["bundle_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "policy_lookup",
+            "description": "Look up policy information like cancellation, pets, parking, breakfast. Use when user asks about rules, policies, or 'can I...' questions.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "listing_id": {
+                        "type": "string",
+                        "description": "ID of the listing (flight or hotel)"
+                    },
+                    "question": {
+                        "type": "string",
+                        "description": "The policy question to answer"
+                    }
+                },
+                "required": ["question"]
+            }
+        }
+    }
+]
+
+
+# ============================================
+# Tool Implementation Functions
+# ============================================
+class MRKLTools:
+    """Implementation of MRKL tools"""
+    
+    def __init__(self, session_id: str, user_id: str):
+        self.session_id = session_id
+        self.user_id = user_id
+        self._cached_bundles = []  # Store recommendations for reference
+    
+    async def intent_parser(self, query: str, context: Dict = None) -> Dict:
+        """Parse user intent from natural language"""
+        logger.info(f"[Tool: intent_parser] query={query}")
+        
+        if intent_parser:
+            parsed = intent_parser.parse(query, context or {})
+            if session_store and parsed:
+                session_store.merge_intent(self.session_id, parsed.to_dict())
+            return {
+                "tool": "intent_parser",
+                "result": parsed.to_dict() if parsed else {},
+                "needs_clarification": parsed.needs_clarification if parsed else False,
+                "clarification_question": parsed.clarification_question if parsed and parsed.needs_clarification else None
+            }
+        
+        # Fallback: basic extraction
+        return {
+            "tool": "intent_parser",
+            "result": {"query": query, "destination": None, "budget": None},
+            "needs_clarification": True,
+            "clarification_question": "Where would you like to travel to?"
+        }
+    
+    async def bundle_matcher(
+        self, 
+        destination: str = None,
+        origin: str = None,
+        departure_date: str = None,
+        return_date: str = None,
+        budget: float = None,
+        constraints: List[str] = None
+    ) -> Dict:
+        """Find flight+hotel bundles"""
+        logger.info(f"[Tool: bundle_matcher] origin={origin}, dest={destination}, depart={departure_date}, return={return_date}, budget={budget}")
+        
+        # Collect missing required fields
+        missing_fields = []
+        if not origin:
+            missing_fields.append("departure city")
+        if not destination:
+            missing_fields.append("destination")
+        if not departure_date:
+            missing_fields.append("departure date")
+        if not return_date:
+            missing_fields.append("return date")
+        
+        # If any required field is missing, ask for clarification
+        if missing_fields:
+            missing_str = ", ".join(missing_fields)
+            example = "For example: 'Flights from Delhi to Mumbai, December 15-20'"
+            return {
+                "tool": "bundle_matcher",
+                "bundles": [],
+                "count": 0,
                 "needs_clarification": True,
-                "question": parsed_intent.get("clarification_question", "Could you tell me more about your trip?") if parsed_intent else "Could you tell me more about your trip?"
+                "missing_fields": missing_fields,
+                "clarification_question": f"I need a few more details: {missing_str}. {example}"
             }
-    else:
-        # Get search parameters
-        destination = search_params.get("destination", "MIA")
-        origin = search_params.get("origin", "SFO")
-        budget = search_params.get("budget")
-        constraints = search_params.get("constraints", [])
         
-        # Get deals
-        deals = get_deals_for_bundle(
-            destination=destination,
-            origin=origin,
-            max_flight_price=budget * 0.4 if budget else None,
-            max_hotel_price=budget * 0.6 / 3 if budget else None,
-            tags=constraints
-        )
+        # Fetch from search service
+        deals = await self._fetch_deals(destination, origin)
         
         # Build bundles
-        bundles = _build_bundles(deals, search_params)
-        
-        # Save to session
-        if session_store and bundles:
-            session_store.save_recommendations(session_id, bundles)
-        
-        output = {
-            "success": True,
-            "bundles": bundles,
+        bundles = self._build_bundles(deals, {
             "destination": destination,
-            "origin": origin
-        }
-    
-    logger.info(f"[RecommendationAgent] Found {len(output.get('bundles', []))} bundles")
-    
-    return {
-        **state,
-        "agent_output": output,
-        "response_type": "recommendations"
-    }
-
-
-def _build_bundles(deals: Dict[str, List], params: Dict) -> List[Dict]:
-    """
-    Build flight+hotel bundles from deals.
-    Calculate Fit Score based on: price vs budget + amenity match + location flag
-    """
-    flights = deals.get("flights", [])
-    hotels = deals.get("hotels", [])
-    
-    if not flights and not hotels:
-        return []
-    
-    bundles = []
-    budget = params.get("budget")
-    constraints = params.get("constraints", [])
-    
-    for i in range(min(3, max(len(flights), len(hotels)))):
-        flight = flights[i] if i < len(flights) else (flights[0] if flights else None)
-        hotel = hotels[i] if i < len(hotels) else (hotels[0] if hotels else None)
-        
-        if not flight and not hotel:
-            continue
-        
-        flight_price = flight.get("current_price", 0) if flight else 0
-        hotel_price = hotel.get("current_price", 0) * 3 if hotel else 0  # 3 nights
-        total_price = flight_price + hotel_price
-        
-        # Get actual avg_30d_price from deals (pre-calculated in database)
-        flight_avg = flight.get("avg_30d_price", flight_price * 1.15) if flight else 0
-        hotel_avg = (hotel.get("avg_30d_price", hotel_price / 3 * 1.15) * 3) if hotel else 0
-        avg_30d_total = flight_avg + hotel_avg
-        
-        separate_price = total_price * 1.1
-        
-        # Calculate actual discount percentage
-        discount_pct = ((avg_30d_total - total_price) / avg_30d_total * 100) if avg_30d_total > 0 else 10
-        
-        # ========================================
-        # FIT SCORE CALCULATION (作业要求)
-        # Based on: price vs budget + amenity match + location flag
-        # ========================================
-        
-        # 1. Price vs Budget (0-15 points)
-        budget_score = 0
-        if budget:
-            if total_price <= budget * 0.7:
-                budget_score = 15  # Far under budget - great value
-            elif total_price <= budget * 0.9:
-                budget_score = 10  # Under budget - good value
-            elif total_price <= budget:
-                budget_score = 5   # At budget - acceptable
-            else:
-                budget_score = 0   # Over budget
-        else:
-            budget_score = 8  # No budget specified - neutral
-        
-        # 2. Amenity/Policy Match (0-15 points)
-        hotel_tags = hotel.get("tags", []) if hotel else []
-        match_count = sum(1 for c in constraints if c in hotel_tags)
-        amenity_score = min(15, match_count * 5)  # 5 points per match, max 15
-        
-        # 3. Location/Convenience Flag (0-10 points)
-        # Direct flight = convenient location (no layovers)
-        stops = flight.get("metadata", {}).get("stops", 1) if flight else 1
-        if stops == 0:
-            location_score = 10  # Direct flight - best
-        elif stops == 1:
-            location_score = 5   # 1 stop - okay
-        else:
-            location_score = 0   # Multiple stops - inconvenient
-        
-        # Base Deal Score from database (average of flight + hotel)
-        flight_deal_score = flight.get("deal_score", 50) if flight else 50
-        hotel_deal_score = hotel.get("deal_score", 50) if hotel else 50
-        base_deal_score = (flight_deal_score + hotel_deal_score) // 2
-        
-        # Final Fit Score = weighted combination
-        # Base score contributes 60%, fit factors contribute 40%
-        fit_bonus = budget_score + amenity_score + location_score  # 0-40 points
-        fit_score = min(95, max(30, int(base_deal_score * 0.6 + fit_bonus)))
-        
-        # Generate explanation with real data
-        exp = generate_explanation({
-            "total_price": total_price,
-            "avg_30d_price": avg_30d_total,
-            "discount_pct": discount_pct,
-            "rating": hotel.get("metadata", {}).get("rating", 4.0) if hotel else 4.0,
-            "rooms_left": hotel.get("availability", 5) if hotel else 5,
-            "flight": flight or {},
-            "hotel": {
-                "amenities": hotel_tags, 
-                "policy": {"refundable": "refundable" in hotel_tags}
-            } if hotel else {},
-            "has_promo": (flight.get("has_promo", False) if flight else False) or (hotel.get("has_promo", False) if hotel else False),
-            "promo_end_date": (flight.get("promo_end_date") if flight else None) or (hotel.get("promo_end_date") if hotel else None)
+            "origin": origin,
+            "departure_date": departure_date,
+            "return_date": return_date,
+            "budget": budget,
+            "constraints": constraints or []
         })
         
-        bundle = {
-            "bundle_id": f"bundle_{i+1}_{datetime.utcnow().strftime('%H%M%S')}",
-            "name": f"{(flight.get('origin') if flight else None) or params.get('origin') or '???'} -> {(flight.get('destination') if flight else None) or params.get('destination') or '???'} + {hotel.get('name', 'Hotel') if hotel else 'Hotel'}",
-            "flight": flight,
-            "hotel": hotel,
-            "total_price": total_price,
-            "separate_price": separate_price,
-            "savings": separate_price - total_price,
-            "deal_score": fit_score,  # This is now the Fit Score
-            "base_deal_score": base_deal_score,  # Original deal score for reference
-            "discount_percent": round(discount_pct, 1),
-            "explanation": exp,
-            "destination": params.get("destination", "MIA"),
-            "origin": params.get("origin", "SFO")
+        # If no bundles found, inform user
+        if not bundles:
+            return {
+                "tool": "bundle_matcher",
+                "bundles": [],
+                "count": 0,
+                "destination": destination,
+                "origin": origin,
+                "needs_clarification": True,
+                "clarification_question": f"Sorry, I couldn't find any flights from {origin} to {destination} for {departure_date} to {return_date}. Please try different dates or route."
+            }
+        
+        # Cache for later reference
+        self._cached_bundles = bundles
+        if session_store:
+            session_store.save_recommendations(self.session_id, bundles)
+        
+        return {
+            "tool": "bundle_matcher",
+            "bundles": bundles[:3],
+            "count": len(bundles),
+            "destination": destination,
+            "origin": origin,
+            "departure_date": departure_date,
+            "return_date": return_date
         }
-        bundles.append(bundle)
     
-    bundles.sort(key=lambda b: b["deal_score"], reverse=True)
-    return bundles
-
-
-def synthesizer_node(state: TravelState) -> TravelState:
-    """
-    SYNTHESIZER NODE
-    Formats the final response based on agent output.
-    """
-    response_type = state.get("response_type", "")
-    output = state.get("agent_output", {})
-    session_id = state.get("session_id", "")
-    user_id = state.get("user_id", "")
-    
-    # Format response based on type
-    if response_type == "policy_answer":
-        response = output.get("answer", "I couldn't find that information.")
-    
-    elif response_type == "watch_created":
-        if output.get("success"):
-            watches = output.get("watches", [])
-            listing = output.get("listing_name", "your selection")
-            response = f"Got it! I'll alert you when {listing} has: {', '.join(watches)}."
+    async def price_analyzer(self, bundle_id: str, listing_type: str = "bundle") -> Dict:
+        """Analyze if a deal is good"""
+        logger.info(f"[Tool: price_analyzer] bundle_id={bundle_id}")
+        
+        # Get bundle from cache or session
+        bundle = self._get_bundle_by_id(bundle_id)
+        
+        if not bundle:
+            return {
+                "tool": "price_analyzer",
+                "error": "Bundle not found. Please search for options first."
+            }
+        
+        # Calculate analysis
+        current_price = bundle.get("total_price", 0)
+        avg_30d = current_price * 1.15  # Mock: assume 15% higher average
+        discount_pct = ((avg_30d - current_price) / avg_30d) * 100
+        
+        # Determine verdict
+        if discount_pct >= 20:
+            verdict = "GREAT_DEAL"
+            verdict_text = "This is a great deal!"
+        elif discount_pct >= 10:
+            verdict = "GOOD_DEAL"
+            verdict_text = "This is a good deal."
+        elif discount_pct >= 0:
+            verdict = "FAIR"
+            verdict_text = "This is a fair price."
         else:
-            response = output.get("message", "Couldn't create watch.")
+            verdict = "ABOVE_AVERAGE"
+            verdict_text = "This is above average price."
+        
+        return {
+            "tool": "price_analyzer",
+            "bundle_id": bundle_id,
+            "current_price": current_price,
+            "avg_30d_price": avg_30d,
+            "discount_pct": round(discount_pct, 1),
+            "verdict": verdict,
+            "verdict_text": verdict_text,
+            "deal_score": bundle.get("deal_score", 70)
+        }
     
-    elif response_type == "price_analysis":
-        if output.get("success"):
-            response = f"""**Price Analysis: {output['name']}**
-
-Current Price: ${output['current_price']:.0f}
-30-day Average: ${output['avg_30d_price']:.0f}
-Difference: {output['diff_percent']:.0f}%
-
-**Verdict: {output['verdict']}**"""
-        else:
-            response = output.get("message", "Couldn't analyze price.")
-    
-    elif response_type == "quote":
-        if output.get("success"):
-            bundle = output.get("bundle", {})
-            quote = output.get("quote", {})
-            response = f"""**Complete Quote: {bundle.get('name', 'Your Trip')}**
-
-**Flight:**
-- {quote.get('flight_quote', {}).get('route', 'Flight')}
-- Total: ${quote.get('flight_quote', {}).get('pricing', {}).get('total', 0):.0f}
-
-**Hotel:**
-- {quote.get('hotel_quote', {}).get('name', 'Hotel')}
-- Total: ${quote.get('hotel_quote', {}).get('pricing', {}).get('total', 0):.0f}
-
-**Grand Total: ${quote.get('summary', {}).get('grand_total', 0):.0f}**
-
-Quote valid for 30 minutes. Ready to book?"""
-        else:
-            response = output.get("message", "Couldn't generate quote.")
-    
-    elif response_type == "booking_confirmation":
-        if output.get("success"):
-            response = "Great! Redirecting you to complete your booking..."
-        else:
-            response = output.get("message", "Couldn't confirm booking.")
-    
-    elif response_type == "recommendations":
-        if output.get("needs_clarification"):
-            response = output.get("question", "Could you tell me more about your trip?")
-        elif output.get("bundles"):
-            bundles = output["bundles"]
-            lines = [f"**Here are {len(bundles)} options for {output.get('destination', 'your destination')}:**\n"]
-            
-            for i, bundle in enumerate(bundles[:3], 1):
-                lines.append(f"**Option {i}: {bundle['name']}**")
-                lines.append(f"Total: ${bundle['total_price']:.0f} (save ${bundle['savings']:.0f})")
-                lines.append(f"Deal Score: {bundle['deal_score']}/100")
-                exp = bundle.get("explanation", {})
-                lines.append(f"Why: {exp.get('why_this', 'Good value')}")
-                lines.append("")
-            
-            lines.append("Want me to analyze any of these, create a price alert, or get a full quote?")
-            response = "\n".join(lines)
-        else:
-            response = get_llm_response(
-                f"Help the user find travel options. Query: {state.get('query', '')}. "
-                f"Destination: {output.get('destination', 'unknown')}"
-            )
-    
-    else:
-        response = "How can I help you with your travel plans today?"
-    
-    logger.info(f"[Synthesizer] Response type: {response_type}, length: {len(response)}")
-    
-    # Save last_response_type to session for confirmation handling
-    if session_store and session_id:
+    async def watch_creator(
+        self, 
+        bundle_id: str, 
+        price_threshold: float = None,
+        watch_type: str = "both"
+    ) -> Dict:
+        """Create a price/inventory watch"""
+        logger.info(f"[Tool: watch_creator] bundle_id={bundle_id}, threshold={price_threshold}")
+        
+        bundle = self._get_bundle_by_id(bundle_id)
+        
+        if not bundle:
+            return {
+                "tool": "watch_creator",
+                "error": "Bundle not found. Please search for options first."
+            }
+        
         try:
-            # Try to update last_response_type if method exists
-            if hasattr(session_store, 'update_last_response_type'):
-                session_store.update_last_response_type(session_id, response_type)
-            elif hasattr(session_store, 'update_session'):
-                session_store.update_session(session_id, {"last_response_type": response_type})
+            # Create watch
+            watch_id = f"watch_{uuid.uuid4().hex[:8]}"
+            current_price = bundle.get("total_price", 0) or 0
+            
+            # Safely get listing_id
+            flight = bundle.get("flight") or {}
+            hotel = bundle.get("hotel") or {}
+            listing_id = flight.get("listing_id") or hotel.get("listing_id") or bundle_id
+            
+            watch_data = {
+                "watch_id": watch_id,
+                "user_id": self.user_id,
+                "bundle_id": bundle_id,
+                "listing_id": listing_id,
+                "price_threshold": price_threshold or (current_price * 0.9 if current_price else 100),
+                "current_price": current_price,
+                "watch_type": watch_type,
+                "created_at": datetime.utcnow().isoformat(),
+                "active": True
+            }
+            
+            # Save to watch store if available
+            if watch_store and WatchCreate:
+                try:
+                    watch_store.create_watch(WatchCreate(**watch_data))
+                except Exception as e:
+                    logger.warning(f"Watch store error: {e}")
+            
+            return {
+                "tool": "watch_creator",
+                "watch_id": watch_id,
+                "bundle_name": bundle.get("name", "Selected bundle"),
+                "price_threshold": watch_data["price_threshold"],
+                "watch_type": watch_type,
+                "message": f"I'll notify you when the price drops below ${watch_data['price_threshold']:.0f}"
+            }
         except Exception as e:
-            logger.warning(f"Could not save last_response_type: {e}")
+            logger.error(f"watch_creator error: {e}")
+            return {
+                "tool": "watch_creator",
+                "error": f"Failed to create watch: {str(e)}"
+            }
     
-    return {
-        **state,
-        "response": response,
-        "metadata": {
-            "session_id": session_id,
-            "user_id": user_id,
-            "response_type": response_type,
-            "timestamp": datetime.utcnow().isoformat()
-        }
-    }
+    async def quote_generator(
+        self, 
+        bundle_id: str, 
+        travelers: int = 1,
+        nights: int = 3
+    ) -> Dict:
+        """Generate booking quote"""
+        logger.info(f"[Tool: quote_generator] bundle_id={bundle_id}, travelers={travelers}")
+        
+        bundle = self._get_bundle_by_id(bundle_id)
+        
+        if not bundle:
+            return {
+                "tool": "quote_generator",
+                "error": "Bundle not found. Please search for options first."
+            }
+        
+        try:
+            # Safely get flight and hotel data
+            flight = bundle.get("flight") or {}
+            hotel = bundle.get("hotel") or {}
+            
+            # Calculate prices safely
+            flight_unit_price = flight.get("current_price") or flight.get("price") or 0
+            hotel_unit_price = hotel.get("current_price") or hotel.get("pricePerNight") or 0
+            
+            flight_price = flight_unit_price * travelers
+            hotel_price = hotel_unit_price * nights
+            
+            subtotal = flight_price + hotel_price
+            taxes = subtotal * 0.12  # 12% taxes
+            fees = 25.00  # Booking fee
+            grand_total = subtotal + taxes + fees
+            
+            quote = {
+                "tool": "quote_generator",
+                "quote_id": f"quote_{uuid.uuid4().hex[:8]}",
+                "bundle_id": bundle_id,
+                "bundle_name": bundle.get("name", "Selected bundle"),
+                "breakdown": {
+                    "flight": {
+                        "description": f"{flight.get('origin', 'DEL')} → {flight.get('destination', 'BOM')}",
+                        "unit_price": flight_unit_price,
+                        "quantity": travelers,
+                        "total": flight_price
+                    },
+                    "hotel": {
+                        "description": hotel.get("name", "Hotel"),
+                        "unit_price": hotel_unit_price,
+                        "quantity": nights,
+                        "total": hotel_price
+                    },
+                    "subtotal": subtotal,
+                    "taxes": taxes,
+                    "fees": fees,
+                    "grand_total": grand_total
+                },
+                "travelers": travelers,
+                "nights": nights,
+                "valid_until": datetime.utcnow().isoformat(),
+                "next_step": "Reply 'confirm' to proceed with booking"
+            }
+            
+            # Save quote to session
+            if session_store:
+                try:
+                    session_store.save_quote(self.session_id, quote)
+                except Exception as e:
+                    logger.warning(f"Failed to save quote to session: {e}")
+            
+            return quote
+        except Exception as e:
+            logger.error(f"quote_generator error: {e}")
+            return {
+                "tool": "quote_generator",
+                "error": f"Failed to generate quote: {str(e)}"
+            }
+    
+    async def policy_lookup(self, question: str, listing_id: str = None) -> Dict:
+        """Look up policy information"""
+        logger.info(f"[Tool: policy_lookup] question={question}")
+        
+        try:
+            # Try to get listing from recent bundles
+            if not listing_id and self._cached_bundles:
+                bundle = self._cached_bundles[0]
+                hotel = bundle.get("hotel") or {}
+                flight = bundle.get("flight") or {}
+                listing_id = hotel.get("listing_id") or flight.get("listing_id")
+            
+            answer = None
+            
+            # Get policy answer from store
+            if policy_store:
+                try:
+                    answer = answer_policy_question(listing_id, question)
+                except Exception as e:
+                    logger.warning(f"Policy store error: {e}")
+                    answer = None
+            
+            # If no answer found, suggest contacting the property
+            if not answer:
+                answer = "I couldn't find specific policy information for this listing. Please contact the hotel or airline directly to confirm their policies."
+            
+            return {
+                "tool": "policy_lookup",
+                "question": question,
+                "answer": answer,
+                "listing_id": listing_id
+            }
+        except Exception as e:
+            logger.error(f"policy_lookup error: {e}")
+            return {
+                "tool": "policy_lookup",
+                "question": question,
+                "answer": "I couldn't find specific policy information. Please contact the hotel or airline directly.",
+                "listing_id": None
+            }
+    
+    # ============================================
+    # Helper Methods
+    # ============================================
+    async def _fetch_deals(self, destination: str, origin: str) -> Dict:
+        """Fetch deals from search service"""
+        flights = []
+        hotels = []
+        
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                # Fetch flights
+                flight_res = await client.get(
+                    "http://search-service:3003/api/v1/search/flights",
+                    params={"origin": origin, "destination": destination}
+                )
+                if flight_res.status_code == 200:
+                    flights = flight_res.json().get("data", [])
+                    for f in flights:
+                        f["current_price"] = f.get("price", 0)
+                        f["deal_score"] = f.get("deal_score", 75)
+                
+                # Fetch hotels
+                hotel_res = await client.get(
+                    "http://search-service:3003/api/v1/search/hotels",
+                    params={"city": destination}
+                )
+                if hotel_res.status_code == 200:
+                    hotels = hotel_res.json().get("data", [])
+                    for h in hotels:
+                        h["current_price"] = h.get("pricePerNight", h.get("price", 0))
+                        h["deal_score"] = h.get("deal_score", 75)
+                        
+        except Exception as e:
+            logger.error(f"Search service error: {e}")
+            # Fallback to deals cache
+            if deals_cache:
+                return get_deals_for_bundle(destination, origin=origin)
+        
+        return {"flights": flights, "hotels": hotels}
+    
+    def _build_bundles(self, deals: Dict, params: Dict) -> List[Dict]:
+        """Build flight+hotel bundles"""
+        flights = deals.get("flights", [])
+        hotels = deals.get("hotels", [])
+        
+        if not flights and not hotels:
+            return []
+        
+        bundles = []
+        for i in range(min(3, max(len(flights), len(hotels)))):
+            flight = flights[i] if i < len(flights) else (flights[0] if flights else None)
+            hotel = hotels[i] if i < len(hotels) else (hotels[0] if hotels else None)
+            
+            if not flight and not hotel:
+                continue
+            
+            flight_price = flight.get("current_price", 0) if flight else 0
+            hotel_price = (hotel.get("current_price", 0) * 3) if hotel else 0
+            total_price = flight_price + hotel_price
+            
+            bundle = {
+                "bundle_id": f"option_{i+1}",
+                "name": f"{params.get('origin', 'SFO')} → {params.get('destination', 'MIA')} + {hotel.get('name', 'Hotel') if hotel else 'Hotel'}",
+                "flight": flight,
+                "hotel": hotel,
+                "total_price": total_price,
+                "savings": total_price * 0.1,
+                "deal_score": ((flight.get("deal_score", 70) if flight else 70) + (hotel.get("deal_score", 70) if hotel else 70)) // 2,
+                "explanation": generate_explanation({
+                    "total_price": total_price,
+                    "flight": flight or {},
+                    "hotel": hotel or {}
+                }),
+                "destination": params.get("destination"),
+                "origin": params.get("origin", "SFO")
+            }
+            bundles.append(bundle)
+        
+        bundles.sort(key=lambda b: b["deal_score"], reverse=True)
+        return bundles
+    
+    def _get_bundle_by_id(self, bundle_id: str) -> Optional[Dict]:
+        """Get bundle by ID from cache or session"""
+        # Normalize bundle_id
+        bundle_id = bundle_id.lower().replace(" ", "_")
+        if bundle_id.startswith("option"):
+            bundle_id = bundle_id.replace("option", "option_").replace("__", "_")
+        
+        # Try to extract number
+        import re
+        match = re.search(r'(\d+)', bundle_id)
+        if match:
+            idx = int(match.group(1)) - 1  # Convert to 0-indexed
+            if 0 <= idx < len(self._cached_bundles):
+                return self._cached_bundles[idx]
+        
+        # Search by bundle_id
+        for bundle in self._cached_bundles:
+            if bundle.get("bundle_id", "").lower() == bundle_id:
+                return bundle
+        
+        # Try session store
+        if session_store:
+            bundles = session_store.get_previous_recommendations(self.session_id)
+            if bundles:
+                self._cached_bundles = bundles
+                if match:
+                    idx = int(match.group(1)) - 1
+                    if 0 <= idx < len(bundles):
+                        return bundles[idx]
+        
+        return None
 
 
 # ============================================
-# Router Function (Conditional Edge)
+# Main Concierge Agent Class
 # ============================================
-def route_to_agent(state: TravelState) -> str:
+class ConciergeAgent:
     """
-    Routing function for conditional edges.
-    Returns the name of the next node based on intent.
-    """
-    intent = state.get("intent", "recommendation")
-    
-    routing_map = {
-        "policy": "policy_agent",
-        "watch": "watch_agent",
-        "price_analysis": "price_analysis_agent",
-        "quote": "quote_agent",
-        "booking_confirmation": "booking_confirmation_agent",
-        "recommendation": "recommendation_agent",
-        "clarification": "recommendation_agent"
-    }
-    
-    return routing_map.get(intent, "recommendation_agent")
-
-
-# ============================================
-# Build the Graph
-# ============================================
-def build_travel_graph() -> StateGraph:
-    """
-    Build the LangGraph workflow.
-    
-    Graph structure:
-    START -> supervisor -> [router] -> {agent} -> synthesizer -> END
-    """
-    # Create graph with state schema
-    workflow = StateGraph(TravelState)
-    
-    # Add nodes
-    workflow.add_node("supervisor", supervisor_node)
-    workflow.add_node("policy_agent", policy_agent_node)
-    workflow.add_node("watch_agent", watch_agent_node)
-    workflow.add_node("price_analysis_agent", price_analysis_agent_node)
-    workflow.add_node("quote_agent", quote_agent_node)
-    workflow.add_node("booking_confirmation_agent", booking_confirmation_agent_node)
-    workflow.add_node("recommendation_agent", recommendation_agent_node)
-    workflow.add_node("synthesizer", synthesizer_node)
-    
-    # Set entry point
-    workflow.set_entry_point("supervisor")
-    
-    # Add conditional routing from supervisor to agents
-    workflow.add_conditional_edges(
-        "supervisor",
-        route_to_agent,
-        {
-            "policy_agent": "policy_agent",
-            "watch_agent": "watch_agent",
-            "price_analysis_agent": "price_analysis_agent",
-            "quote_agent": "quote_agent",
-            "booking_confirmation_agent": "booking_confirmation_agent",
-            "recommendation_agent": "recommendation_agent"
-        }
-    )
-    
-    # All agents go to synthesizer
-    workflow.add_edge("policy_agent", "synthesizer")
-    workflow.add_edge("watch_agent", "synthesizer")
-    workflow.add_edge("price_analysis_agent", "synthesizer")
-    workflow.add_edge("quote_agent", "synthesizer")
-    workflow.add_edge("booking_confirmation_agent", "synthesizer")
-    workflow.add_edge("recommendation_agent", "synthesizer")
-    
-    # Synthesizer goes to END
-    workflow.add_edge("synthesizer", END)
-    
-    return workflow
-
-
-# ============================================
-# Compile and Create Global Instance
-# ============================================
-travel_graph = build_travel_graph()
-travel_app = travel_graph.compile()
-
-
-# ============================================
-# Main Interface (Drop-in replacement)
-# ============================================
-class LangGraphConciergeAgent:
-    """
-    LangGraph-based Concierge Agent.
-    Drop-in replacement for ConciergeAgent.
+    Single LLM Agent with MRKL Tools.
+    LLM decides which tool to call based on user query.
     """
     
     def __init__(self):
-        self.graph = travel_app
-        logger.info("LangGraphConciergeAgent initialized with graph workflow")
-    
+        self.openai_client = None
+        
+        if USE_OPENAI and OPENAI_AVAILABLE:
+            try:
+                self.openai_client = OpenAI(api_key=OPENAI_API_KEY)
+                logger.info("ConciergeAgent: Using OpenAI with function calling")
+            except Exception as e:
+                logger.warning(f"OpenAI init failed: {e}")
+        
+        self.system_prompt = """You are a travel concierge assistant for a Kayak-like booking platform.
+
+You have access to these tools:
+1. intent_parser - Extract travel details from user query
+2. bundle_matcher - Find flight+hotel bundles
+3. price_analyzer - Check if a deal is good
+4. watch_creator - Set up price alerts
+5. quote_generator - Get booking quote
+6. policy_lookup - Answer policy questions
+
+For new searches, use bundle_matcher with the destination.
+For analysis questions, use price_analyzer.
+For alert requests, use watch_creator.
+For booking requests, use quote_generator.
+For policy questions, use policy_lookup.
+
+Be concise and helpful. Always use tools to provide accurate information."""
+
     async def process_message(
         self,
         query: str,
         user_id: str,
         session_id: Optional[str] = None
     ) -> Dict[str, Any]:
-        """
-        Process a user message using the LangGraph workflow.
-        Same interface as original ConciergeAgent.
-        """
-        # Initial state
-        initial_state: TravelState = {
-            "query": query,
+        """Process user message using MRKL tool pattern"""
+        
+        # Get or create session
+        if session_store:
+            session_id = session_store.get_or_create_session(user_id, session_id)
+        else:
+            session_id = session_id or f"sess_{user_id}_{uuid.uuid4().hex[:8]}"
+        
+        # Initialize tools
+        tools = MRKLTools(session_id, user_id)
+        
+        # Load previous recommendations into tools cache
+        if session_store:
+            prev_recs = session_store.get_previous_recommendations(session_id)
+            if prev_recs:
+                tools._cached_bundles = prev_recs
+        
+        # Call LLM with tools
+        if self.openai_client:
+            result = await self._call_with_openai_tools(query, tools)
+        elif OLLAMA_AVAILABLE:
+            result = await self._call_with_ollama_tools(query, tools)
+        else:
+            result = await self._call_with_keyword_fallback(query, tools)
+        
+        # Format response with backward-compatible fields
+        response_data = {
+            "response": result.get("response", ""),
+            "session_id": session_id,
             "user_id": user_id,
-            "session_id": session_id or "",
-            "intent": "",
-            "search_params": {},
-            "previous_recommendations": [],
-            "parsed_intent": None,
-            "agent_output": {},
-            "response": "",
-            "response_type": "",
-            "metadata": {}
+            "type": result.get("type", "message"),
+            "tool_used": result.get("tool_used"),
+            "timestamp": datetime.utcnow().isoformat()
         }
         
-        # Run the graph
+        # Add type-specific fields for backward compatibility
+        data = result.get("data", {})
+        if result.get("type") == "recommendations":
+            response_data["bundles"] = data.get("bundles", [])
+        elif result.get("type") == "quote":
+            response_data["quote"] = data
+        elif result.get("type") == "watch_created":
+            response_data["watches"] = [data] if data else []
+        elif result.get("type") == "analysis":
+            response_data["analysis"] = data
+        elif result.get("type") == "policy":
+            response_data["policy_answer"] = data.get("answer")
+        
+        return response_data
+    
+    async def _call_with_openai_tools(self, query: str, tools: MRKLTools) -> Dict:
+        """Use OpenAI function calling to select and execute tools"""
+        
         try:
-            final_state = self.graph.invoke(initial_state)
+            # First call: let LLM decide which tool to use
+            response = self.openai_client.chat.completions.create(
+                model=OPENAI_MODEL,
+                messages=[
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": query}
+                ],
+                tools=MRKL_TOOLS,
+                tool_choice="auto",
+                max_tokens=500
+            )
+            
+            message = response.choices[0].message
+            
+            # Check if LLM wants to call a tool
+            if message.tool_calls:
+                tool_call = message.tool_calls[0]
+                tool_name = tool_call.function.name
+                tool_args = json.loads(tool_call.function.arguments)
+                
+                logger.info(f"LLM selected tool: {tool_name} with args: {tool_args}")
+                
+                # Execute the tool
+                tool_result = await self._execute_tool(tools, tool_name, tool_args)
+                
+                # Second call: generate natural language response
+                follow_up = self.openai_client.chat.completions.create(
+                    model=OPENAI_MODEL,
+                    messages=[
+                        {"role": "system", "content": self.system_prompt},
+                        {"role": "user", "content": query},
+                        message,
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": json.dumps(tool_result)
+                        }
+                    ],
+                    max_tokens=500
+                )
+                
+                return {
+                    "response": follow_up.choices[0].message.content,
+                    "type": self._get_response_type(tool_name),
+                    "tool_used": tool_name,
+                    "data": tool_result
+                }
+            
+            # No tool call, just return the message
+            return {
+                "response": message.content,
+                "type": "message",
+                "tool_used": None
+            }
+            
+        except Exception as e:
+            logger.error(f"OpenAI tool call error: {e}")
+            return await self._call_with_keyword_fallback(query, tools)
+    
+    async def _call_with_ollama_tools(self, query: str, tools: MRKLTools) -> Dict:
+        """Use Ollama with tools (if supported) or fallback to keyword matching"""
+        
+        try:
+            # Try Ollama with tools format
+            response = ollama.chat(
+                model=OLLAMA_MODEL,
+                messages=[
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": query}
+                ],
+                tools=MRKL_TOOLS
+            )
+            
+            message = response.get("message", {})
+            
+            if message.get("tool_calls"):
+                tool_call = message["tool_calls"][0]
+                tool_name = tool_call["function"]["name"]
+                tool_args = tool_call["function"]["arguments"]
+                
+                if isinstance(tool_args, str):
+                    tool_args = json.loads(tool_args)
+                
+                logger.info(f"Ollama selected tool: {tool_name}")
+                
+                tool_result = await self._execute_tool(tools, tool_name, tool_args)
+                
+                # Generate response with tool result
+                follow_up = ollama.chat(
+                    model=OLLAMA_MODEL,
+                    messages=[
+                        {"role": "system", "content": self.system_prompt},
+                        {"role": "user", "content": query},
+                        {"role": "assistant", "content": f"Tool result: {json.dumps(tool_result)}"},
+                        {"role": "user", "content": "Please summarize this result for the user."}
+                    ]
+                )
+                
+                return {
+                    "response": follow_up["message"]["content"],
+                    "type": self._get_response_type(tool_name),
+                    "tool_used": tool_name,
+                    "data": tool_result
+                }
             
             return {
-                "response": final_state.get("response", ""),
-                "session_id": final_state.get("metadata", {}).get("session_id", session_id),
-                "user_id": user_id,
-                "type": final_state.get("response_type", ""),
-                "timestamp": final_state.get("metadata", {}).get("timestamp", datetime.utcnow().isoformat()),
-                # Include additional data based on type
-                **({"bundles": final_state.get("agent_output", {}).get("bundles", [])} 
-                   if final_state.get("response_type") == "recommendations" else {}),
-                **({"quote": final_state.get("agent_output", {}).get("quote")} 
-                   if final_state.get("response_type") == "quote" else {}),
+                "response": message.get("content", "How can I help you with travel planning?"),
+                "type": "message",
+                "tool_used": None
             }
+            
         except Exception as e:
-            logger.error(f"Graph execution error: {e}")
-            return {
-                "response": "I encountered an error. Could you try rephrasing?",
-                "session_id": session_id,
-                "user_id": user_id,
-                "type": "error",
-                "timestamp": datetime.utcnow().isoformat()
-            }
+            logger.warning(f"Ollama tools not supported, using keyword fallback: {e}")
+            return await self._call_with_keyword_fallback(query, tools)
+    
+    async def _call_with_keyword_fallback(self, query: str, tools: MRKLTools) -> Dict:
+        """Fallback: use keyword matching to select tools (no LLM tool selection)"""
+        
+        query_lower = query.lower().strip()
+        
+        # Check for confirmation keywords (user saying "yes" after a quote)
+        confirm_keywords = ["yes", "confirm", "sure", "ok", "okay", "go ahead", 
+                          "do it", "let's do it", "sounds good", "perfect", "yeah", "yes please"]
+        
+        # Handle booking confirmation
+        if query_lower in confirm_keywords or any(kw == query_lower for kw in confirm_keywords):
+            # Check if we have a pending quote
+            if tools._cached_bundles:
+                tool_name = "booking_confirmation"
+                bundle = tools._cached_bundles[0]
+                tool_result = {
+                    "tool": "booking_confirmation",
+                    "status": "confirmed",
+                    "bundle_id": bundle.get("bundle_id"),
+                    "bundle_name": bundle.get("name"),
+                    "redirect_url": f"/booking/{bundle.get('bundle_id')}",
+                    "message": f"Great! Redirecting you to complete your booking for {bundle.get('name')}..."
+                }
+                return {
+                    "response": tool_result["message"],
+                    "type": "booking_confirmation",
+                    "tool_used": tool_name,
+                    "data": tool_result
+                }
+        
+        # Keyword-based tool selection
+        if any(kw in query_lower for kw in ["cancel", "refund", "pet", "parking", "breakfast", "wifi", "policy", "check-in", "check-out"]):
+            tool_name = "policy_lookup"
+            tool_result = await tools.policy_lookup(question=query)
+            
+        elif any(kw in query_lower for kw in ["watch", "alert", "notify", "track", "let me know", "tell me if"]):
+            tool_name = "watch_creator"
+            # Extract bundle reference
+            bundle_id = "option_1"  # Default to first option
+            import re
+            match = re.search(r'option\s*(\d+)', query_lower)
+            if match:
+                bundle_id = f"option_{match.group(1)}"
+            tool_result = await tools.watch_creator(bundle_id=bundle_id)
+            
+        elif any(kw in query_lower for kw in ["analyze", "good deal", "worth it", "is this good", "compare"]):
+            tool_name = "price_analyzer"
+            bundle_id = "option_1"
+            import re
+            match = re.search(r'option\s*(\d+)', query_lower)
+            if match:
+                bundle_id = f"option_{match.group(1)}"
+            tool_result = await tools.price_analyzer(bundle_id=bundle_id)
+            
+        elif any(kw in query_lower for kw in ["book", "reserve", "quote", "checkout", "total cost", "proceed"]):
+            tool_name = "quote_generator"
+            bundle_id = "option_1"
+            import re
+            match = re.search(r'option\s*(\d+)', query_lower)
+            if match:
+                bundle_id = f"option_{match.group(1)}"
+            tool_result = await tools.quote_generator(bundle_id=bundle_id)
+            
+        else:
+            # Default: search for bundles
+            tool_name = "bundle_matcher"
+            # Extract origin, destination, and dates
+            origin, destination = self._extract_origin_destination(query)
+            departure_date, return_date = self._extract_dates(query)
+            tool_result = await tools.bundle_matcher(
+                origin=origin,
+                destination=destination,
+                departure_date=departure_date,
+                return_date=return_date
+            )
+        
+        # Format response
+        response = self._format_tool_result(tool_name, tool_result)
+        
+        return {
+            "response": response,
+            "type": self._get_response_type(tool_name),
+            "tool_used": tool_name,
+            "data": tool_result
+        }
+    
+    async def _execute_tool(self, tools: MRKLTools, tool_name: str, tool_args: Dict) -> Dict:
+        """Execute a tool by name"""
+        
+        tool_map = {
+            "intent_parser": tools.intent_parser,
+            "bundle_matcher": tools.bundle_matcher,
+            "price_analyzer": tools.price_analyzer,
+            "watch_creator": tools.watch_creator,
+            "quote_generator": tools.quote_generator,
+            "policy_lookup": tools.policy_lookup
+        }
+        
+        tool_func = tool_map.get(tool_name)
+        if tool_func:
+            return await tool_func(**tool_args)
+        
+        return {"error": f"Unknown tool: {tool_name}"}
+    
+    def _get_response_type(self, tool_name: str) -> str:
+        """Map tool name to response type"""
+        type_map = {
+            "intent_parser": "clarification",
+            "bundle_matcher": "recommendations",
+            "price_analyzer": "analysis",
+            "watch_creator": "watch_created",
+            "quote_generator": "quote",
+            "policy_lookup": "policy",
+            "booking_confirmation": "booking_confirmation"
+        }
+        return type_map.get(tool_name, "message")
+    
+    def _extract_origin_destination(self, query: str) -> tuple:
+        """Extract origin and destination from query"""
+        import re
+        
+        # Common city to airport code mapping
+        city_codes = {
+            "miami": "MIA", "new york": "JFK", "los angeles": "LAX",
+            "san francisco": "SFO", "chicago": "ORD", "boston": "BOS",
+            "seattle": "SEA", "denver": "DEN", "vegas": "LAS", "las vegas": "LAS",
+            "orlando": "MCO", "dallas": "DFW", "atlanta": "ATL",
+            "mumbai": "BOM", "delhi": "DEL", "bangalore": "BLR", "bengaluru": "BLR",
+            "chennai": "MAA", "kolkata": "CCU", "hyderabad": "HYD"
+        }
+        
+        query_lower = query.lower()
+        origin = None
+        destination = None
+        
+        # Pattern: "from X to Y" or "X to Y"
+        from_to_pattern = r'from\s+(\w+(?:\s+\w+)?)\s+to\s+(\w+(?:\s+\w+)?)'
+        match = re.search(from_to_pattern, query_lower)
+        if match:
+            origin_str = match.group(1).strip()
+            dest_str = match.group(2).strip()
+            origin = city_codes.get(origin_str, origin_str.upper()[:3])
+            destination = city_codes.get(dest_str, dest_str.upper()[:3])
+        else:
+            # Pattern: "to Y" (destination only)
+            to_pattern = r'\bto\s+(\w+(?:\s+\w+)?)'
+            match = re.search(to_pattern, query_lower)
+            if match:
+                dest_str = match.group(1).strip()
+                destination = city_codes.get(dest_str, dest_str.upper()[:3])
+        
+        # Check for 3-letter airport codes
+        codes = re.findall(r'\b([A-Z]{3})\b', query.upper())
+        if len(codes) >= 2 and not origin:
+            origin = codes[0]
+            destination = codes[1]
+        elif len(codes) == 1 and not destination:
+            destination = codes[0]
+        
+        return origin, destination
+    
+    def _extract_dates(self, query: str) -> tuple:
+        """Extract departure and return dates from query"""
+        import re
+        from datetime import datetime, timedelta
+        
+        departure_date = None
+        return_date = None
+        
+        # Pattern: "December 15-20" or "Dec 15 - Dec 20"
+        range_pattern = r'(\w+\s+\d{1,2})\s*[-–to]+\s*(\w+\s+\d{1,2}|\d{1,2})'
+        match = re.search(range_pattern, query, re.IGNORECASE)
+        if match:
+            departure_date = match.group(1)
+            return_date = match.group(2)
+        
+        # Pattern: "2024-12-15 to 2024-12-20"
+        iso_pattern = r'(\d{4}-\d{2}-\d{2})\s*(?:to|-)\s*(\d{4}-\d{2}-\d{2})'
+        match = re.search(iso_pattern, query)
+        if match:
+            departure_date = match.group(1)
+            return_date = match.group(2)
+        
+        # Pattern: "next week", "this weekend"
+        if "next week" in query.lower():
+            today = datetime.now()
+            next_monday = today + timedelta(days=(7 - today.weekday()))
+            departure_date = next_monday.strftime("%Y-%m-%d")
+            return_date = (next_monday + timedelta(days=5)).strftime("%Y-%m-%d")
+        elif "this weekend" in query.lower():
+            today = datetime.now()
+            saturday = today + timedelta(days=(5 - today.weekday()) % 7)
+            departure_date = saturday.strftime("%Y-%m-%d")
+            return_date = (saturday + timedelta(days=2)).strftime("%Y-%m-%d")
+        
+        return departure_date, return_date
+    
+    def _format_tool_result(self, tool_name: str, result: Dict) -> str:
+        """Format tool result as natural language"""
+        
+        if "error" in result:
+            return result["error"]
+        
+        if tool_name == "bundle_matcher":
+            # Check if clarification is needed
+            if result.get("needs_clarification"):
+                return result.get("clarification_question", "Could you provide more details about your trip?")
+            
+            bundles = result.get("bundles", [])
+            if not bundles:
+                return f"I couldn't find any deals for {result.get('destination')}. Could you tell me where you're flying from?"
+            
+            lines = [f"**Here are {len(bundles)} options for {result.get('destination')}:**\n"]
+            for i, b in enumerate(bundles, 1):
+                lines.append(f"**Option {i}: {b['name']}**")
+                lines.append(f"💰 ${b['total_price']:.0f} total (save ${b['savings']:.0f})")
+                lines.append(f"⭐ Deal Score: {b['deal_score']}/100")
+                exp = b.get("explanation", {})
+                lines.append(f"💡 {exp.get('why_this', 'Good value')}")
+                lines.append("")
+            lines.append("Want me to analyze any option, create a price alert, or get a quote?")
+            return "\n".join(lines)
+        
+        elif tool_name == "price_analyzer":
+            return (
+                f"**Price Analysis for {result.get('bundle_id', 'this deal')}:**\n"
+                f"Current Price: ${result.get('current_price', 0):.0f}\n"
+                f"30-Day Average: ${result.get('avg_30d_price', 0):.0f}\n"
+                f"Discount: {result.get('discount_pct', 0):.1f}%\n"
+                f"Verdict: **{result.get('verdict_text', 'Fair price')}**"
+            )
+        
+        elif tool_name == "watch_creator":
+            return (
+                f"✅ **Watch Created!**\n"
+                f"Tracking: {result.get('bundle_name', 'your selection')}\n"
+                f"{result.get('message', 'I will notify you of price changes.')}"
+            )
+        
+        elif tool_name == "quote_generator":
+            breakdown = result.get("breakdown", {})
+            return (
+                f"**Booking Quote: {result.get('bundle_name', '')}**\n\n"
+                f"Flight: ${breakdown.get('flight', {}).get('total', 0):.0f}\n"
+                f"Hotel ({result.get('nights', 3)} nights): ${breakdown.get('hotel', {}).get('total', 0):.0f}\n"
+                f"Subtotal: ${breakdown.get('subtotal', 0):.0f}\n"
+                f"Taxes & Fees: ${breakdown.get('taxes', 0) + breakdown.get('fees', 0):.0f}\n"
+                f"**Grand Total: ${breakdown.get('grand_total', 0):.0f}**\n\n"
+                f"{result.get('next_step', 'Reply confirm to proceed.')}"
+            )
+        
+        elif tool_name == "policy_lookup":
+            return f"**Policy Info:**\n{result.get('answer', 'Information not available.')}"
+        
+        return str(result)
 
 
 # ============================================
-# Global Instance (Drop-in replacement)
+# Global Instance
 # ============================================
-langgraph_concierge_agent = LangGraphConciergeAgent()
+concierge_agent = ConciergeAgent()
+
+# Backward compatibility aliases (for langgraph_concierge.py replacement)
+LangGraphConciergeAgent = ConciergeAgent  # Alias class name
+langgraph_concierge_agent = concierge_agent  # Alias instance
 
 
 # ============================================
-# Convenience Function (Same interface)
+# Convenience Function
 # ============================================
 async def process_chat(query: str, user_id: str, session_id: Optional[str] = None) -> Dict[str, Any]:
-    """Process a chat message using LangGraph workflow"""
-    return await langgraph_concierge_agent.process_message(query, user_id, session_id)
+    """Process a chat message using MRKL tools"""
+    return await concierge_agent.process_message(query, user_id, session_id)
 
 
 # ============================================
-# For Testing / Visualization
+# For Testing
 # ============================================
-def get_graph_diagram() -> str:
-    """
-    Returns ASCII diagram of the graph for documentation.
-    """
-    return """
-    LangGraph Travel Concierge Workflow
-    ===================================
-    
-                    +------------------+
-                    |   supervisor     |
-                    +--------+---------+
-                             |
-            +----------------+----------------+
-            |                |                |
-            v                v                v
-    +---------------+---------------+---------------+
-    | policy_agent  | watch_agent   | quote_agent   |
-    |               |               |               |
-    | price_analysis_agent          | recommend_agent|
-    +-------+-------+-------+-------+-------+-------+
-            |               |               |
-            +---------------+---------------+
-                            |
-                   +--------v--------+
-                   |   synthesizer   |
-                   +--------+--------+
-                            |
-                           END
-    
-    Pattern: Orchestrator-Workers (DATA 236 Multi-Agent Design Patterns)
-    """
-
-
 if __name__ == "__main__":
-    # Quick test
     import asyncio
     
     async def test():
-        # Test different intents
         test_queries = [
-            ("I want to go to Miami next week", "user123"),
-            ("Is this a good deal?", "user123"),
-            ("Watch it for me below $500", "user123"),
+            ("Find me flights to Miami", "user123"),
+            ("Is option 1 a good deal?", "user123"),
+            ("Watch option 1 for me", "user123"),
             ("What's the cancellation policy?", "user123"),
-            ("Book it!", "user123")
+            ("Book option 1", "user123")
         ]
         
         for query, user_id in test_queries:
             print(f"\n{'='*50}")
             print(f"Query: {query}")
             result = await process_chat(query, user_id)
-            print(f"Type: {result['type']}")
-            print(f"Response: {result['response'][:200]}...")
+            print(f"Tool Used: {result.get('tool_used')}")
+            print(f"Response: {result['response'][:300]}...")
     
     asyncio.run(test())
