@@ -92,6 +92,22 @@ const AiChatWidget = () => {
     }, 5000);
   };
 
+  // Handle booking redirect
+  const handleBookingRedirect = (quoteData) => {
+    const bookingData = {
+      quote: quoteData,
+      sessionId: sessionId,
+      userId: userId
+    };
+    console.log('Navigating to booking with data:', bookingData);
+    localStorage.setItem('aiBookingData', JSON.stringify(bookingData));
+    
+    setTimeout(() => {
+      navigate('/booking/summary');
+      setIsOpen(false);
+    }, 500);
+  };
+
   const handleSend = async (e) => {
     e.preventDefault();
     if (!input.trim() || sending) return;
@@ -108,46 +124,39 @@ const AiChatWidget = () => {
     }]);
 
     try {
-      // Check if user is confirming a booking using the ref (immediate access)
-      const confirmKeywords = ['yes', 'confirm', 'proceed', 'go ahead', 'book now'];
-      const lowerMessage = userMessage.toLowerCase();
-      const isConfirming = confirmKeywords.some(kw => lowerMessage.includes(kw));
-      
-      console.log('User message:', userMessage);
-      console.log('Is confirming:', isConfirming);
-      console.log('Last quote ref:', lastQuoteRef.current);
-      
-      if (isConfirming && lastQuoteRef.current) {
-        // Navigate to booking page with the quote data
-        const bookingData = {
-          quote: lastQuoteRef.current,
-          sessionId: sessionId,
-          userId: userId
-        };
-        console.log('Navigating to booking with data:', bookingData);
-        localStorage.setItem('aiBookingData', JSON.stringify(bookingData));
-        
-        // Add confirmation message
-        setMessages(prev => [...prev, {
-          role: 'assistant',
-          content: 'Great! Redirecting you to complete your booking...',
-          timestamp: new Date().toISOString()
-        }]);
-        
-        setTimeout(() => {
-          navigate('/booking/summary');
-          setIsOpen(false);
-        }, 500);
-        
-        setSending(false);
-        return;
-      }
-      
       const response = await sendChatMessage(userMessage, userId, sessionId);
       
       // Update session ID
       if (response.session_id) {
         setSessionId(response.session_id);
+      }
+      
+      // Check if this is a booking_confirmation from backend
+      if (response.type === 'booking_confirmation') {
+        console.log('Booking confirmation received:', response);
+        
+        // Add confirmation message
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: response.response || 'Great! Redirecting you to complete your booking...',
+          timestamp: new Date().toISOString()
+        }]);
+        
+        // Use lastQuoteRef for booking data
+        if (lastQuoteRef.current) {
+          handleBookingRedirect(lastQuoteRef.current);
+        } else {
+          // Fallback: create booking data from response
+          handleBookingRedirect({
+            response: response.response,
+            bundles: response.bundles,
+            booking: response.booking,
+            timestamp: new Date().toISOString()
+          });
+        }
+        
+        setSending(false);
+        return;
       }
       
       // Check if this is a quote response and save it
@@ -304,8 +313,8 @@ const AiChatWidget = () => {
                 <h4>Hi! I'm your travel assistant</h4>
                 <p>Ask me anything about flights, hotels, or travel planning.</p>
                 <div className="ai-chat-suggestions">
-                  <button onClick={() => handleSuggestionClick('Find me a trip to Mumbai')}>
-                    Trip to Mumbai
+                  <button onClick={() => handleSuggestionClick('Flights from Delhi to Mumbai, December 15-20')}>
+                    Delhi to Mumbai
                   </button>
                   <button onClick={() => handleSuggestionClick('Hotels under $200 in Delhi')}>
                     Hotels in Delhi

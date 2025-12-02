@@ -123,6 +123,7 @@ const HomeSearchPage = () => {
   const [showPriceAnalysis, setShowPriceAnalysis] = useState(false);
   const [showQuoteModal, setShowQuoteModal] = useState(false);
   const [selectedBundle, setSelectedBundle] = useState(null);
+  const [lastAiQuote, setLastAiQuote] = useState(null); // Store last quote for booking
 
   const RESULTS_LIMIT = 10;
 
@@ -264,14 +265,57 @@ const HomeSearchPage = () => {
     try {
       const response = await sendChatMessage(prompt, userId, aiSessionId);
 
+      // Update session ID
+      if (response.session_id) {
+        setAiSessionId(response.session_id);
+      }
+
+      // Check if this is a booking_confirmation - redirect to booking page
+      if (response.type === 'booking_confirmation') {
+        console.log('Booking confirmation received:', response);
+        
+        // Add confirmation message to conversation
+        setAiConversation(prev => [...prev, {
+          role: 'assistant',
+          content: response.response || 'Great! Redirecting you to complete your booking...'
+        }]);
+
+        // Save booking data to localStorage for BookingSummaryPage
+        const bookingData = {
+          quote: lastAiQuote || {
+            response: response.response,
+            bundles: response.bundles,
+            timestamp: new Date().toISOString()
+          },
+          sessionId: aiSessionId,
+          userId: userId
+        };
+        localStorage.setItem('aiBookingData', JSON.stringify(bookingData));
+
+        // Redirect to booking summary page
+        setTimeout(() => {
+          navigate('/booking/summary');
+        }, 500);
+
+        setAiLoading(false);
+        return;
+      }
+
+      // Check if this is a quote response - save it for later booking
+      if (response.type === 'quote' || response.response?.includes('Grand Total')) {
+        setLastAiQuote({
+          response: response.response,
+          bundles: response.bundles,
+          quote: response.quote,
+          timestamp: new Date().toISOString()
+        });
+        console.log('Quote saved for booking');
+      }
+
       setAiResponse(response.response || '');
       setAiBundles(response.bundles || []);
       setAiChanges(response.changes || null);
       setAiSuggestions(response.suggestions || []);
-
-      if (response.session_id) {
-        setAiSessionId(response.session_id);
-      }
 
       // Add AI response to conversation
       setAiConversation(prev => [...prev, {
