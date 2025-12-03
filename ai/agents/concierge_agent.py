@@ -1,12 +1,11 @@
-# agents/langgraph_concierge.py
+# agents/concierge_agent.py
 """
 Concierge Agent with MRKL Tools Pattern
 
 Single LLM Agent that decides which tool to call based on user intent.
-Replaces LangGraph multi-agent with simpler tool-based approach.
 
-Drop-in replacement for the original langgraph_concierge.py.
-Exports the same interfaces: LangGraphConciergeAgent, langgraph_concierge_agent, process_chat
+Exports: ConciergeAgent, concierge_agent, process_chat
+...
 
 Architecture:
 ┌─────────────────────────────────────────────────────────────┐
@@ -1199,10 +1198,6 @@ Be concise and helpful. Always use tools to provide accurate information."""
 # Global Instance
 # ============================================
 concierge_agent = ConciergeAgent()
-
-# Backward compatibility aliases (for langgraph_concierge.py replacement)
-LangGraphConciergeAgent = ConciergeAgent  # Alias class name
-langgraph_concierge_agent = concierge_agent  # Alias instance
 
 
 # ============================================

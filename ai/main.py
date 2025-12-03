@@ -125,7 +125,7 @@ except ImportError as e:
 
 # Concierge Agent (for inline chat endpoint)
 try:
-    from agents.langgraph_concierge import langgraph_concierge_agent as concierge_agent, process_chat
+    from agents.concierge_agent import concierge_agent, process_chat
     CONCIERGE_AVAILABLE = True
 except ImportError as e:
     logger.warning(f"Concierge agent not available: {e}")
