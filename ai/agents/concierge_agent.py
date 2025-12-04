@@ -987,14 +987,43 @@ CRITICAL RULES:
     async def _call_ollama(self, query: str, tools: MRKLTools) -> Dict:
         """Call Ollama with function calling"""
         try:
-            response = ollama.chat(
-                model=OLLAMA_MODEL,
-                messages=[
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": query}
-                ],
-                tools=TOOL_DEFINITIONS
-            )
+            # Some versions of the Ollama Python client do NOT yet support the
+            # "tools" argument on Client.chat(). We first try with tools, and
+            # if the client raises a TypeError for the unexpected keyword,
+            # gracefully fall back to a plain chat call (no tool-calling) so
+            # that the chat endpoint still returns a useful response instead
+            # of an error.
+            try:
+                response = ollama.chat(
+                    model=OLLAMA_MODEL,
+                    messages=[
+                        {"role": "system", "content": self.system_prompt},
+                        {"role": "user", "content": query}
+                    ],
+                    tools=TOOL_DEFINITIONS
+                )
+            except TypeError as te:
+                if "unexpected keyword argument 'tools'" in str(te):
+                    logger.warning(
+                        "Ollama client does not support 'tools' argument on chat(); "
+                        "falling back to plain chat without tool calling."
+                    )
+                    response = ollama.chat(
+                        model=OLLAMA_MODEL,
+                        messages=[
+                            {"role": "system", "content": self.system_prompt},
+                            {"role": "user", "content": query}
+                        ]
+                    )
+                    message = response.get("message", {})
+                    return {
+                        "response": message.get("content", "How can I help you with travel planning?"),
+                        "type": "message",
+                        "tool_used": None
+                    }
+                # Re-raise any other TypeError so it is handled by the outer
+                # exception block and logged as an Ollama error.
+                raise
             
             message = response.get("message", {})
             tool_calls = message.get("tool_calls", [])

@@ -296,7 +296,9 @@ services:
       - OPENAI_API_KEY=
       - OPENAI_MODEL=gpt-3.5-turbo
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
-      - OLLAMA_EMBEDDING_MODEL=mxbai-embed-large
+      - OLLAMA_LLM_MODEL=llama3.2:3b
+      - OLLAMA_HOST=http://host.docker.internal:11434
+      - OLLAMA_MODEL=llama3.2
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9093
       - KAFKA_CONSUMER_GROUP=ai-deals-agent
       - KAFKA_DEALS_RAW_TOPIC=raw_supplier_feeds

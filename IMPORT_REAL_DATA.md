@@ -79,4 +79,3 @@ curl "http://localhost:3000/api/v1/search/flights?origin=DEL&destination=BOM"
 ```
 
 The flights are now searchable! To get the full dataset, run the import script above.
-
