@@ -1,0 +1,656 @@
+{
+  "timestamp": "2025-12-02T13:05:49.712956",
+  "summary": {
+    "total_tests": 54,
+    "total_passed": 32,
+    "total_failed": 22,
+    "overall_pass_rate": 59.25925925925925,
+    "timestamp": "2025-12-02T13:05:49.711599"
+  },
+  "test_suites": {
+    "Functional Tests": {
+      "results": [
+        {
+          "test_name": "User Registration",
+          "passed": false,
+          "message": "Status 401: {\"timestamp\":\"2025-12-02T21:05:25.517Z\",\"status\":401,\"error\":\"Unauthorized\",\"message\":\"Missing or invalid Authorization header. Expected format: Bearer <token>\",\"path\":\"/register\"}",
+          "duration": 0.05914020538330078,
+          "timestamp": "2025-12-02T21:05:25.523157"
+        },
+        {
+          "test_name": "User Login",
+          "passed": false,
+          "message": "Status 401: {\"timestamp\":\"2025-12-02T21:05:25.530Z\",\"status\":401,\"error\":\"Unauthorized\",\"message\":\"Missing or invalid Authorization header. Expected format: Bearer <token>\",\"path\":\"/login\"}",
+          "duration": 0.012569904327392578,
+          "timestamp": "2025-12-02T21:05:25.536257"
+        },
+        {
+          "test_name": "Duplicate Email Rejection",
+          "passed": false,
+          "message": "Expected 409, got 401",
+          "duration": 0.01756596565246582,
+          "timestamp": "2025-12-02T21:05:25.554120"
+        },
+        {
+          "test_name": "Invalid SSN Format Rejection",
+          "passed": false,
+          "message": "Expected 400, got 401",
+          "duration": 0.008047103881835938,
+          "timestamp": "2025-12-02T21:05:25.562591"
+        },
+        {
+          "test_name": "Search Flights",
+          "passed": true,
+          "message": "Found 0 flights",
+          "duration": 0.03413200378417969,
+          "timestamp": "2025-12-02T21:05:25.597659"
+        },
+        {
+          "test_name": "Search Hotels",
+          "passed": true,
+          "message": "Found 0 hotels",
+          "duration": 0.02074909210205078,
+          "timestamp": "2025-12-02T21:05:25.618938"
+        },
+        {
+          "test_name": "Search Cars",
+          "passed": true,
+          "message": "Found 0 cars",
+          "duration": 0.020661115646362305,
+          "timestamp": "2025-12-02T21:05:25.639943"
+        },
+        {
+          "test_name": "Search Empty Results",
+          "passed": true,
+          "message": "Empty results handled correctly",
+          "duration": 0.024835824966430664,
+          "timestamp": "2025-12-02T21:05:25.665036"
+        }
+      ],
+      "total": 8,
+      "passed": 4,
+      "failed": 4,
+      "pass_rate": 50.0,
+      "avg_duration": 0.02471265196800232
+    },
+    "Performance Tests": {
+      "results": [
+        {
+          "test_name": "Database Insert Performance",
+          "passed": true,
+          "metrics": {
+            "total_records": 3777,
+            "total_duration_seconds": 8.57,
+            "records_per_second": 440.81,
+            "users_inserted": 777,
+            "users_duration_seconds": 1.37,
+            "flights_inserted": 1000,
+            "flights_duration_seconds": 1.26,
+            "hotels_inserted": 1000,
+            "hotels_duration_seconds": 2.76,
+            "cars_inserted": 1000,
+            "cars_duration_seconds": 1.89
+          },
+          "message": "",
+          "timestamp": "2025-12-02T21:05:34.290212"
+        },
+        {
+          "test_name": "Query Performance",
+          "passed": true,
+          "metrics": {
+            "num_queries": 50,
+            "avg_response_time_ms": 10.8,
+            "median_response_time_ms": 9.73,
+            "p95_response_time_ms": 18.29,
+            "p99_response_time_ms": 25.37,
+            "min_response_time_ms": 7.75,
+            "max_response_time_ms": 23.34
+          },
+          "message": "",
+          "timestamp": "2025-12-02T21:05:34.832847"
+        },
+        {
+          "test_name": "Concurrent Requests",
+          "passed": false,
+          "metrics": {
+            "concurrent_users": 100,
+            "total_requests": 500,
+            "total_duration_seconds": 2.9,
+            "requests_per_second": 172.35,
+            "avg_response_time_ms": 524.92,
+            "p95_response_time_ms": 848.82,
+            "success_rate_percent": 100.0
+          },
+          "message": "",
+          "timestamp": "2025-12-02T21:05:37.734486"
+        },
+        {
+          "test_name": "Pagination Performance",
+          "passed": true,
+          "metrics": {
+            "pages_tested": 10,
+            "page_size": 50,
+            "avg_response_time_ms": 13.38,
+            "max_response_time_ms": 26.29,
+            "min_response_time_ms": 10.8
+          },
+          "message": "",
+          "timestamp": "2025-12-02T21:05:37.869363"
+        },
+        {
+          "test_name": "Database Connection Pooling",
+          "passed": true,
+          "metrics": {
+            "connections_opened": 20,
+            "connection_time_seconds": 2.33,
+            "avg_query_time_ms": 6.02,
+            "max_query_time_ms": 12.55
+          },
+          "message": "",
+          "timestamp": "2025-12-02T21:05:40.320866"
+        }
+      ],
+      "total": 5,
+      "passed": 4,
+      "failed": 1,
+      "pass_rate": 80.0
+    },
+    "Integration Tests": {
+      "results": [
+        {
+          "test_name": "API Endpoint Availability",
+          "passed": false,
+          "message": "Tested 3 endpoints",
+          "duration": 0.01986098289489746,
+          "timestamp": "2025-12-02T21:05:40.345190"
+        },
+        {
+          "test_name": "Error Propagation",
+          "passed": true,
+          "message": "Error correctly returned: 401",
+          "duration": 0.005296230316162109,
+          "timestamp": "2025-12-02T21:05:40.350927"
+        },
+        {
+          "test_name": "Timeout Handling",
+          "passed": true,
+          "message": "Timeout correctly handled",
+          "duration": 0.00780797004699707,
+          "timestamp": "2025-12-02T21:05:40.358882"
+        },
+        {
+          "test_name": "Request/Response Format",
+          "passed": true,
+          "message": "Valid JSON format",
+          "duration": 0.011333703994750977,
+          "timestamp": "2025-12-02T21:05:40.370313"
+        },
+        {
+          "test_name": "Transaction Rollback",
+          "passed": false,
+          "message": "1054 (42S22): Unknown column 'user_id' in 'field list'",
+          "duration": 0.01452493667602539,
+          "timestamp": "2025-12-02T21:05:40.385008"
+        },
+        {
+          "test_name": "Data Consistency",
+          "passed": true,
+          "message": "MySQL users: 19285, MongoDB reviews: 500",
+          "duration": 0.04732203483581543,
+          "timestamp": "2025-12-02T21:05:40.432540"
+        },
+        {
+          "test_name": "Connection Failure Recovery",
+          "passed": true,
+          "message": "Reconnection successful",
+          "duration": 0.020689725875854492,
+          "timestamp": "2025-12-02T21:05:40.453348"
+        },
+        {
+          "test_name": "Kafka Producer",
+          "passed": false,
+          "message": "NoBrokersAvailable",
+          "duration": 2.0134389400482178,
+          "timestamp": "2025-12-02T21:05:42.466926"
+        },
+        {
+          "test_name": "Kafka Consumer",
+          "passed": false,
+          "message": "NoBrokersAvailable",
+          "duration": 2.0051121711730957,
+          "timestamp": "2025-12-02T21:05:44.472453"
+        },
+        {
+          "test_name": "Kafka Message Delivery",
+          "passed": false,
+          "message": "NoBrokersAvailable",
+          "duration": 2.0047929286956787,
+          "timestamp": "2025-12-02T21:05:46.477516"
+        },
+        {
+          "test_name": "Kafka Consumer Group",
+          "passed": false,
+          "message": "NoBrokersAvailable",
+          "duration": 2.004033088684082,
+          "timestamp": "2025-12-02T21:05:48.481796"
+        },
+        {
+          "test_name": "End-to-End Booking Flow",
+          "passed": false,
+          "message": "User registration failed",
+          "duration": 0.024264812469482422,
+          "timestamp": "2025-12-02T21:05:48.506292"
+        }
+      ],
+      "total": 12,
+      "passed": 5,
+      "failed": 7,
+      "pass_rate": 41.66666666666667,
+      "avg_duration": 0.681539793809255
+    },
+    "AI Service Tests": {
+      "results": [
+        {
+          "test_name": "Deals Agent Health",
+          "passed": true,
+          "message": "Deals agent enabled: True",
+          "duration": 0.029494762420654297,
+          "timestamp": "2025-12-02T21:05:48.543272"
+        },
+        {
+          "test_name": "Deal Detection Logic",
+          "passed": true,
+          "message": "Deal endpoint accessible",
+          "duration": 0.011482954025268555,
+          "timestamp": "2025-12-02T21:05:48.555213"
+        },
+        {
+          "test_name": "Inventory Scarcity Detection",
+          "passed": true,
+          "message": "Scarcity filter accessible",
+          "duration": 0.0073490142822265625,
+          "timestamp": "2025-12-02T21:05:48.562868"
+        },
+        {
+          "test_name": "Deal Scoring Algorithm",
+          "passed": true,
+          "message": "Endpoint not available (skipped)",
+          "duration": 0.008677005767822266,
+          "timestamp": "2025-12-02T21:05:48.571859"
+        },
+        {
+          "test_name": "Natural Language Query",
+          "passed": true,
+          "message": "Response length: 91 chars",
+          "duration": 0.04322671890258789,
+          "timestamp": "2025-12-02T21:05:48.615341"
+        },
+        {
+          "test_name": "Constraint Extraction",
+          "passed": true,
+          "message": "Tested 3 queries",
+          "duration": 0.12088274955749512,
+          "timestamp": "2025-12-02T21:05:48.736375"
+        },
+        {
+          "test_name": "Clarifying Questions",
+          "passed": true,
+          "message": "Question count: 1",
+          "duration": 0.05111289024353027,
+          "timestamp": "2025-12-02T21:05:48.787701"
+        },
+        {
+          "test_name": "Malformed Input Handling",
+          "passed": true,
+          "message": "Handled 3/4 inputs",
+          "duration": 0.0452117919921875,
+          "timestamp": "2025-12-02T21:05:48.833114"
+        },
+        {
+          "test_name": "Bundle Creation",
+          "passed": false,
+          "message": "Generated 0 bundles",
+          "duration": 0.005959749221801758,
+          "timestamp": "2025-12-02T21:05:48.839324"
+        },
+        {
+          "test_name": "Fit Score Calculation",
+          "passed": true,
+          "message": "No bundles to test (skipped)",
+          "duration": 0.00937199592590332,
+          "timestamp": "2025-12-02T21:05:48.849034"
+        },
+        {
+          "test_name": "Budget Constraint Compliance",
+          "passed": true,
+          "message": "Checked 0 bundles",
+          "duration": 0.0069561004638671875,
+          "timestamp": "2025-12-02T21:05:48.858159"
+        },
+        {
+          "test_name": "Amenity/Policy Matching",
+          "passed": true,
+          "message": "Found 0 matching bundles",
+          "duration": 0.01303410530090332,
+          "timestamp": "2025-12-02T21:05:48.871602"
+        },
+        {
+          "test_name": "Why This Explanation",
+          "passed": true,
+          "message": "No bundles to test (skipped)",
+          "duration": 0.006320953369140625,
+          "timestamp": "2025-12-02T21:05:48.878235"
+        },
+        {
+          "test_name": "What to Watch Alerts",
+          "passed": true,
+          "message": "No bundles to test (skipped)",
+          "duration": 0.01128697395324707,
+          "timestamp": "2025-12-02T21:05:48.889683"
+        },
+        {
+          "test_name": "Create Watch",
+          "passed": false,
+          "message": "Status 200: {\"watch_id\":\"watch_cbd02ab0b02f\",\"user_id\":\"test-user-123\",\"listing_type\":\"hotel\",\"listing_id\":\"1234",
+          "duration": 0.015403985977172852,
+          "timestamp": "2025-12-02T21:05:48.905573"
+        },
+        {
+          "test_name": "Get User Watches",
+          "passed": false,
+          "message": "Status 404",
+          "duration": 0.00941014289855957,
+          "timestamp": "2025-12-02T21:05:48.915307"
+        },
+        {
+          "test_name": "WebSocket Connection",
+          "passed": false,
+          "message": "server rejected WebSocket connection: HTTP 403",
+          "duration": 0.06456279754638672,
+          "timestamp": "2025-12-02T21:05:49.000147"
+        },
+        {
+          "test_name": "WebSocket Message Delivery Time",
+          "passed": false,
+          "message": "server rejected WebSocket connection: HTTP 403",
+          "duration": 0.007753849029541016,
+          "timestamp": "2025-12-02T21:05:49.009601"
+        },
+        {
+          "test_name": "Bundle Response Time",
+          "passed": true,
+          "message": "Response time: 0.02s (target: \u22643s)",
+          "duration": 0.02493596076965332,
+          "timestamp": "2025-12-02T21:05:49.034617"
+        }
+      ],
+      "total": 19,
+      "passed": 14,
+      "failed": 5,
+      "pass_rate": 73.68421052631578,
+      "avg_duration": 0.025917605349892063
+    },
+    "Data Quality Tests": {
+      "results": [
+        {
+          "test_name": "Foreign Key Constraints",
+          "passed": false,
+          "message": "1406 (22001): Data too long for column 'userId' at row 1",
+          "duration": 0.06279706954956055,
+          "timestamp": "2025-12-02T21:05:49.097806"
+        },
+        {
+          "test_name": "NOT NULL Constraints",
+          "passed": false,
+          "message": "1364 (HY000): Field 'email' doesn't have a default value",
+          "duration": 0.05771899223327637,
+          "timestamp": "2025-12-02T21:05:49.156773"
+        },
+        {
+          "test_name": "Unique Constraints",
+          "passed": true,
+          "message": "Unique constraint enforced",
+          "duration": 0.05651283264160156,
+          "timestamp": "2025-12-02T21:05:49.213945"
+        },
+        {
+          "test_name": "Data Type Enforcement",
+          "passed": false,
+          "message": "1366 (HY000): Incorrect integer value: 'invalid' for column 'guests' at row 1",
+          "duration": 0.04556870460510254,
+          "timestamp": "2025-12-02T21:05:49.260162"
+        },
+        {
+          "test_name": "MongoDB Index Effectiveness",
+          "passed": false,
+          "message": "Found 1 indexes",
+          "duration": 0.07508516311645508,
+          "timestamp": "2025-12-02T21:05:49.335931"
+        },
+        {
+          "test_name": "MongoDB Document Structure",
+          "passed": true,
+          "message": "Document structure validated",
+          "duration": 0.057988882064819336,
+          "timestamp": "2025-12-02T21:05:49.395292"
+        },
+        {
+          "test_name": "Booking-Billing Consistency",
+          "passed": true,
+          "message": "Booking: 505.57, Payment: 505.57",
+          "duration": 0.08401703834533691,
+          "timestamp": "2025-12-02T21:05:49.480453"
+        },
+        {
+          "test_name": "Referential Integrity",
+          "passed": false,
+          "message": "Found 25330 orphaned bookings",
+          "duration": 0.12160897254943848,
+          "timestamp": "2025-12-02T21:05:49.603153"
+        },
+        {
+          "test_name": "Data Completeness",
+          "passed": true,
+          "message": "Found 0 incomplete user records",
+          "duration": 0.04301571846008301,
+          "timestamp": "2025-12-02T21:05:49.648051"
+        },
+        {
+          "test_name": "SQL Injection Prevention",
+          "passed": true,
+          "message": "Parameterized queries prevent injection",
+          "duration": 0.05974388122558594,
+          "timestamp": "2025-12-02T21:05:49.709542"
+        }
+      ],
+      "total": 10,
+      "passed": 5,
+      "failed": 5,
+      "pass_rate": 50.0,
+      "avg_duration": 0.06640572547912597
+    }
+  },
+  "performance_metrics": {
+    "database_insert": {
+      "total_records": 3777,
+      "total_duration_seconds": 8.57,
+      "records_per_second": 440.81,
+      "users_inserted": 777,
+      "users_duration_seconds": 1.37,
+      "flights_inserted": 1000,
+      "flights_duration_seconds": 1.26,
+      "hotels_inserted": 1000,
+      "hotels_duration_seconds": 2.76,
+      "cars_inserted": 1000,
+      "cars_duration_seconds": 1.89
+    },
+    "query_performance": {
+      "num_queries": 50,
+      "avg_response_time_ms": 10.8,
+      "median_response_time_ms": 9.73,
+      "p95_response_time_ms": 18.29,
+      "p99_response_time_ms": 25.37,
+      "min_response_time_ms": 7.75,
+      "max_response_time_ms": 23.34
+    },
+    "concurrent_requests": {
+      "concurrent_users": 100,
+      "total_requests": 500,
+      "total_duration_seconds": 2.9,
+      "requests_per_second": 172.35,
+      "avg_response_time_ms": 524.92,
+      "p95_response_time_ms": 848.82,
+      "success_rate_percent": 100.0
+    },
+    "pagination": {
+      "pages_tested": 10,
+      "page_size": 50,
+      "avg_response_time_ms": 13.38,
+      "max_response_time_ms": 26.29,
+      "min_response_time_ms": 10.8
+    },
+    "connection_pooling": {
+      "connections_opened": 20,
+      "connection_time_seconds": 2.33,
+      "avg_query_time_ms": 6.02,
+      "max_query_time_ms": 12.55
+    }
+  },
+  "issues": [
+    {
+      "title": "User Registration",
+      "description": "Status 401: {\"timestamp\":\"2025-12-02T21:05:25.517Z\",\"status\":401,\"error\":\"Unauthorized\",\"message\":\"Missing or invalid Authorization header. Expected format: Bearer <token>\",\"path\":\"/register\"}",
+      "severity": "medium",
+      "suite": "Functional Tests"
+    },
+    {
+      "title": "User Login",
+      "description": "Status 401: {\"timestamp\":\"2025-12-02T21:05:25.530Z\",\"status\":401,\"error\":\"Unauthorized\",\"message\":\"Missing or invalid Authorization header. Expected format: Bearer <token>\",\"path\":\"/login\"}",
+      "severity": "medium",
+      "suite": "Functional Tests"
+    },
+    {
+      "title": "Duplicate Email Rejection",
+      "description": "Expected 409, got 401",
+      "severity": "medium",
+      "suite": "Functional Tests"
+    },
+    {
+      "title": "Invalid SSN Format Rejection",
+      "description": "Expected 400, got 401",
+      "severity": "medium",
+      "suite": "Functional Tests"
+    },
+    {
+      "title": "Concurrent Requests",
+      "description": "",
+      "severity": "medium",
+      "suite": "Performance Tests"
+    },
+    {
+      "title": "API Endpoint Availability",
+      "description": "Tested 3 endpoints",
+      "severity": "medium",
+      "suite": "Integration Tests"
+    },
+    {
+      "title": "Transaction Rollback",
+      "description": "1054 (42S22): Unknown column 'user_id' in 'field list'",
+      "severity": "medium",
+      "suite": "Integration Tests"
+    },
+    {
+      "title": "Kafka Producer",
+      "description": "NoBrokersAvailable",
+      "severity": "medium",
+      "suite": "Integration Tests"
+    },
+    {
+      "title": "Kafka Consumer",
+      "description": "NoBrokersAvailable",
+      "severity": "medium",
+      "suite": "Integration Tests"
+    },
+    {
+      "title": "Kafka Message Delivery",
+      "description": "NoBrokersAvailable",
+      "severity": "medium",
+      "suite": "Integration Tests"
+    },
+    {
+      "title": "Kafka Consumer Group",
+      "description": "NoBrokersAvailable",
+      "severity": "medium",
+      "suite": "Integration Tests"
+    },
+    {
+      "title": "End-to-End Booking Flow",
+      "description": "User registration failed",
+      "severity": "medium",
+      "suite": "Integration Tests"
+    },
+    {
+      "title": "Bundle Creation",
+      "description": "Generated 0 bundles",
+      "severity": "medium",
+      "suite": "AI Service Tests"
+    },
+    {
+      "title": "Create Watch",
+      "description": "Status 200: {\"watch_id\":\"watch_cbd02ab0b02f\",\"user_id\":\"test-user-123\",\"listing_type\":\"hotel\",\"listing_id\":\"1234",
+      "severity": "medium",
+      "suite": "AI Service Tests"
+    },
+    {
+      "title": "Get User Watches",
+      "description": "Status 404",
+      "severity": "medium",
+      "suite": "AI Service Tests"
+    },
+    {
+      "title": "WebSocket Connection",
+      "description": "server rejected WebSocket connection: HTTP 403",
+      "severity": "medium",
+      "suite": "AI Service Tests"
+    },
+    {
+      "title": "WebSocket Message Delivery Time",
+      "description": "server rejected WebSocket connection: HTTP 403",
+      "severity": "medium",
+      "suite": "AI Service Tests"
+    },
+    {
+      "title": "Foreign Key Constraints",
+      "description": "1406 (22001): Data too long for column 'userId' at row 1",
+      "severity": "medium",
+      "suite": "Data Quality Tests"
+    },
+    {
+      "title": "NOT NULL Constraints",
+      "description": "1364 (HY000): Field 'email' doesn't have a default value",
+      "severity": "medium",
+      "suite": "Data Quality Tests"
+    },
+    {
+      "title": "Data Type Enforcement",
+      "description": "1366 (HY000): Incorrect integer value: 'invalid' for column 'guests' at row 1",
+      "severity": "medium",
+      "suite": "Data Quality Tests"
+    },
+    {
+      "title": "MongoDB Index Effectiveness",
+      "description": "Found 1 indexes",
+      "severity": "medium",
+      "suite": "Data Quality Tests"
+    },
+    {
+      "title": "Referential Integrity",
+      "description": "Found 25330 orphaned bookings",
+      "severity": "medium",
+      "suite": "Data Quality Tests"
+    }
+  ],
+  "recommendations": [
+    "Overall pass rate is below 95%. Review failed tests and fix critical issues."
+  ]
+}

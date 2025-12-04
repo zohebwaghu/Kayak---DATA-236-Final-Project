@@ -1,0 +1,44 @@
+# Test Harness Dependencies
+
+# HTTP Client
+requests>=2.31.0
+httpx>=0.24.0
+
+# Database Drivers
+mysql-connector-python>=8.1.0
+pymongo>=4.5.0
+redis>=5.0.0
+
+# Kafka
+kafka-python>=2.0.2
+
+# Testing Framework
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+pytest-timeout>=2.1.0
+
+# Data Generation
+faker>=19.0.0
+numpy>=1.24.0
+
+# Performance Testing
+locust>=2.15.0
+psutil>=5.9.0
+
+# Reporting
+jinja2>=3.1.2
+matplotlib>=3.7.0
+pandas>=2.0.0
+
+# Utilities
+python-dotenv>=1.0.0
+colorama>=0.4.6
+tqdm>=4.65.0
+
+# WebSocket Testing
+websockets>=11.0.0
+
+# Date/Time
+python-dateutil>=2.8.2
+

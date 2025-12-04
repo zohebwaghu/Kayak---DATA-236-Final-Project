@@ -1,0 +1,798 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kayak Simulation Test Report</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+        .timestamp {
+            color: #7f8c8d;
+            margin-bottom: 30px;
+        }
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .summary-card {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 6px;
+            border-left: 4px solid #3498db;
+        }
+        .summary-card.passed {
+            border-left-color: #27ae60;
+        }
+        .summary-card.failed {
+            border-left-color: #e74c3c;
+        }
+        .summary-card h3 {
+            font-size: 14px;
+            color: #7f8c8d;
+            margin-bottom: 10px;
+        }
+        .summary-card .value {
+            font-size: 32px;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        .test-suite {
+            margin-bottom: 40px;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+        .test-suite-header {
+            background: #34495e;
+            color: white;
+            padding: 15px 20px;
+            font-weight: bold;
+        }
+        .test-suite-content {
+            padding: 20px;
+        }
+        .test-result {
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 4px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .test-result.passed {
+            background: #d4edda;
+            color: #155724;
+        }
+        .test-result.failed {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .test-name {
+            font-weight: 500;
+        }
+        .test-duration {
+            color: #6c757d;
+            font-size: 14px;
+        }
+        .test-message {
+            font-size: 12px;
+            color: #6c757d;
+            margin-top: 5px;
+        }
+        .performance-metrics {
+            background: #e8f4f8;
+            padding: 20px;
+            border-radius: 6px;
+            margin-bottom: 30px;
+        }
+        .performance-metrics h2 {
+            margin-bottom: 15px;
+        }
+        .metric {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #d0d0d0;
+        }
+        .metric:last-child {
+            border-bottom: none;
+        }
+        .issues {
+            background: #fff3cd;
+            padding: 20px;
+            border-radius: 6px;
+            margin-bottom: 30px;
+        }
+        .issue {
+            padding: 10px;
+            margin: 5px 0;
+            background: white;
+            border-left: 3px solid #ffc107;
+            border-radius: 4px;
+        }
+        .recommendations {
+            background: #d1ecf1;
+            padding: 20px;
+            border-radius: 6px;
+        }
+        .recommendation {
+            padding: 10px;
+            margin: 5px 0;
+            background: white;
+            border-left: 3px solid #17a2b8;
+            border-radius: 4px;
+        }
+        .pass-rate {
+            font-size: 48px;
+            font-weight: bold;
+            color: #e74c3c;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 Kayak Simulation Test Report</h1>
+        <div class="timestamp">Generated: 2025-12-02 12:57:47</div>
+        
+        <div class="summary">
+            <div class="summary-card">
+                <h3>Total Tests</h3>
+                <div class="value">54</div>
+            </div>
+            <div class="summary-card passed">
+                <h3>Passed</h3>
+                <div class="value">31</div>
+            </div>
+            <div class="summary-card failed">
+                <h3>Failed</h3>
+                <div class="value">23</div>
+            </div>
+            <div class="summary-card">
+                <h3>Pass Rate</h3>
+                <div class="pass-rate">57.4%</div>
+            </div>
+        </div>
+        
+        
+        <div class="performance-metrics">
+            <h2>📊 Performance Metrics</h2>
+            <div class="metric"><span>database_insert - total_records</span><span>1000</span></div><div class="metric"><span>database_insert - total_duration_seconds</span><span>8.15</span></div><div class="metric"><span>database_insert - records_per_second</span><span>122.67</span></div><div class="metric"><span>database_insert - users_inserted</span><span>1000</span></div><div class="metric"><span>database_insert - users_duration_seconds</span><span>1.05</span></div><div class="metric"><span>database_insert - flights_inserted</span><span>0</span></div><div class="metric"><span>database_insert - flights_duration_seconds</span><span>1.81</span></div><div class="metric"><span>database_insert - hotels_inserted</span><span>0</span></div><div class="metric"><span>database_insert - hotels_duration_seconds</span><span>2.98</span></div><div class="metric"><span>database_insert - cars_inserted</span><span>0</span></div><div class="metric"><span>database_insert - cars_duration_seconds</span><span>1.35</span></div><div class="metric"><span>query_performance - num_queries</span><span>50</span></div><div class="metric"><span>query_performance - avg_response_time_ms</span><span>10.55</span></div><div class="metric"><span>query_performance - median_response_time_ms</span><span>9.85</span></div><div class="metric"><span>query_performance - p95_response_time_ms</span><span>19.55</span></div><div class="metric"><span>query_performance - p99_response_time_ms</span><span>24.18</span></div><div class="metric"><span>query_performance - min_response_time_ms</span><span>7.66</span></div><div class="metric"><span>query_performance - max_response_time_ms</span><span>23.57</span></div><div class="metric"><span>concurrent_requests - concurrent_users</span><span>100</span></div><div class="metric"><span>concurrent_requests - total_requests</span><span>500</span></div><div class="metric"><span>concurrent_requests - total_duration_seconds</span><span>3.32</span></div><div class="metric"><span>concurrent_requests - requests_per_second</span><span>150.63</span></div><div class="metric"><span>concurrent_requests - avg_response_time_ms</span><span>608.29</span></div><div class="metric"><span>concurrent_requests - p95_response_time_ms</span><span>780.73</span></div><div class="metric"><span>concurrent_requests - success_rate_percent</span><span>100.0</span></div><div class="metric"><span>pagination - pages_tested</span><span>10</span></div><div class="metric"><span>pagination - page_size</span><span>50</span></div><div class="metric"><span>pagination - avg_response_time_ms</span><span>14.18</span></div><div class="metric"><span>pagination - max_response_time_ms</span><span>28.76</span></div><div class="metric"><span>pagination - min_response_time_ms</span><span>8.06</span></div><div class="metric"><span>connection_pooling - connections_opened</span><span>20</span></div><div class="metric"><span>connection_pooling - connection_time_seconds</span><span>2.45</span></div><div class="metric"><span>connection_pooling - avg_query_time_ms</span><span>12.05</span></div><div class="metric"><span>connection_pooling - max_query_time_ms</span><span>101.9</span></div>
+        </div>
+        
+        
+        
+            <div class="test-suite">
+                <div class="test-suite-header">
+                    Functional Tests - 4/8 passed (50.0%)
+                </div>
+                <div class="test-suite-content">
+                    
+                <div class="test-result failed">
+                    <div>
+                        <div class="test-name">User Registration</div>
+                        <div class="test-message">Status 401: {"timestamp":"2025-12-02T20:57:21.862Z","status":401,"error":"Unauthorized","message":"Missing or invalid Authorization header. Expected format: Bearer <token>","path":"/register"}</div>
+                    </div>
+                    <div class="test-duration">0.04s</div>
+                </div>
+                
+                <div class="test-result failed">
+                    <div>
+                        <div class="test-name">User Login</div>
+                        <div class="test-message">Status 401: {"timestamp":"2025-12-02T20:57:21.873Z","status":401,"error":"Unauthorized","message":"Missing or invalid Authorization header. Expected format: Bearer <token>","path":"/login"}</div>
+                    </div>
+                    <div class="test-duration">0.01s</div>
+                </div>
+                
+                <div class="test-result failed">
+                    <div>
+                        <div class="test-name">Duplicate Email Rejection</div>
+                        <div class="test-message">Expected 409, got 401</div>
+                    </div>
+                    <div class="test-duration">0.02s</div>
+                </div>
+                
+                <div class="test-result failed">
+                    <div>
+                        <div class="test-name">Invalid SSN Format Rejection</div>
+                        <div class="test-message">Expected 400, got 401</div>
+                    </div>
+                    <div class="test-duration">0.01s</div>
+                </div>
+                
+                <div class="test-result passed">
+                    <div>
+                        <div class="test-name">Search Flights</div>
+                        <div class="test-message">Found 0 flights</div>
+                    </div>
+                    <div class="test-duration">0.26s</div>
+                </div>
+                
+                <div class="test-result passed">
+                    <div>
+                        <div class="test-name">Search Hotels</div>
+                        <div class="test-message">Found 0 hotels</div>
+                    </div>
+                    <div class="test-duration">0.07s</div>
+                </div>
+                
+                <div class="test-result passed">
+                    <div>
+                        <div class="test-name">Search Cars</div>
+                        <div class="test-message">Found 0 cars</div>
+                    </div>
+                    <div class="test-duration">0.03s</div>
+                </div>
+                
+                <div class="test-result passed">
+                    <div>
+                        <div class="test-name">Search Empty Results</div>
+                        <div class="test-message">Empty results handled correctly</div>
+                    </div>
+                    <div class="test-duration">0.03s</div>
+                </div>
+                
+                </div>
+            </div>
+            
+            <div class="test-suite">
+                <div class="test-suite-header">
+                    Performance Tests - 4/5 passed (80.0%)
+                </div>
+                <div class="test-suite-content">
+                    
+                <div class="test-result passed">
+                    <div>
+                        <div class="test-name">Database Insert Performance</div>
+                        
+                    </div>
+                    <div class="test-duration">0.00s</div>
+                </div>
+                
+                <div class="test-result passed">
+                    <div>
+                        <div class="test-name">Query Performance</div>
+                        
+                    </div>
+                    <div class="test-duration">0.00s</div>
+                </div>
+                
+                <div class="test-result failed">
+                    <div>
+                        <div class="test-name">Concurrent Requests</div>
+                        
+                    </div>
+                    <div class="test-duration">0.00s</div>
+                </div>
+                
+                <div class="test-result passed">
+                    <div>
+                        <div class="test-name">Pagination Performance</div>
+                        
+                    </div>
+                    <div class="test-duration">0.00s</div>
+                </div>
+                
+                <div class="test-result passed">
+                    <div>
+                        <div class="test-name">Database Connection Pooling</div>
+                        
+                    </div>
+                    <div class="test-duration">0.00s</div>
+                </div>
+                
+                </div>
+            </div>
+            
+            <div class="test-suite">
+                <div class="test-suite-header">
+                    Integration Tests - 5/12 passed (41.7%)
+                </div>
+                <div class="test-suite-content">
+                    
+                <div class="test-result failed">
+                    <div>
+                        <div class="test-name">API Endpoint Availability</div>
+                        <div class="test-message">Tested 3 endpoints</div>
+                    </div>
+                    <div class="test-duration">0.02s</div>
+                </div>
+                
+                <div class="test-result passed">
+                    <div>
+                        <div class="test-name">Error Propagation</div>
+                        <div class="test-message">Error correctly returned: 401</div>
+                    </div>
+                    <div class="test-duration">0.00s</div>
+                </div>
+                
+                <div class="test-result passed">
+                    <div>
+                        <div class="test-name">Timeout Handling</div>
+                        <div class="test-message">Timeout correctly handled</div>
+                    </div>
+                    <div class="test-duration">0.00s</div>
+                </div>
+                
+                <div class="test-result passed">
+                    <div>
+                        <div class="test-name">Request/Response Format</div>
+                        <div class="test-message">Valid JSON format</div>
+                    </div>
+                    <div class="test-duration">0.02s</div>
+                </div>
+                
+                <div class="test-result failed">
+                    <div>
+                        <div class="test-name">Transaction Rollback</div>
+                        <div class="test-message">1054 (42S22): Unknown column 'user_id' in 'field list'</div>
+                    </div>
+                    <div class="test-duration">0.04s</div>
+                </div>
+                
+                <div class="test-result passed">
+                    <div>
+                        <div class="test-name">Data Consistency</div>
+                        <div class="test-message">MySQL users: 11004, MongoDB reviews: 500</div>
+                    </div>
+                    <div class="test-duration">0.13s</div>
+                </div>
+                
+                <div class="test-result passed">
+                    <div>
+                        <div class="test-name">Connection Failure Recovery</div>
+                        <div class="test-message">Reconnection successful</div>
+                    </div>
+                    <div class="test-duration">0.02s</div>
+                </div>
+                
+                <div class="test-result failed">
+                    <div>
+                        <div class="test-name">Kafka Producer</div>
+                        <div class="test-message">NoBrokersAvailable</div>
+                    </div>
+                    <div class="test-duration">2.00s</div>
+                </div>
+                
+                <div class="test-result failed">
+                    <div>
+                        <div class="test-name">Kafka Consumer</div>
+                        <div class="test-message">NoBrokersAvailable</div>
+                    </div>
+                    <div class="test-duration">2.00s</div>
+                </div>
+                
+                <div class="test-result failed">
+                    <div>
+                        <div class="test-name">Kafka Message Delivery</div>
+                        <div class="test-message">NoBrokersAvailable</div>
+                    </div>
+                    <div class="test-duration">2.00s</div>
+                </div>
+                
+                <div class="test-result failed">
+                    <div>
+                        <div class="test-name">Kafka Consumer Group</div>
+                        <div class="test-message">NoBrokersAvailable</div>
+                    </div>
+                    <div class="test-duration">2.00s</div>
+                </div>
+                
+                <div class="test-result failed">
+                    <div>
+                        <div class="test-name">End-to-End Booking Flow</div>
+                        <div class="test-message">User registration failed</div>
+                    </div>
+                    <div class="test-duration">0.01s</div>
+                </div>
+                
+                </div>
+            </div>
+            
+            <div class="test-suite">
+                <div class="test-suite-header">
+                    AI Service Tests - 14/19 passed (73.7%)
+                </div>
+                <div class="test-suite-content">
+                    
+                <div class="test-result passed">
+                    <div>
+                        <div class="test-name">Deals Agent Health</div>
+                        <div class="test-message">Deals agent enabled: True</div>
+                    </div>
+                    <div class="test-duration">0.01s</div>
+                </div>
+                
+                <div class="test-result passed">
+                    <div>
+                        <div class="test-name">Deal Detection Logic</div>
+                        <div class="test-message">Deal endpoint accessible</div>
+                    </div>
+                    <div class="test-duration">0.03s</div>
+                </div>
+                
+                <div class="test-result passed">
+                    <div>
+                        <div class="test-name">Inventory Scarcity Detection</div>
+                        <div class="test-message">Scarcity filter accessible</div>
+                    </div>
+                    <div class="test-duration">0.01s</div>
+                </div>
+                
+                <div class="test-result passed">
+                    <div>
+                        <div class="test-name">Deal Scoring Algorithm</div>
+                        <div class="test-message">Endpoint not available (skipped)</div>
+                    </div>
+                    <div class="test-duration">0.01s</div>
+                </div>
+                
+                <div class="test-result passed">
+                    <div>
+                        <div class="test-name">Natural Language Query</div>
+                        <div class="test-message">Response length: 91 chars</div>
+                    </div>
+                    <div class="test-duration">0.77s</div>
+                </div>
+                
+                <div class="test-result passed">
+                    <div>
+                        <div class="test-name">Constraint Extraction</div>
+                        <div class="test-message">Tested 3 queries</div>
+                    </div>
+                    <div class="test-duration">0.11s</div>
+                </div>
+                
+                <div class="test-result passed">
+                    <div>
+                        <div class="test-name">Clarifying Questions</div>
+                        <div class="test-message">Question count: 1</div>
+                    </div>
+                    <div class="test-duration">0.04s</div>
+                </div>
+                
+                <div class="test-result passed">
+                    <div>
+                        <div class="test-name">Malformed Input Handling</div>
+                        <div class="test-message">Handled 3/4 inputs</div>
+                    </div>
+                    <div class="test-duration">0.06s</div>
+                </div>
+                
+                <div class="test-result failed">
+                    <div>
+                        <div class="test-name">Bundle Creation</div>
+                        <div class="test-message">Generated 0 bundles</div>
+                    </div>
+                    <div class="test-duration">0.07s</div>
+                </div>
+                
+                <div class="test-result passed">
+                    <div>
+                        <div class="test-name">Fit Score Calculation</div>
+                        <div class="test-message">No bundles to test (skipped)</div>
+                    </div>
+                    <div class="test-duration">0.01s</div>
+                </div>
+                
+                <div class="test-result passed">
+                    <div>
+                        <div class="test-name">Budget Constraint Compliance</div>
+                        <div class="test-message">Checked 0 bundles</div>
+                    </div>
+                    <div class="test-duration">0.02s</div>
+                </div>
+                
+                <div class="test-result passed">
+                    <div>
+                        <div class="test-name">Amenity/Policy Matching</div>
+                        <div class="test-message">Found 0 matching bundles</div>
+                    </div>
+                    <div class="test-duration">0.02s</div>
+                </div>
+                
+                <div class="test-result passed">
+                    <div>
+                        <div class="test-name">Why This Explanation</div>
+                        <div class="test-message">No bundles to test (skipped)</div>
+                    </div>
+                    <div class="test-duration">0.01s</div>
+                </div>
+                
+                <div class="test-result passed">
+                    <div>
+                        <div class="test-name">What to Watch Alerts</div>
+                        <div class="test-message">No bundles to test (skipped)</div>
+                    </div>
+                    <div class="test-duration">0.01s</div>
+                </div>
+                
+                <div class="test-result failed">
+                    <div>
+                        <div class="test-name">Create Watch</div>
+                        <div class="test-message">Status 200: {"watch_id":"watch_2db8eda235a4","user_id":"test-user-123","listing_type":"hotel","listing_id":"1234</div>
+                    </div>
+                    <div class="test-duration">0.06s</div>
+                </div>
+                
+                <div class="test-result failed">
+                    <div>
+                        <div class="test-name">Get User Watches</div>
+                        <div class="test-message">Status 404</div>
+                    </div>
+                    <div class="test-duration">0.00s</div>
+                </div>
+                
+                <div class="test-result failed">
+                    <div>
+                        <div class="test-name">WebSocket Connection</div>
+                        <div class="test-message">server rejected WebSocket connection: HTTP 403</div>
+                    </div>
+                    <div class="test-duration">0.07s</div>
+                </div>
+                
+                <div class="test-result failed">
+                    <div>
+                        <div class="test-name">WebSocket Message Delivery Time</div>
+                        <div class="test-message">server rejected WebSocket connection: HTTP 403</div>
+                    </div>
+                    <div class="test-duration">0.01s</div>
+                </div>
+                
+                <div class="test-result passed">
+                    <div>
+                        <div class="test-name">Bundle Response Time</div>
+                        <div class="test-message">Response time: 0.01s (target: ≤3s)</div>
+                    </div>
+                    <div class="test-duration">0.01s</div>
+                </div>
+                
+                </div>
+            </div>
+            
+            <div class="test-suite">
+                <div class="test-suite-header">
+                    Data Quality Tests - 4/10 passed (40.0%)
+                </div>
+                <div class="test-suite-content">
+                    
+                <div class="test-result failed">
+                    <div>
+                        <div class="test-name">Foreign Key Constraints</div>
+                        <div class="test-message">1054 (42S22): Unknown column 'user_id' in 'field list'</div>
+                    </div>
+                    <div class="test-duration">0.05s</div>
+                </div>
+                
+                <div class="test-result failed">
+                    <div>
+                        <div class="test-name">NOT NULL Constraints</div>
+                        <div class="test-message">1364 (HY000): Field 'email' doesn't have a default value</div>
+                    </div>
+                    <div class="test-duration">0.06s</div>
+                </div>
+                
+                <div class="test-result passed">
+                    <div>
+                        <div class="test-name">Unique Constraints</div>
+                        <div class="test-message">Unique constraint enforced</div>
+                    </div>
+                    <div class="test-duration">0.07s</div>
+                </div>
+                
+                <div class="test-result failed">
+                    <div>
+                        <div class="test-name">Data Type Enforcement</div>
+                        <div class="test-message">1054 (42S22): Unknown column 'user_id' in 'field list'</div>
+                    </div>
+                    <div class="test-duration">0.05s</div>
+                </div>
+                
+                <div class="test-result failed">
+                    <div>
+                        <div class="test-name">MongoDB Index Effectiveness</div>
+                        <div class="test-message">Found 1 indexes</div>
+                    </div>
+                    <div class="test-duration">0.06s</div>
+                </div>
+                
+                <div class="test-result passed">
+                    <div>
+                        <div class="test-name">MongoDB Document Structure</div>
+                        <div class="test-message">Document structure validated</div>
+                    </div>
+                    <div class="test-duration">0.11s</div>
+                </div>
+                
+                <div class="test-result failed">
+                    <div>
+                        <div class="test-name">Booking-Billing Consistency</div>
+                        <div class="test-message">1054 (42S22): Unknown column 'booking_id' in 'field list'</div>
+                    </div>
+                    <div class="test-duration">0.04s</div>
+                </div>
+                
+                <div class="test-result failed">
+                    <div>
+                        <div class="test-name">Referential Integrity</div>
+                        <div class="test-message">1054 (42S22): Unknown column 'b.user_id' in 'on clause'</div>
+                    </div>
+                    <div class="test-duration">0.04s</div>
+                </div>
+                
+                <div class="test-result passed">
+                    <div>
+                        <div class="test-name">Data Completeness</div>
+                        <div class="test-message">Found 0 incomplete user records</div>
+                    </div>
+                    <div class="test-duration">0.04s</div>
+                </div>
+                
+                <div class="test-result passed">
+                    <div>
+                        <div class="test-name">SQL Injection Prevention</div>
+                        <div class="test-message">Parameterized queries prevent injection</div>
+                    </div>
+                    <div class="test-duration">0.06s</div>
+                </div>
+                
+                </div>
+            </div>
+            
+        
+        
+        <div class="issues">
+            <h2>⚠️ Identified Issues</h2>
+            
+            <div class="issue">
+                <strong>User Registration</strong> (medium)
+                <div>Status 401: {"timestamp":"2025-12-02T20:57:21.862Z","status":401,"error":"Unauthorized","message":"Missing or invalid Authorization header. Expected format: Bearer <token>","path":"/register"}</div>
+            </div>
+            
+            <div class="issue">
+                <strong>User Login</strong> (medium)
+                <div>Status 401: {"timestamp":"2025-12-02T20:57:21.873Z","status":401,"error":"Unauthorized","message":"Missing or invalid Authorization header. Expected format: Bearer <token>","path":"/login"}</div>
+            </div>
+            
+            <div class="issue">
+                <strong>Duplicate Email Rejection</strong> (medium)
+                <div>Expected 409, got 401</div>
+            </div>
+            
+            <div class="issue">
+                <strong>Invalid SSN Format Rejection</strong> (medium)
+                <div>Expected 400, got 401</div>
+            </div>
+            
+            <div class="issue">
+                <strong>Concurrent Requests</strong> (medium)
+                <div></div>
+            </div>
+            
+            <div class="issue">
+                <strong>API Endpoint Availability</strong> (medium)
+                <div>Tested 3 endpoints</div>
+            </div>
+            
+            <div class="issue">
+                <strong>Transaction Rollback</strong> (medium)
+                <div>1054 (42S22): Unknown column 'user_id' in 'field list'</div>
+            </div>
+            
+            <div class="issue">
+                <strong>Kafka Producer</strong> (medium)
+                <div>NoBrokersAvailable</div>
+            </div>
+            
+            <div class="issue">
+                <strong>Kafka Consumer</strong> (medium)
+                <div>NoBrokersAvailable</div>
+            </div>
+            
+            <div class="issue">
+                <strong>Kafka Message Delivery</strong> (medium)
+                <div>NoBrokersAvailable</div>
+            </div>
+            
+            <div class="issue">
+                <strong>Kafka Consumer Group</strong> (medium)
+                <div>NoBrokersAvailable</div>
+            </div>
+            
+            <div class="issue">
+                <strong>End-to-End Booking Flow</strong> (medium)
+                <div>User registration failed</div>
+            </div>
+            
+            <div class="issue">
+                <strong>Bundle Creation</strong> (medium)
+                <div>Generated 0 bundles</div>
+            </div>
+            
+            <div class="issue">
+                <strong>Create Watch</strong> (medium)
+                <div>Status 200: {"watch_id":"watch_2db8eda235a4","user_id":"test-user-123","listing_type":"hotel","listing_id":"1234</div>
+            </div>
+            
+            <div class="issue">
+                <strong>Get User Watches</strong> (medium)
+                <div>Status 404</div>
+            </div>
+            
+            <div class="issue">
+                <strong>WebSocket Connection</strong> (medium)
+                <div>server rejected WebSocket connection: HTTP 403</div>
+            </div>
+            
+            <div class="issue">
+                <strong>WebSocket Message Delivery Time</strong> (medium)
+                <div>server rejected WebSocket connection: HTTP 403</div>
+            </div>
+            
+            <div class="issue">
+                <strong>Foreign Key Constraints</strong> (medium)
+                <div>1054 (42S22): Unknown column 'user_id' in 'field list'</div>
+            </div>
+            
+            <div class="issue">
+                <strong>NOT NULL Constraints</strong> (medium)
+                <div>1364 (HY000): Field 'email' doesn't have a default value</div>
+            </div>
+            
+            <div class="issue">
+                <strong>Data Type Enforcement</strong> (medium)
+                <div>1054 (42S22): Unknown column 'user_id' in 'field list'</div>
+            </div>
+            
+            <div class="issue">
+                <strong>MongoDB Index Effectiveness</strong> (medium)
+                <div>Found 1 indexes</div>
+            </div>
+            
+            <div class="issue">
+                <strong>Booking-Billing Consistency</strong> (medium)
+                <div>1054 (42S22): Unknown column 'booking_id' in 'field list'</div>
+            </div>
+            
+            <div class="issue">
+                <strong>Referential Integrity</strong> (medium)
+                <div>1054 (42S22): Unknown column 'b.user_id' in 'on clause'</div>
+            </div>
+            
+        </div>
+        
+        
+        
+        <div class="recommendations">
+            <h2>💡 Recommendations</h2>
+            <div class="recommendation">Overall pass rate is below 95%. Review failed tests and fix critical issues.</div>
+        </div>
+        
+    </div>
+</body>
+</html>
