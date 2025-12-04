@@ -47,3 +47,4 @@ temp/
 *.sql.gz
 *.db
 
+.env

@@ -1,18 +1,16 @@
 # llm/intent_parser.py
 """
 Intent Parser for Concierge Agent
-Extracts structured data from natural language queries:
-- Dates, budget, travelers
+Extracts structured travel intent from natural language:
 - Origin/destination
 - Constraints (pet-friendly, no red-eye, etc.)
 Implements: "Intent understanding with a single clarifying question max"
 """
 
 import re
-import os
-from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Dict, Any, Optional, Tuple, List
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from loguru import logger
 
 # Try to import OpenAI for advanced parsing
@@ -23,9 +21,13 @@ except ImportError:
     OPENAI_AVAILABLE = False
 
 
+# ============================================
+# Data Classes
+# ============================================
+
 @dataclass
 class ParsedIntent:
-    """Structured intent extracted from natural language"""
+    """Structured travel intent"""
     origin: Optional[str] = None
     destination: Optional[str] = None
     date_from: Optional[str] = None
@@ -33,7 +35,6 @@ class ParsedIntent:
     budget: Optional[float] = None
     travelers: int = 1
     constraints: List[str] = field(default_factory=list)
-    raw_query: str = ""
     confidence: float = 0.0
     needs_clarification: bool = False
     clarification_question: Optional[str] = None
@@ -47,12 +48,15 @@ class ParsedIntent:
             "budget": self.budget,
             "travelers": self.travelers,
             "constraints": self.constraints,
-            "raw_query": self.raw_query,
             "confidence": self.confidence,
             "needs_clarification": self.needs_clarification,
             "clarification_question": self.clarification_question
         }
 
+
+# ============================================
+# Intent Parser
+# ============================================
 
 class IntentParser:
     """
@@ -63,6 +67,7 @@ class IntentParser:
     def __init__(self):
         # Common airport codes
         self.airport_codes = {
+            # US Cities
             "sfo": "SFO", "san francisco": "SFO",
             "lax": "LAX", "los angeles": "LAX", "la": "LAX",
             "jfk": "JFK", "new york": "JFK", "nyc": "JFK",
@@ -73,20 +78,29 @@ class IntentParser:
             "sea": "SEA", "seattle": "SEA",
             "bos": "BOS", "boston": "BOS",
             "atl": "ATL", "atlanta": "ATL",
+            "hnl": "HNL", "honolulu": "HNL", "hawaii": "HNL",
             "las": "LAS", "vegas": "LAS", "las vegas": "LAS",
             "phx": "PHX", "phoenix": "PHX",
-            "hnl": "HNL", "honolulu": "HNL", "hawaii": "HNL",
-            "cancun": "CUN", "cun": "CUN",
-            "tokyo": "NRT", "nrt": "NRT",
-            "paris": "CDG", "cdg": "CDG",
-            "london": "LHR", "lhr": "LHR",
-            # India cities (from flight dataset)
+            "slc": "SLC", "salt lake": "SLC",
+            
+            # Indian Cities
             "delhi": "DEL", "del": "DEL", "new delhi": "DEL",
             "mumbai": "BOM", "bom": "BOM", "bombay": "BOM",
             "bangalore": "BLR", "blr": "BLR", "bengaluru": "BLR",
+            "chennai": "MAA", "maa": "MAA", "madras": "MAA",
             "kolkata": "CCU", "ccu": "CCU", "calcutta": "CCU",
             "hyderabad": "HYD", "hyd": "HYD",
-            "chennai": "MAA", "maa": "MAA", "madras": "MAA",
+            "ahmedabad": "AMD", "amd": "AMD",
+            "pune": "PNQ", "pnq": "PNQ",
+            "jaipur": "JAI", "jai": "JAI",
+            "goa": "GOI", "goi": "GOI",
+            
+            # International
+            "tokyo": "NRT", "nrt": "NRT", "hnd": "HND",
+            "london": "LHR", "lhr": "LHR",
+            "paris": "CDG", "cdg": "CDG",
+            "rome": "FCO", "fco": "FCO",
+            "cancun": "CUN", "cun": "CUN",
         }
         
         # Destination keywords (for "anywhere warm" type queries)
@@ -96,54 +110,37 @@ class IntentParser:
             "mountain": ["DEN", "SLC"],
             "city": ["JFK", "ORD", "LAX"],
             "europe": ["CDG", "LHR", "FCO"],
-            "asia": ["NRT", "HKG", "SIN"],
+            "asia": ["NRT", "HND"],
+            "tropical": ["HNL", "CUN"],
         }
         
         # Constraint patterns
         self.constraint_patterns = {
-            "pet-friendly": [r"pet[- ]?friendly", r"pets? allowed", r"with pets?", r"bring.*pet"],
-            "no-redeye": [r"no red[- ]?eye", r"avoid red[- ]?eye", r"not red[- ]?eye"],
-            "direct-flight": [r"direct", r"non[- ]?stop", r"no stops?", r"no layover"],
-            "refundable": [r"refundable", r"free cancel", r"flexible"],
-            "breakfast": [r"breakfast", r"with breakfast"],
-            "wifi": [r"wifi", r"wi-fi", r"internet"],
-            "parking": [r"parking", r"free parking"],
-            "pool": [r"pool", r"swimming"],
-            "gym": [r"gym", r"fitness"],
-            "business-class": [r"business class", r"business seat"],
-            "first-class": [r"first class"],
-            "economy": [r"economy", r"cheap"],
+            "pet-friendly": [r"pet[\s-]*friendly", r"with\s+pet", r"dog", r"cat", r"bring.*pet"],
+            "no-red-eye": [r"no\s+red[\s-]*eye", r"avoid.*red[\s-]*eye", r"daytime", r"morning\s+flight"],
+            "direct-flight": [r"direct", r"non[\s-]*stop", r"no\s+stops", r"no\s+layover"],
+            "refundable": [r"refundable", r"free\s+cancellation", r"flexible"],
+            "breakfast": [r"breakfast", r"morning\s+meal"],
+            "near-transit": [r"near\s+transit", r"public\s+transport", r"subway", r"metro"],
+            "business-class": [r"business\s+class", r"first\s+class", r"premium"],
+            "budget": [r"cheap", r"budget", r"affordable", r"low\s+cost"],
         }
         
-        # Budget patterns
-        self.budget_patterns = [
-            r"\$(\d+(?:,\d{3})*(?:\.\d{2})?)",  # $1000, $1,000, $1000.00
-            r"(\d+(?:,\d{3})*)\s*(?:dollars?|usd|bucks?)",  # 1000 dollars
-            r"budget\s*(?:of|is|:)?\s*\$?(\d+(?:,\d{3})*)",  # budget of 1000
-            r"under\s*\$?(\d+(?:,\d{3})*)",  # under 1000
-            r"(?:max|maximum)\s*\$?(\d+(?:,\d{3})*)",  # max 1000
-        ]
-        
-        # Date patterns
-        self.month_names = {
-            "jan": 1, "january": 1, "feb": 2, "february": 2,
-            "mar": 3, "march": 3, "apr": 4, "april": 4,
-            "may": 5, "jun": 6, "june": 6,
-            "jul": 7, "july": 7, "aug": 8, "august": 8,
-            "sep": 9, "september": 9, "oct": 10, "october": 10,
-            "nov": 11, "november": 11, "dec": 12, "december": 12
+        # Month mapping
+        self.months = {
+            "jan": 1, "january": 1,
+            "feb": 2, "february": 2,
+            "mar": 3, "march": 3,
+            "apr": 4, "april": 4,
+            "may": 5,
+            "jun": 6, "june": 6,
+            "jul": 7, "july": 7,
+            "aug": 8, "august": 8,
+            "sep": 9, "september": 9, "sept": 9,
+            "oct": 10, "october": 10,
+            "nov": 11, "november": 11,
+            "dec": 12, "december": 12
         }
-        
-        # OpenAI client (if available)
-        self.openai_client = None
-        if OPENAI_AVAILABLE:
-            api_key = os.getenv("OPENAI_API_KEY", "")
-            if api_key and not api_key.startswith("sk-your"):
-                try:
-                    self.openai_client = OpenAI(api_key=api_key)
-                    logger.info("IntentParser: OpenAI client initialized")
-                except Exception as e:
-                    logger.warning(f"IntentParser: OpenAI init failed: {e}")
     
     def parse(self, query: str, context: Optional[Dict[str, Any]] = None) -> ParsedIntent:
         """
@@ -152,15 +149,15 @@ class IntentParser:
         Args:
             query: User's natural language query
             context: Optional session context for multi-turn conversations
-        
+            
         Returns:
-            ParsedIntent with extracted data
+            ParsedIntent with extracted information
         """
         query_lower = query.lower().strip()
         
-        intent = ParsedIntent(raw_query=query)
+        intent = ParsedIntent()
         
-        # Extract each component
+        # Extract components
         intent.origin = self._extract_origin(query_lower, context)
         intent.destination = self._extract_destination(query_lower)
         intent.date_from, intent.date_to = self._extract_dates(query_lower)
@@ -171,7 +168,7 @@ class IntentParser:
         # Calculate confidence
         intent.confidence = self._calculate_confidence(intent)
         
-        # Check if clarification needed (single question max)
+        # Check if clarification is needed
         intent.needs_clarification, intent.clarification_question = self._check_clarification_needed(intent)
         
         logger.info(f"Parsed intent: destination={intent.destination}, "
@@ -182,14 +179,22 @@ class IntentParser:
     
     def _extract_origin(self, query: str, context: Optional[Dict] = None) -> Optional[str]:
         """Extract origin airport/city"""
+        
+        # First, try "from X to Y" pattern (most specific)
+        from_to_pattern = r"from\s+(\w+)\s+to\s+"
+        match = re.search(from_to_pattern, query)
+        if match:
+            origin = match.group(1).lower().strip()
+            if origin in self.airport_codes:
+                return self.airport_codes[origin]
+        
         # Pattern: "from SFO", "departing from San Francisco"
         patterns = [
-            r"from\s+(\w+(?:\s+\w+)?)",
-            r"departing\s+(?:from\s+)?(\w+(?:\s+\w+)?)",
-            r"leaving\s+(?:from\s+)?(\w+(?:\s+\w+)?)",
+            r"from\s+(\w+)(?:\s|,|$)",
+            r"departing\s+(?:from\s+)?(\w+)",
+            r"leaving\s+(?:from\s+)?(\w+)",
             r"(\w{3})\s+to\s+",  # SFO to ...
         ]
-        
         for pattern in patterns:
             match = re.search(pattern, query)
             if match:
@@ -201,30 +206,42 @@ class IntentParser:
         if context and context.get("origin"):
             return context["origin"]
         
-        # Default to SFO (common in our dataset)
         return None
-    
+
     def _extract_destination(self, query: str) -> Optional[str]:
         """Extract destination airport/city"""
-        # Pattern: "to Miami", "going to NYC"
+        
+        # First, try "from X to Y" pattern (most specific)
+        from_to_pattern = r"from\s+(\w+(?:\s+\w+)?)\s+to\s+(\w+)"
+        match = re.search(from_to_pattern, query)
+        if match:
+            destination = match.group(2).lower()
+            if destination in self.airport_codes:
+                return self.airport_codes[destination]
+        
+        # Pattern: "to Miami", "going to NYC" - but skip common verbs
+        skip_words = {"travel", "go", "fly", "visit", "book", "find", "search", "get", "see", "the", "next", "this"}
+        
         patterns = [
             r"to\s+(\w+(?:\s+\w+)?)",
             r"going\s+(?:to\s+)?(\w+(?:\s+\w+)?)",
             r"visiting\s+(\w+(?:\s+\w+)?)",
             r"trip\s+to\s+(\w+(?:\s+\w+)?)",
-            r"fly\s+to\s+(\w+(?:\s+\w+)?)",
-            r"in\s+(\w+(?:\s+\w+)?)",
+            r"flight\s+to\s+(\w+(?:\s+\w+)?)",
+            r"flights\s+to\s+(\w+(?:\s+\w+)?)",
+            r"deals\s+to\s+(\w+(?:\s+\w+)?)",
         ]
-        
+
         for pattern in patterns:
-            match = re.search(pattern, query)
-            if match:
-                location = match.group(1).lower().strip()
-                # Skip common words
-                if location in ["the", "a", "an", "anywhere", "somewhere"]:
+            matches = re.findall(pattern, query)
+            for location in matches:
+                location = location.lower().strip()
+                
+                # Skip common verbs
+                if location.split()[0] in skip_words:
                     continue
                 
-                # Check full match
+                # Check if full match is in airport codes
                 if location in self.airport_codes:
                     return self.airport_codes[location]
                 
@@ -232,18 +249,25 @@ class IntentParser:
                 first_word = location.split()[0]
                 if first_word in self.airport_codes:
                     return self.airport_codes[first_word]
+        
         # Check for keyword destinations ("anywhere warm")
         for keyword, destinations in self.destination_keywords.items():
             if keyword in query:
                 return destinations[0]
+        
+        # Direct city name matching (for queries like "Mumbai next week")
+        words = query.split()
+        for word in words:
+            word_lower = word.lower().strip(",.!?")
+            if word_lower in self.airport_codes:
+                return self.airport_codes[word_lower]
 
         return None
     
     def _extract_dates(self, query: str) -> Tuple[Optional[str], Optional[str]]:
         """Extract travel dates"""
-        date_from = None
-        date_to = None
         today = datetime.now()
+        year = today.year
         
         # Pattern: "Oct 25-27", "October 25 to 27"
         range_pattern = r"(\w+)\s+(\d{1,2})[-–to]+\s*(\d{1,2})"
@@ -253,101 +277,122 @@ class IntentParser:
             day1 = int(match.group(2))
             day2 = int(match.group(3))
             
-            if month_str in self.month_names:
-                month = self.month_names[month_str]
-                year = today.year if month >= today.month else today.year + 1
-                
-                date_from = f"{year}-{month:02d}-{day1:02d}"
-                date_to = f"{year}-{month:02d}-{day2:02d}"
-                return date_from, date_to
+            if month_str in self.months:
+                month = self.months[month_str]
+                # Adjust year if month is in the past
+                if month < today.month or (month == today.month and day1 < today.day):
+                    year += 1
+                try:
+                    date_from = datetime(year, month, day1)
+                    date_to = datetime(year, month, day2)
+                    return date_from.strftime("%Y-%m-%d"), date_to.strftime("%Y-%m-%d")
+                except ValueError:
+                    pass
         
-        # Pattern: "next weekend", "this weekend"
+        # Pattern: "December 20-25" or "Dec 20-25"
+        range_pattern2 = r"(\w+)\s+(\d{1,2})\s*[-–]\s*(\d{1,2})"
+        match = re.search(range_pattern2, query)
+        if match:
+            month_str = match.group(1).lower()
+            day1 = int(match.group(2))
+            day2 = int(match.group(3))
+            
+            if month_str in self.months:
+                month = self.months[month_str]
+                if month < today.month or (month == today.month and day1 < today.day):
+                    year += 1
+                try:
+                    date_from = datetime(year, month, day1)
+                    date_to = datetime(year, month, day2)
+                    return date_from.strftime("%Y-%m-%d"), date_to.strftime("%Y-%m-%d")
+                except ValueError:
+                    pass
+        
+        # Pattern: "next weekend"
         if "next weekend" in query:
-            # Find next Saturday
             days_until_saturday = (5 - today.weekday()) % 7
             if days_until_saturday == 0:
                 days_until_saturday = 7
             saturday = today + timedelta(days=days_until_saturday + 7)
             sunday = saturday + timedelta(days=1)
-            date_from = saturday.strftime("%Y-%m-%d")
-            date_to = sunday.strftime("%Y-%m-%d")
-            return date_from, date_to
+            return saturday.strftime("%Y-%m-%d"), sunday.strftime("%Y-%m-%d")
         
+        # Pattern: "this weekend"
         if "this weekend" in query or "weekend" in query:
             days_until_saturday = (5 - today.weekday()) % 7
             if days_until_saturday == 0:
                 days_until_saturday = 7
             saturday = today + timedelta(days=days_until_saturday)
             sunday = saturday + timedelta(days=1)
-            date_from = saturday.strftime("%Y-%m-%d")
-            date_to = sunday.strftime("%Y-%m-%d")
-            return date_from, date_to
+            return saturday.strftime("%Y-%m-%d"), sunday.strftime("%Y-%m-%d")
         
-        # Pattern: "next month"
-        if "next month" in query:
-            next_month = today.month + 1 if today.month < 12 else 1
-            year = today.year if today.month < 12 else today.year + 1
-            date_from = f"{year}-{next_month:02d}-01"
-            # End of month
-            if next_month in [4, 6, 9, 11]:
-                date_to = f"{year}-{next_month:02d}-30"
-            elif next_month == 2:
-                date_to = f"{year}-{next_month:02d}-28"
-            else:
-                date_to = f"{year}-{next_month:02d}-31"
-            return date_from, date_to
+        # Pattern: "next week"
+        if "next week" in query:
+            next_monday = today + timedelta(days=(7 - today.weekday()))
+            departure_date = next_monday.strftime("%Y-%m-%d")
+            return_date = (next_monday + timedelta(days=5)).strftime("%Y-%m-%d")
+            return departure_date, return_date
         
-        # Pattern: specific date "December 15"
-        single_date = r"(\w+)\s+(\d{1,2})(?:st|nd|rd|th)?"
-        match = re.search(single_date, query)
+        # Pattern: single date "Oct 25" or "October 25"
+        single_date_pattern = r"(\w+)\s+(\d{1,2})(?!\s*[-–])"
+        match = re.search(single_date_pattern, query)
         if match:
             month_str = match.group(1).lower()
             day = int(match.group(2))
             
-            if month_str in self.month_names:
-                month = self.month_names[month_str]
-                year = today.year if month >= today.month else today.year + 1
-                date_from = f"{year}-{month:02d}-{day:02d}"
-                # Default 3-night stay
-                date_to_obj = datetime(year, month, day) + timedelta(days=3)
-                date_to = date_to_obj.strftime("%Y-%m-%d")
-                return date_from, date_to
+            if month_str in self.months:
+                month = self.months[month_str]
+                if month < today.month or (month == today.month and day < today.day):
+                    year += 1
+                try:
+                    date_from_obj = datetime(year, month, day)
+                    date_to_obj = datetime(year, month, day) + timedelta(days=3)
+                    return date_from_obj.strftime("%Y-%m-%d"), date_to_obj.strftime("%Y-%m-%d")
+                except ValueError:
+                    pass
         
-        return date_from, date_to
+        return None, None
     
     def _extract_budget(self, query: str) -> Optional[float]:
         """Extract budget amount"""
-        for pattern in self.budget_patterns:
+        # Pattern: "$1000", "1000 dollars", "budget $1000", "under $1000"
+        patterns = [
+            r"\$\s*(\d+(?:,\d{3})*(?:\.\d{2})?)",
+            r"(\d+(?:,\d{3})*)\s*(?:dollars|usd)",
+            r"budget\s*(?:of\s*)?\$?\s*(\d+(?:,\d{3})*)",
+            r"under\s*\$?\s*(\d+(?:,\d{3})*)",
+            r"max(?:imum)?\s*\$?\s*(\d+(?:,\d{3})*)",
+        ]
+        
+        for pattern in patterns:
             match = re.search(pattern, query, re.IGNORECASE)
             if match:
-                budget_str = match.group(1).replace(",", "")
+                amount_str = match.group(1).replace(",", "")
                 try:
-                    return float(budget_str)
+                    return float(amount_str)
                 except ValueError:
-                    continue
+                    pass
+        
         return None
     
     def _extract_travelers(self, query: str) -> int:
         """Extract number of travelers"""
+        # Pattern: "for 2", "2 people", "two travelers"
         patterns = [
-            r"for\s+(\d+)\s*(?:people|persons?|travelers?|adults?)",
-            r"(\d+)\s*(?:people|persons?|travelers?|adults?)",
-            r"party\s+of\s+(\d+)",
+            r"for\s+(\d+)",
+            r"(\d+)\s+(?:people|travelers|passengers|adults)",
             r"(\d+)\s+of\s+us",
         ]
         
         for pattern in patterns:
             match = re.search(pattern, query, re.IGNORECASE)
             if match:
-                try:
-                    return int(match.group(1))
-                except ValueError:
-                    continue
+                return int(match.group(1))
         
-        # Check for "two", "three", etc.
+        # Word numbers
         word_numbers = {
             "two": 2, "three": 3, "four": 4, "five": 5,
-            "six": 6, "couple": 2, "pair": 2
+            "six": 6, "seven": 7, "eight": 8
         }
         for word, num in word_numbers.items():
             if word in query:
@@ -389,16 +434,24 @@ class IntentParser:
     def _check_clarification_needed(self, intent: ParsedIntent) -> Tuple[bool, Optional[str]]:
         """
         Check if clarification is needed.
-        Returns at most ONE clarifying question (as per requirements).
+        Returns at most ONE clarifying question that asks for ALL missing required fields.
+        (As per assignment requirement: "single clarifying question max")
         """
-        # Priority order for clarification
+        missing = []
+        
+        if not intent.origin:
+            missing.append("departure city (e.g., Delhi, SFO)")
+        
         if not intent.destination:
-            return True, "Where would you like to go? (e.g., Miami, Tokyo, 'anywhere warm')"
+            missing.append("destination (e.g., Mumbai, Tokyo, 'anywhere warm')")
         
         if not intent.date_from:
-            return True, "When are you planning to travel? (e.g., 'next weekend', 'Oct 25-27')"
+            missing.append("travel dates (e.g., 'December 15-20', 'next weekend')")
         
-        # Budget and travelers are optional, don't ask
+        if missing:
+            question = f"I need a few more details: {' and '.join(missing)}. Could you provide these?"
+            return True, question
+        
         return False, None
     
     def merge_with_context(self, intent: ParsedIntent, context: Dict[str, Any]) -> ParsedIntent:
