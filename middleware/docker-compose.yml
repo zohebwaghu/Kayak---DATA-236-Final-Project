@@ -321,6 +321,7 @@ services:
       - CORS_ORIGINS=http://localhost:3000,http://localhost:3001
     volumes:
       - ../data:/data
+      - ../ai:/app
     depends_on:
       mysql:
         condition: service_healthy

@@ -1,0 +1,88 @@
+{
+    "family": "kayak-app-stack",
+    "networkMode": "awsvpc",
+    "requiresCompatibilities": ["FARGATE"],
+    "cpu": "2048", 
+    "memory": "4096",
+    "executionRoleArn": "arn:aws:iam::056323207432:role/ecsTaskExecutionRole",
+    "containerDefinitions": [
+        {
+            "name": "frontend",
+            "image": "056323207432.dkr.ecr.us-east-1.amazonaws.com/kayak-frontend:latest",
+            "portMappings": [{"containerPort": 80}],
+            "essential": true
+        },
+        {
+            "name": "api-gateway",
+            "image": "056323207432.dkr.ecr.us-east-1.amazonaws.com/kayak-api-gateway:latest",
+            "portMappings": [{"containerPort": 3000}],
+            "environment": [
+                {"name": "USER_SERVICE_URL", "value": "http://localhost:3001"},
+                {"name": "SEARCH_SERVICE_URL", "value": "http://localhost:3003"},
+                {"name": "BOOKING_SERVICE_URL", "value": "http://localhost:3002"},
+                {"name": "BILLING_SERVICE_URL", "value": "http://localhost:3004"},
+                {"name": "ADMIN_SERVICE_URL", "value": "http://localhost:3005"}
+            ],
+            "essential": true
+        },
+        {
+            "name": "user-service",
+            "image": "056323207432.dkr.ecr.us-east-1.amazonaws.com/kayak-user-service:latest",
+            "portMappings": [{"containerPort": 3001}],
+            "environment": [
+                {"name": "MYSQL_HOST", "value": "127.0.0.1"},
+                {"name": "MONGO_URI", "value": "mongodb://127.0.0.1:27017/kayak"}
+            ]
+        },
+        {
+            "name": "booking-service",
+            "image": "056323207432.dkr.ecr.us-east-1.amazonaws.com/kayak-booking-service:latest",
+            "portMappings": [{"containerPort": 3002}],
+            "environment": [
+                {"name": "MYSQL_HOST", "value": "127.0.0.1"}
+            ]
+        },
+        {
+            "name": "search-service",
+            "image": "056323207432.dkr.ecr.us-east-1.amazonaws.com/kayak-search-service:latest",
+            "portMappings": [{"containerPort": 3003}],
+            "environment": [
+                {"name": "MONGO_URI", "value": "mongodb://127.0.0.1:27017/kayak"},
+                {"name": "REDIS_HOST", "value": "127.0.0.1"}
+            ]
+        },
+        {
+            "name": "billing-service",
+            "image": "056323207432.dkr.ecr.us-east-1.amazonaws.com/kayak-billing-service:latest",
+            "portMappings": [{"containerPort": 3004}],
+            "environment": [
+                {"name": "MYSQL_HOST", "value": "127.0.0.1"}
+            ]
+        },
+        {
+            "name": "admin-service",
+            "image": "056323207432.dkr.ecr.us-east-1.amazonaws.com/kayak-admin-service:latest",
+            "portMappings": [{"containerPort": 3005}],
+            "environment": [
+                {"name": "MYSQL_HOST", "value": "127.0.0.1"},
+                {"name": "MONGO_URI", "value": "mongodb://127.0.0.1:27017/kayak"}
+            ]
+        },
+        {
+            "name": "mysql",
+            "image": "mysql:8.0",
+            "environment": [
+                {"name": "MYSQL_ROOT_PASSWORD", "value": "rootpassword"},
+                {"name": "MYSQL_DATABASE", "value": "kayak_users"}
+            ]
+        },
+        {
+            "name": "mongo",
+            "image": "mongo:latest"
+        },
+        {
+            "name": "redis",
+            "image": "redis:alpine"
+        }
+    ]
+}

@@ -364,13 +364,19 @@ class DealsAgentRunner:
         has_promotion = current_price < original_price * 0.9
         
         # Calculate score
-        score = calculate_deal_score(
+        score_result = calculate_deal_score(
             current_price=current_price,
             avg_30d_price=avg_price,
             availability=availability,
             rating=rating,
             has_promotion=has_promotion
         )
+        
+        # Handle both int (mock) and DealScoreBreakdown (real)
+        if hasattr(score_result, "total_score"):
+            score = score_result.total_score
+        else:
+            score = score_result
         
         # Calculate discount percent
         discount_percent = 0
