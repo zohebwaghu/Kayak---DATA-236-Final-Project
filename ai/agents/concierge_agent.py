@@ -71,6 +71,21 @@ except ImportError:
     answer_policy_question = None
     policy_store = None
 
+# Import AirportLookup utility (direct import to avoid utils.__init__ issues)
+try:
+    import importlib.util
+    import os
+    # Direct import without going through utils.__init__.py
+    airport_lookup_path = os.path.join(os.path.dirname(__file__), '..', 'utils', 'airport_lookup.py')
+    spec = importlib.util.spec_from_file_location("airport_lookup", airport_lookup_path)
+    airport_lookup_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(airport_lookup_module)
+    get_airport_lookup = airport_lookup_module.get_airport_lookup
+    AIRPORT_LOOKUP_AVAILABLE = True
+except (ImportError, Exception) as e:
+    AIRPORT_LOOKUP_AVAILABLE = False
+    logger.warning(f"AirportLookup not available - using hardcoded mappings: {e}")
+
 
 # ============================================
 # Tool Definitions (shared by OpenAI & Ollama)
@@ -308,13 +323,89 @@ class MRKLTools:
                 "message": "Where would you like to travel to? (e.g., Mumbai, Miami, Tokyo)"
             }
         
-        # Smart defaults for origin
+        # Convert city names to IATA codes using AirportLookup
+        airport_lookup = None
+        if AIRPORT_LOOKUP_AVAILABLE:
+            try:
+                airport_lookup = get_airport_lookup()
+            except Exception as e:
+                logger.warning(f"Failed to get AirportLookup: {e}")
+        
+        # Convert destination city name to IATA code
+        dest_iata = destination
+        if airport_lookup and len(destination) != 3:  # Not already an IATA code
+            try:
+                dest_iata = airport_lookup.city_to_iata(destination)
+                if not dest_iata:
+                    logger.warning(f"Could not find airport for '{destination}'")
+                    # Continue with original destination (might be a valid code already)
+                else:
+                    logger.info(f"Converted destination '{destination}' → '{dest_iata}'")
+                    destination = dest_iata
+            except Exception as e:
+                logger.warning(f"AirportLookup error for destination '{destination}': {e}")
+                # Continue with original destination
+        
+        # Convert origin city name to IATA code or set smart default
         if not origin:
-            india_airports = ["BOM", "DEL", "BLR", "MAA", "CCU", "HYD"]
-            origin = "DEL" if destination in india_airports else "SFO"
-            # Update cache with default origin
-            current_intent["origin"] = origin
-            MRKLTools._user_intent_cache[self.user_id] = current_intent
+            if airport_lookup:
+                try:
+                    # Try to infer from destination region
+                    dest_info = airport_lookup.get_airport_info(dest_iata)
+                    if dest_info:
+                        dest_country = dest_info.get("country", "").lower()
+                        # Default origins by region
+                        if "india" in dest_country:
+                            origin = "DEL"  # Delhi
+                        elif "united states" in dest_country or "usa" in dest_country:
+                            origin = "SFO"  # San Francisco
+                        elif "united kingdom" in dest_country:
+                            origin = "JFK"  # New York
+                        else:
+                            origin = "SFO"  # Default
+                    else:
+                        origin = "SFO"
+                except Exception as e:
+                    logger.warning(f"AirportLookup error getting airport info: {e}")
+                    origin = "SFO"  # Safe default
+            else:
+                # Fallback to old hardcoded logic
+                india_airports = ["BOM", "DEL", "BLR", "MAA", "CCU", "HYD"]
+                origin = "DEL" if dest_iata in india_airports else "SFO"
+        elif airport_lookup and len(origin) != 3:  # Not already an IATA code
+            try:
+                origin_iata = airport_lookup.city_to_iata(origin)
+                if origin_iata:
+                    logger.info(f"Converted origin '{origin}' → '{origin_iata}'")
+                    origin = origin_iata
+            except Exception as e:
+                logger.warning(f"AirportLookup error for origin '{origin}': {e}")
+                # Continue with original origin
+        
+        # Validate route exists (non-blocking - just log warnings)
+        if airport_lookup:
+            try:
+                if not airport_lookup.validate_route(origin, dest_iata):
+                    # Try to find alternatives
+                    try:
+                        alternatives = airport_lookup.find_alternative_routes(origin, dest_iata, max_stops=1)
+                        if alternatives:
+                            alt_msg = f"No direct route found from {origin} to {dest_iata}. "
+                            connections = [alt.get('connection', '') for alt in alternatives[:3]]
+                            alt_msg += f"Alternatives with connections: {', '.join(connections)}"
+                            logger.warning(alt_msg)
+                        else:
+                            logger.warning(f"Route {origin} → {dest_iata} not found in routes database, but continuing search...")
+                    except Exception as e:
+                        logger.debug(f"Could not find alternative routes: {e}")
+            except Exception as e:
+                logger.debug(f"Route validation error (non-critical): {e}")
+                # Continue anyway - route validation is optional
+        
+        # Update cache with resolved codes
+        current_intent["origin"] = origin
+        current_intent["destination"] = dest_iata
+        MRKLTools._user_intent_cache[self.user_id] = current_intent
         
         # Smart defaults for dates
         if not date_from:
@@ -328,21 +419,21 @@ class MRKLTools:
         
         constraints = constraints or []
         
-        # Fetch deals
-        flights, hotels = await self._fetch_deals(destination, origin)
+        # Fetch deals (use resolved IATA codes)
+        flights, hotels = await self._fetch_deals(dest_iata, origin)
         
         if not flights or not hotels:
             return {
                 "tool": "search_bundles",
                 "success": False,
-                "message": f"No flights or hotels found for {origin} → {destination}",
+                "message": f"No flights or hotels found for {origin} → {dest_iata}",
                 "bundles": []
             }
         
         # Build bundles
         bundles = self._build_bundles(flights, hotels, {
             "origin": origin,
-            "destination": destination,
+            "destination": dest_iata,
             "date_from": date_from,
             "date_to": date_to,
             "budget": budget,
@@ -360,7 +451,7 @@ class MRKLTools:
             "tool": "search_bundles",
             "success": True,
             "origin": origin,
-            "destination": destination,
+            "destination": dest_iata,
             "date_from": date_from,
             "date_to": date_to,
             "budget": budget,
@@ -883,9 +974,12 @@ You help users find and book travel packages (flights + hotels). You have these 
 6. booking_confirmer - Confirm a booking when user agrees.
 
 CRITICAL RULES:
-- Convert city names to airport codes (Delhi=DEL, Mumbai=BOM, New York=JFK, San Francisco=SFO, Los Angeles=LAX, Miami=MIA, Chicago=ORD, London=LHR, Paris=CDG, Tokyo=NRT)
-- Calculate dates from relative terms ("next week" = 7 days from {today})
+- ALWAYS preserve context from previous messages. If user previously said "Miami to Tokyo", keep that origin and destination.
+- When user says "include a stop to X" or "add X to the route", add X to the constraints list and call search_bundles with the SAME origin/destination from previous context.
+- Convert city names to airport codes (Delhi=DEL, Mumbai=BOM, New York=JFK, San Francisco=SFO, Los Angeles=LAX, Miami=MIA, Chicago=ORD, London=LHR, Paris=CDG, Tokyo=NRT, Singapore=SIN)
+- Calculate dates from relative terms ("next week" = 7 days from {today}, "January 1-7" = 2025-01-01 to 2025-01-07)
 - When user provides partial info like "from Delhi" or "to Mumbai", ALWAYS call search_bundles - it will merge with previous context automatically
+- When user refines a search (e.g., "make it pet-friendly", "include stop to singapore"), call search_bundles with the constraint added, preserving origin/destination/dates from previous context
 - You may ask AT MOST ONE clarifying question if destination is missing. Never ask multiple questions.
 - When user says "confirm", "yes", "book it" after a quote, use booking_confirmer
 - Be concise and helpful"""
@@ -910,12 +1004,24 @@ CRITICAL RULES:
         else:
             session_id = session_id or f"sess_{user_id}_{uuid.uuid4().hex[:8]}"
         
+        # Get conversation history
+        conversation_history = []
+        if session_store:
+            session = session_store.get_session(session_id)
+            if session:
+                # Build history from session data
+                if session.get("last_query") and session.get("last_response"):
+                    conversation_history = [
+                        {"role": "user", "content": session.get("last_query")},
+                        {"role": "assistant", "content": session.get("last_response")}
+                    ]
+        
         tools = MRKLTools(user_id, session_id)
         
         if self.use_openai:
-            result = await self._call_openai(query, tools)
+            result = await self._call_openai(query, tools, conversation_history)
         else:
-            result = await self._call_ollama(query, tools)
+            result = await self._call_ollama(query, tools, conversation_history)
         
         if session_store:
             session_store.update_session(session_id, {
@@ -926,15 +1032,21 @@ CRITICAL RULES:
         result["session_id"] = session_id
         return result
     
-    async def _call_openai(self, query: str, tools: MRKLTools) -> Dict:
+    async def _call_openai(self, query: str, tools: MRKLTools, conversation_history: List[Dict] = None) -> Dict:
         """Call OpenAI with function calling"""
         try:
+            messages = [{"role": "system", "content": self.system_prompt}]
+            
+            # Add conversation history
+            if conversation_history:
+                messages.extend(conversation_history)
+            
+            # Add current query
+            messages.append({"role": "user", "content": query})
+            
             response = self.openai_client.chat.completions.create(
                 model=OPENAI_MODEL,
-                messages=[
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": query}
-                ],
+                messages=messages,
                 tools=TOOL_DEFINITIONS,
                 tool_choice="auto",
                 max_tokens=500
@@ -951,14 +1063,18 @@ CRITICAL RULES:
                 
                 tool_result = await self._execute_tool(tools, tool_name, tool_args)
                 
+                follow_up_messages = [{"role": "system", "content": self.system_prompt}]
+                if conversation_history:
+                    follow_up_messages.extend(conversation_history)
+                follow_up_messages.extend([
+                    {"role": "user", "content": query},
+                    {"role": "assistant", "content": None, "tool_calls": [tool_call]},
+                    {"role": "tool", "tool_call_id": tool_call.id, "content": json.dumps(tool_result)}
+                ])
+                
                 follow_up = self.openai_client.chat.completions.create(
                     model=OPENAI_MODEL,
-                    messages=[
-                        {"role": "system", "content": self.system_prompt},
-                        {"role": "user", "content": query},
-                        {"role": "assistant", "content": None, "tool_calls": [tool_call]},
-                        {"role": "tool", "tool_call_id": tool_call.id, "content": json.dumps(tool_result)}
-                    ],
+                    messages=follow_up_messages,
                     max_tokens=800
                 )
                 
@@ -984,43 +1100,32 @@ CRITICAL RULES:
                 "error": str(e)
             }
     
-    async def _call_ollama(self, query: str, tools: MRKLTools) -> Dict:
+    async def _call_ollama(self, query: str, tools: MRKLTools, conversation_history: List[Dict] = None) -> Dict:
         """Call Ollama with function calling"""
         try:
             # Some versions of the Ollama Python client do NOT yet support the
             # "tools" argument on Client.chat(). We first try with tools, and
             # if the client raises a TypeError for the unexpected keyword,
-            # gracefully fall back to a plain chat call (no tool-calling) so
-            # that the chat endpoint still returns a useful response instead
-            # of an error.
+            # gracefully fall back to manual intent parsing + tool calling.
             try:
+                messages = [{"role": "system", "content": self.system_prompt}]
+                if conversation_history:
+                    messages.extend(conversation_history)
+                messages.append({"role": "user", "content": query})
+                
                 response = ollama.chat(
                     model=OLLAMA_MODEL,
-                    messages=[
-                        {"role": "system", "content": self.system_prompt},
-                        {"role": "user", "content": query}
-                    ],
+                    messages=messages,
                     tools=TOOL_DEFINITIONS
                 )
             except TypeError as te:
                 if "unexpected keyword argument 'tools'" in str(te):
                     logger.warning(
                         "Ollama client does not support 'tools' argument on chat(); "
-                        "falling back to plain chat without tool calling."
+                        "falling back to manual intent parsing."
                     )
-                    response = ollama.chat(
-                        model=OLLAMA_MODEL,
-                        messages=[
-                            {"role": "system", "content": self.system_prompt},
-                            {"role": "user", "content": query}
-                        ]
-                    )
-                    message = response.get("message", {})
-                    return {
-                        "response": message.get("content", "How can I help you with travel planning?"),
-                        "type": "message",
-                        "tool_used": None
-                    }
+                    # Manual intent parsing when tools aren't supported
+                    return await self._call_ollama_manual_intent(query, tools, conversation_history)
                 # Re-raise any other TypeError so it is handled by the outer
                 # exception block and logged as an Ollama error.
                 raise
@@ -1040,14 +1145,18 @@ CRITICAL RULES:
                 
                 tool_result = await self._execute_tool(tools, tool_name, tool_args)
                 
+                follow_up_messages = [{"role": "system", "content": self.system_prompt}]
+                if conversation_history:
+                    follow_up_messages.extend(conversation_history)
+                follow_up_messages.extend([
+                    {"role": "user", "content": query},
+                    {"role": "assistant", "content": f"Tool result: {json.dumps(tool_result)}"},
+                    {"role": "user", "content": "Please summarize this result for the user."}
+                ])
+                
                 follow_up = ollama.chat(
                     model=OLLAMA_MODEL,
-                    messages=[
-                        {"role": "system", "content": self.system_prompt},
-                        {"role": "user", "content": query},
-                        {"role": "assistant", "content": f"Tool result: {json.dumps(tool_result)}"},
-                        {"role": "user", "content": "Please summarize this result for the user."}
-                    ]
+                    messages=follow_up_messages
                 )
                 
                 return {
@@ -1071,6 +1180,190 @@ CRITICAL RULES:
                 "type": "error",
                 "error": str(e)
             }
+    
+    async def _call_ollama_manual_intent(self, query: str, tools: MRKLTools, conversation_history: List[Dict] = None) -> Dict:
+        """Manually parse intent and call tools when Ollama doesn't support tool calling"""
+        import re
+        
+        query_lower = query.lower()
+        
+        # Check if this is a refinement/constraint addition
+        is_refinement = any(phrase in query_lower for phrase in [
+            "include", "add", "stop", "stopover", "via", "through",
+            "make it", "also", "need", "want", "require"
+        ])
+        
+        # Extract constraints
+        constraints = []
+        if "singapore" in query_lower or "sin" in query_lower:
+            constraints.append("stop-singapore")
+        if "pet" in query_lower and ("friendly" in query_lower or "allow" in query_lower):
+            constraints.append("pet-friendly")
+        if "wifi" in query_lower or "wi-fi" in query_lower:
+            constraints.append("wifi")
+        if "pool" in query_lower:
+            constraints.append("pool")
+        if "breakfast" in query_lower:
+            constraints.append("breakfast")
+        if "refund" in query_lower or "cancel" in query_lower:
+            constraints.append("refundable")
+        
+        # Extract dates
+        date_from = None
+        date_to = None
+        
+        # Handle "1st week of January" or "first week of January"
+        week_pattern = re.search(r"(?:1st|first)\s+week\s+of\s+(january|february|march|april|may|june|july|august|september|october|november|december)", query_lower)
+        if week_pattern:
+            month_name = week_pattern.group(1)
+            month_map = {
+                "january": 1, "february": 2, "march": 3, "april": 4,
+                "may": 5, "june": 6, "july": 7, "august": 8,
+                "september": 9, "october": 10, "november": 11, "december": 12
+            }
+            month = month_map.get(month_name, 1)
+            date_from = f"2025-{month:02d}-01"
+            date_to = f"2025-{month:02d}-07"
+        else:
+            # Try other date patterns
+            date_patterns = [
+                (r"january\s+(\d+)(?:\s*-\s*(\d+))?", (2025, 1)),
+                (r"february\s+(\d+)(?:\s*-\s*(\d+))?", (2025, 2)),
+                (r"march\s+(\d+)(?:\s*-\s*(\d+))?", (2025, 3)),
+                (r"april\s+(\d+)(?:\s*-\s*(\d+))?", (2025, 4)),
+                (r"may\s+(\d+)(?:\s*-\s*(\d+))?", (2025, 5)),
+                (r"june\s+(\d+)(?:\s*-\s*(\d+))?", (2025, 6)),
+                (r"july\s+(\d+)(?:\s*-\s*(\d+))?", (2025, 7)),
+                (r"august\s+(\d+)(?:\s*-\s*(\d+))?", (2025, 8)),
+                (r"september\s+(\d+)(?:\s*-\s*(\d+))?", (2025, 9)),
+                (r"october\s+(\d+)(?:\s*-\s*(\d+))?", (2025, 10)),
+                (r"november\s+(\d+)(?:\s*-\s*(\d+))?", (2025, 11)),
+                (r"december\s+(\d+)(?:\s*-\s*(\d+))?", (2025, 12)),
+            ]
+            
+            for pattern, (year, month) in date_patterns:
+                match = re.search(pattern, query_lower)
+                if match:
+                    day1 = int(match.group(1))
+                    day2 = int(match.group(2)) if match.group(2) else day1 + 6
+                    date_from = f"{year}-{month:02d}-{day1:02d}"
+                    date_to = f"{year}-{month:02d}-{min(day2, 31):02d}"
+                    break
+        
+        # Extract origin/destination from query
+        origin = None
+        destination = None
+        
+        # City to IATA mapping
+        city_map = {
+            "miami": "MIA", "delhi": "DEL", "mumbai": "BOM", "tokyo": "NRT",
+            "singapore": "SIN", "new york": "JFK", "nyc": "JFK",
+            "san francisco": "SFO", "sfo": "SFO", "los angeles": "LAX",
+            "chicago": "ORD", "london": "LHR", "paris": "CDG"
+        }
+        
+        # Extract "from X" and "to Y" OR "Starting city: X" and "Destination: Y"
+        from_match = re.search(r"(?:from|starting city:?)\s+(\w+)", query_lower)
+        to_match = re.search(r"(?:to|destination:?)\s+(\w+)", query_lower)
+        
+        if from_match:
+            city = from_match.group(1).strip()
+            origin = city_map.get(city, city.upper()[:3])
+        
+        if to_match:
+            city = to_match.group(1).strip()
+            destination = city_map.get(city, city.upper()[:3])
+        
+        # If this is a refinement, use previous intent
+        if is_refinement and tools._last_intent:
+            if not origin:
+                origin = tools._last_intent.get("origin")
+            if not destination:
+                destination = tools._last_intent.get("destination")
+            if not date_from:
+                date_from = tools._last_intent.get("date_from")
+            if not date_to:
+                date_to = tools._last_intent.get("date_to")
+            # Merge constraints
+            existing_constraints = tools._last_intent.get("constraints", [])
+            constraints = list(set(existing_constraints + constraints))
+        
+        # Debug logging
+        logger.info(f"Manual intent parsing: origin={origin}, destination={destination}, date_from={date_from}, date_to={date_to}, is_refinement={is_refinement}, has_last_intent={bool(tools._last_intent)}")
+        
+        # If we have enough info, call search_bundles
+        if destination or (is_refinement and tools._last_intent):
+            tool_args = {
+                "destination": destination,
+                "origin": origin,
+                "date_from": date_from,
+                "date_to": date_to,
+                "constraints": constraints if constraints else None
+            }
+            
+            logger.info(f"Manual intent parsing: calling search_bundles with {tool_args}")
+            try:
+                tool_result = await tools.search_bundles(**tool_args)
+                logger.info(f"search_bundles returned: success={tool_result.get('success')}, bundles={len(tool_result.get('bundles', []))}")
+                
+                # Generate response using Ollama
+                messages = [{"role": "system", "content": self.system_prompt}]
+                if conversation_history:
+                    messages.extend(conversation_history)
+                messages.extend([
+                    {"role": "user", "content": query},
+                    {"role": "assistant", "content": f"Tool result: {json.dumps(tool_result)}"},
+                    {"role": "user", "content": "Please summarize this result for the user in a natural, helpful way. If no flights were found, explain that and suggest alternatives."}
+                ])
+                
+                try:
+                    follow_up = ollama.chat(
+                        model=OLLAMA_MODEL,
+                        messages=messages
+                    )
+                    response_text = follow_up.get("message", {}).get("content", "Here are your results.")
+                except Exception as e:
+                    logger.error(f"Ollama follow-up error: {e}")
+                    # Fallback response if Ollama fails
+                    if tool_result.get("success"):
+                        response_text = f"I found {len(tool_result.get('bundles', []))} travel options for {origin} → {destination}."
+                    else:
+                        response_text = tool_result.get("message", "No flights or hotels found for this route.")
+                
+                return {
+                    "response": response_text,
+                    "type": "recommendations",
+                    "tool_used": "search_bundles",
+                    "data": tool_result,
+                    "bundles": tool_result.get("bundles", [])
+                }
+            except Exception as e:
+                logger.error(f"Error in search_bundles: {e}", exc_info=True)
+                # Return error response but still indicate tool was used
+                return {
+                    "response": f"Sorry, I encountered an error while searching: {str(e)}",
+                    "type": "error",
+                    "tool_used": "search_bundles",
+                    "data": {"error": str(e)},
+                    "bundles": []
+                }
+        
+        # Not enough info - ask for clarification or generate generic response
+        messages = [{"role": "system", "content": self.system_prompt}]
+        if conversation_history:
+            messages.extend(conversation_history)
+        messages.append({"role": "user", "content": query})
+        
+        response = ollama.chat(
+            model=OLLAMA_MODEL,
+            messages=messages
+        )
+        
+        return {
+            "response": response.get("message", {}).get("content", "How can I help you with travel planning?"),
+            "type": "message",
+            "tool_used": None
+        }
     
     async def _execute_tool(self, tools: MRKLTools, tool_name: str, tool_args: Dict) -> Dict:
         """Execute a tool by name"""

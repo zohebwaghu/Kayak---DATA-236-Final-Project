@@ -212,9 +212,10 @@ async def chat(request: ChatRequest):
     try:
         if CONCIERGE_AVAILABLE and concierge_agent:
             # Use the full Concierge Agent
+            # Note: process_message signature is (user_id, query, session_id)
             result = await concierge_agent.process_message(
-                query=request.query,
                 user_id=request.user_id,
+                query=request.query,
                 session_id=request.session_id
             )
         else:
@@ -231,6 +232,11 @@ async def chat(request: ChatRequest):
         bundles = result.get("bundles", [])
         changes = result.get("changes")
         parsed_intent = result.get("parsed_intent")
+        tool_used = result.get("tool_used")  # Extract tool_used for debugging
+        
+        # Log tool usage for debugging
+        if tool_used:
+            logger.info(f"Tool used: {tool_used}, bundles found: {len(bundles)}")
         
         # Generate suggestions based on response type
         suggestions = generate_suggestions(response_type, result)
@@ -252,7 +258,11 @@ async def chat(request: ChatRequest):
         )
         
     except Exception as e:
-        logger.error(f"Chat error: {e}")
+        logger.error(f"Chat error: {e}", exc_info=True)  # Include full traceback
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        
+        # Return error response (200 status with error type, not 500)
         return ChatResponse(
             response="I apologize, but I encountered an error processing your request. Please try again.",
             session_id=request.session_id,

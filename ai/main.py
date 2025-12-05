@@ -431,7 +431,11 @@ if not CHAT_AVAILABLE:
                 timestamp=datetime.utcnow().isoformat()
             )
         except Exception as e:
-            logger.error(f"Chat error: {e}")
+            logger.error(f"Chat error: {e}", exc_info=True)  # Include full traceback
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            
+            # Return error response (200 status with error type, not 500)
             return ChatResponse(
                 response="I apologize, but I encountered an error. Please try again.",
                 session_id=request.session_id,

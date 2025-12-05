@@ -7,13 +7,15 @@ Algorithm Components:
 2. Scarcity Score (0-30 points) - Based on availability/inventory
 3. Rating Bonus (0-20 points) - Based on user ratings
 4. Promotion Bonus (0-10 points) - If listing has active promotion
+5. Reliability Score (0-10 points) - Based on historical on-time performance (flights only)
 
-Total: 0-100 points
+Total: 0-100 points (can exceed 100 with reliability bonus)
 Threshold: 40+ is considered a "deal"
 """
 
-from typing import NamedTuple
+from typing import NamedTuple, Optional
 from loguru import logger
+import os
 
 
 class DealScoreBreakdown(NamedTuple):
@@ -24,6 +26,7 @@ class DealScoreBreakdown(NamedTuple):
     scarcity_score: int
     rating_score: int
     promotion_score: int
+    reliability_score: int
     total_score: int
     is_deal: bool
     
@@ -34,6 +37,7 @@ class DealScoreBreakdown(NamedTuple):
             f"scarcity={self.scarcity_score}, "
             f"rating={self.rating_score}, "
             f"promo={self.promotion_score}, "
+            f"reliability={self.reliability_score}, "
             f"is_deal={self.is_deal})"
         )
 
@@ -44,7 +48,10 @@ def calculate_deal_score(
     availability: int,
     rating: float,
     has_promotion: bool = False,
-    threshold: int = 40
+    threshold: int = 40,
+    origin: Optional[str] = None,
+    destination: Optional[str] = None,
+    airline: Optional[str] = None
 ) -> DealScoreBreakdown:
     """
     Calculate comprehensive deal score for a listing
@@ -93,10 +100,17 @@ def calculate_deal_score(
     promotion_score = 10 if has_promotion else 0
     
     # ============================================
+    # 5. Reliability Score (0-10 points) - Flights only
+    # ============================================
+    reliability_score = 0
+    if origin and destination:
+        reliability_score = _calculate_reliability_score(origin, destination, airline)
+    
+    # ============================================
     # Calculate Total Score
     # ============================================
     total_score = min(
-        price_advantage_score + scarcity_score + rating_score + promotion_score,
+        price_advantage_score + scarcity_score + rating_score + promotion_score + reliability_score,
         100
     )
     
@@ -107,6 +121,7 @@ def calculate_deal_score(
         scarcity_score=scarcity_score,
         rating_score=rating_score,
         promotion_score=promotion_score,
+        reliability_score=reliability_score,
         total_score=total_score,
         is_deal=is_deal_flag
     )
@@ -199,6 +214,69 @@ def _calculate_rating_score(rating: float) -> int:
         return 10
     else:
         return 0
+
+
+def _calculate_reliability_score(origin: str, destination: str, airline: Optional[str] = None) -> int:
+    """
+    Calculate reliability score (0-10 points) based on historical on-time performance
+    
+    Logic:
+    - 95%+ on-time: 10 points (excellent)
+    - 85-95% on-time: 7 points (good)
+    - 75-85% on-time: 5 points (fair)
+    - <75% on-time: 0 points (poor)
+    - No data: 5 points (neutral)
+    
+    Args:
+        origin: Origin airport code (e.g., "SFO")
+        destination: Destination airport code (e.g., "MIA")
+        airline: Airline code (optional, for airline-specific reliability)
+    
+    Returns:
+        int: Reliability score (0-10)
+    """
+    try:
+        from pymongo import MongoClient
+        
+        mongo_uri = os.getenv("MONGO_URI", "mongodb://localhost:27017")
+        mongo_db = os.getenv("MONGO_DB", "kayak_doc")
+        
+        client = MongoClient(mongo_uri)
+        db = client[mongo_db]
+        
+        # Query route reliability
+        query = {
+            "origin": origin.upper(),
+            "destination": destination.upper()
+        }
+        
+        reliability = db.route_reliability.find_one(query)
+        
+        if reliability:
+            on_time_pct = reliability.get("on_time_percentage", 70.0)
+            
+            # If airline-specific data available, use it
+            if airline and "airline_scores" in reliability:
+                airline_scores = reliability.get("airline_scores", {})
+                if airline in airline_scores:
+                    on_time_pct = airline_scores[airline].get("on_time_pct", on_time_pct)
+            
+            # Convert percentage to score
+            if on_time_pct >= 95:
+                return 10
+            elif on_time_pct >= 85:
+                return 7
+            elif on_time_pct >= 75:
+                return 5
+            else:
+                return 0
+        else:
+            # No data available - return neutral score
+            return 5
+    
+    except Exception as e:
+        logger.debug(f"Could not calculate reliability score: {e}")
+        return 5  # Neutral score if lookup fails
 
 
 def is_deal(
