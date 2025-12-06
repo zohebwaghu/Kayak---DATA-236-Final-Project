@@ -1,0 +1,161 @@
+/* kayak-design-tokens.css
+ * CSS Custom Properties / Design Tokens
+ * Import at the top of your global CSS file
+ *
+ * Confidence levels:
+ * ✓ CONFIRMED - From official Kayak brand resources
+ * ~ ESTIMATED - Based on visual analysis and travel UI patterns
+ */
+
+:root {
+  /* ============================================
+     COLORS - BRAND
+     ============================================ */
+  /* ✓ Primary orange - CONFIRMED from brand resources */
+  --color-brand-primary: #FF6A06;
+  --color-brand-primary-hover: #E55D00;
+  --color-brand-primary-light: #FFF4ED;
+
+  /* ============================================
+     COLORS - BACKGROUNDS
+     ============================================ */
+  --color-bg-page: #FFFFFF;
+  --color-bg-secondary: #F5F5F5;
+  --color-bg-hero: #1A1A2E;
+  --color-bg-hero-dark: #0F0F1A;
+  --color-bg-notification: #2D2D2D;
+
+  /* ============================================
+     COLORS - TEXT
+     ============================================ */
+  --color-text-primary: #1A1A1A;
+  --color-text-secondary: #6B6B6B;
+  --color-text-muted: #9B9B9B;
+  --color-text-inverse: #FFFFFF;
+  --color-text-link: #0066CC;
+
+  /* ============================================
+     COLORS - BORDERS
+     ============================================ */
+  --color-border-default: #E0E0E0;
+  --color-border-light: #F0F0F0;
+  --color-border-focus: #FF6A06;
+
+  /* ============================================
+     COLORS - STATUS / SEMANTIC
+     ============================================ */
+  --color-success: #00A651;
+  --color-success-light: #E6F7ED;
+  --color-info: #0066CC;
+  --color-info-light: #E6F0FA;
+  --color-warning: #F5A623;
+  --color-error: #D0021B;
+
+  /* ============================================
+     COLORS - FLIGHT BADGES
+     ============================================ */
+  --color-badge-best-bg: #E6F7ED;
+  --color-badge-best-text: #00A651;
+  --color-badge-value-bg: #F5F5F5;
+  --color-badge-value-text: #6B6B6B;
+  --color-badge-fastest-bg: #E6F0FA;
+  --color-badge-fastest-text: #0066CC;
+
+  /* ============================================
+     TYPOGRAPHY
+     ============================================ */
+  /* Note: Kayak uses custom 'KAYAK' font. These are fallbacks. */
+  --font-family-primary: 'Circular', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-family-mono: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+
+  /* Font Weights */
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* Font Sizes */
+  --font-size-xs: 12px;
+  --font-size-sm: 14px;
+  --font-size-base: 16px;
+  --font-size-lg: 18px;
+  --font-size-xl: 20px;
+  --font-size-2xl: 24px;
+  --font-size-3xl: 32px;
+  --font-size-4xl: 40px;
+  --font-size-hero: 48px;
+
+  /* Line Heights */
+  --line-height-tight: 1.2;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.75;
+
+  /* ============================================
+     SPACING
+     ============================================ */
+  --spacing-1: 4px;
+  --spacing-2: 8px;
+  --spacing-3: 12px;
+  --spacing-4: 16px;
+  --spacing-5: 20px;
+  --spacing-6: 24px;
+  --spacing-8: 32px;
+  --spacing-10: 40px;
+  --spacing-12: 48px;
+  --spacing-16: 64px;
+  --spacing-20: 80px;
+
+  /* Layout-specific spacing */
+  --container-max-width: 1200px;
+  --container-padding: 24px;
+  --section-gap: 64px;
+  --card-padding: 24px;
+
+  /* ============================================
+     BORDER RADIUS
+     ============================================ */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-pill: 9999px;
+
+  /* Component-specific */
+  --radius-button: 8px;
+  --radius-card: 12px;
+  --radius-search-form: 16px;
+  --radius-input: 8px;
+
+  /* ============================================
+     SHADOWS
+     ============================================ */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.12);
+  --shadow-xl: 0 8px 32px rgba(0, 0, 0, 0.16);
+
+  /* Component-specific */
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-card-hover: 0 4px 16px rgba(0, 0, 0, 0.12);
+  --shadow-search-form: 0 4px 24px rgba(0, 0, 0, 0.1);
+
+  /* ============================================
+     TRANSITIONS
+     ============================================ */
+  --transition-fast: 150ms ease;
+  --transition-normal: 250ms ease;
+  --transition-slow: 350ms ease;
+
+  /* ============================================
+     Z-INDEX SCALE
+     ============================================ */
+  --z-dropdown: 100;
+  --z-modal: 200;
+  --z-tooltip: 300;
+  --z-navbar: 1000;
+
+  /* ============================================
+     COMPONENT DIMENSIONS
+     ============================================ */
+  --navbar-height: 64px;
+}

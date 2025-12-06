@@ -1,0 +1,567 @@
+/* src/pages/bookings/PaymentPage.css - Using Kayak Design Tokens */
+
+.kayak-payment-page {
+  min-height: 100vh;
+  background: var(--color-bg-secondary);
+}
+
+/* Header */
+.kayak-payment-hero {
+  background: var(--color-bg-page);
+  padding: var(--card-padding);
+  border-bottom: 1px solid var(--color-border-default);
+}
+
+.kayak-payment-hero::before {
+  display: none;
+}
+
+.kayak-payment-hero-content {
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.kayak-payment-hero-steps {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+  margin-bottom: var(--spacing-3);
+}
+
+.kayak-payment-step {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.kayak-payment-step.active {
+  color: var(--color-brand-primary);
+}
+
+.kayak-payment-step.completed {
+  color: var(--color-success);
+}
+
+.kayak-payment-step-num {
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.kayak-payment-step.active .kayak-payment-step-num {
+  background: var(--color-brand-primary);
+  color: var(--color-text-inverse);
+}
+
+.kayak-payment-step.completed .kayak-payment-step-num {
+  background: var(--color-success);
+  color: var(--color-text-inverse);
+}
+
+.kayak-payment-step-divider {
+  width: 32px;
+  height: 2px;
+  background: var(--color-border-default);
+}
+
+.kayak-payment-title {
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+/* Container */
+.kayak-payment-container {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: var(--card-padding);
+}
+
+/* Layout */
+.kayak-payment-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--card-padding);
+}
+
+/* Responsive - moved to bottom */
+
+/* Summary Card */
+.kayak-payment-summary {
+  background: var(--color-bg-page);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-default);
+  overflow: hidden;
+}
+
+.kayak-payment-summary-header {
+  padding: var(--spacing-5);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.kayak-payment-type-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  padding: var(--spacing-1) var(--spacing-2);
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  margin-bottom: var(--spacing-2);
+}
+
+.kayak-payment-type-badge.flight {
+  background: var(--color-info-light);
+  color: var(--color-info);
+}
+
+.kayak-payment-type-badge.hotel {
+  background: var(--color-success-light);
+  color: var(--color-success);
+}
+
+.kayak-payment-type-badge.car {
+  background: rgba(139, 92, 246, 0.1);
+  color: #8b5cf6;
+}
+
+.kayak-payment-trip-title {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  margin: 0 0 2px;
+}
+
+.kayak-payment-trip-subtitle {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+.kayak-payment-summary-body {
+  padding: var(--spacing-5);
+}
+
+.kayak-payment-meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+  margin-bottom: var(--spacing-5);
+}
+
+.kayak-payment-meta-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.kayak-payment-meta-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.kayak-payment-meta-icon svg {
+  width: 16px;
+  height: 16px;
+  stroke: var(--color-text-secondary);
+}
+
+.kayak-payment-price-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding-top: var(--spacing-4);
+  border-top: 1px solid var(--color-border-light);
+}
+
+.kayak-payment-price-label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.kayak-payment-price-value {
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+
+.kayak-payment-price-value span {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+}
+
+.kayak-payment-back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  margin-top: var(--spacing-4);
+  padding: 0;
+  background: none;
+  border: none;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-brand-primary);
+  cursor: pointer;
+}
+
+.kayak-payment-back-link:hover {
+  color: var(--color-brand-primary-hover);
+}
+
+/* Payment Form Card */
+.kayak-payment-form-card {
+  background: var(--color-bg-page);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-default);
+  overflow: hidden;
+}
+
+.kayak-payment-form-header {
+  padding: var(--spacing-5);
+  border-bottom: 1px solid var(--color-border-light);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+}
+
+.kayak-payment-lock-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-pill);
+  background: var(--color-success-light);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.kayak-payment-lock-icon svg {
+  width: 18px;
+  height: 18px;
+  stroke: var(--color-success);
+}
+
+.kayak-payment-form-header-text h2 {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.kayak-payment-form-header-text p {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+.kayak-payment-form-body {
+  padding: var(--spacing-5);
+}
+
+.kayak-payment-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-4);
+}
+
+.kayak-payment-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+}
+
+.kayak-payment-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--spacing-3);
+}
+
+/* Responsive - moved to bottom */
+
+.kayak-payment-label {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+}
+
+.kayak-payment-input {
+  width: 100%;
+  padding: var(--spacing-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  background: var(--color-bg-page);
+}
+
+.kayak-payment-input:focus {
+  outline: none;
+  border-color: var(--color-border-focus);
+}
+
+.kayak-payment-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.kayak-payment-textarea {
+  width: 100%;
+  padding: var(--spacing-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  background: var(--color-bg-page);
+  resize: vertical;
+  min-height: 70px;
+}
+
+.kayak-payment-textarea:focus {
+  outline: none;
+  border-color: var(--color-border-focus);
+}
+
+.kayak-payment-submit {
+  width: 100%;
+  padding: var(--spacing-3) var(--spacing-5);
+  background: var(--color-brand-primary);
+  color: var(--color-text-inverse);
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-2);
+  margin-top: var(--spacing-1);
+}
+
+.kayak-payment-submit:hover {
+  background: var(--color-brand-primary-hover);
+}
+
+.kayak-payment-submit:disabled {
+  background: var(--color-border-default);
+  cursor: not-allowed;
+}
+
+.kayak-payment-submit svg {
+  width: 18px;
+  height: 18px;
+}
+
+.kayak-payment-secure-note {
+  text-align: center;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-1);
+}
+
+.kayak-payment-secure-note svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Error */
+.kayak-payment-error {
+  padding: var(--spacing-3);
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: var(--radius-sm);
+  color: var(--color-error);
+  font-size: var(--font-size-xs);
+}
+
+/* Empty State */
+.kayak-payment-empty {
+  text-align: center;
+  padding: var(--spacing-12) var(--card-padding);
+  background: var(--color-bg-page);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-default);
+  max-width: 400px;
+  margin: 0 auto;
+}
+
+.kayak-payment-empty-icon {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto var(--spacing-4);
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-pill);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-size-3xl);
+}
+
+.kayak-payment-empty-title {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  margin: 0 0 var(--spacing-2);
+}
+
+.kayak-payment-empty-text {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin: 0 0 var(--spacing-5);
+}
+
+.kayak-payment-empty-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-3) var(--spacing-5);
+  background: var(--color-brand-primary);
+  color: var(--color-text-inverse);
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+}
+
+.kayak-payment-empty-btn:hover {
+  background: var(--color-brand-primary-hover);
+}
+
+/* Card Icons */
+.kayak-card-icons {
+  display: flex;
+  gap: var(--spacing-2);
+  margin-bottom: var(--spacing-3);
+}
+
+.kayak-card-icon {
+  width: 36px;
+  height: 24px;
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-secondary);
+}
+
+/* ============================================
+   Responsive Styles
+   ============================================ */
+
+/* 1024px - Small desktops */
+@media (max-width: 1024px) {
+  .kayak-payment-layout {
+    grid-template-columns: 1fr;
+    gap: var(--spacing-5);
+  }
+
+  .kayak-payment-summary {
+    order: -1; /* Show summary first on mobile */
+  }
+}
+
+/* 768px - Tablets */
+@media (max-width: 768px) {
+  .kayak-payment-hero {
+    padding: var(--spacing-4);
+  }
+
+  .kayak-payment-title {
+    font-size: var(--font-size-xl);
+  }
+
+  .kayak-payment-hero-steps {
+    display: none;
+  }
+
+  .kayak-payment-container {
+    padding: var(--spacing-4);
+  }
+
+  .kayak-payment-summary-header,
+  .kayak-payment-summary-body,
+  .kayak-payment-form-header,
+  .kayak-payment-form-body {
+    padding: var(--spacing-4);
+  }
+
+  .kayak-payment-price-value {
+    font-size: var(--font-size-xl);
+  }
+}
+
+/* 480px - Small phones */
+@media (max-width: 480px) {
+  .kayak-payment-hero {
+    padding: var(--spacing-3);
+  }
+
+  .kayak-payment-title {
+    font-size: var(--font-size-lg);
+  }
+
+  .kayak-payment-container {
+    padding: var(--spacing-3);
+  }
+
+  .kayak-payment-row {
+    grid-template-columns: 1fr;
+  }
+
+  .kayak-payment-summary-header,
+  .kayak-payment-summary-body,
+  .kayak-payment-form-header,
+  .kayak-payment-form-body {
+    padding: var(--spacing-3);
+  }
+
+  .kayak-payment-input,
+  .kayak-payment-textarea {
+    padding: var(--spacing-3);
+    font-size: 16px; /* Prevents iOS zoom */
+  }
+
+  .kayak-payment-submit {
+    padding: var(--spacing-4);
+    min-height: 48px;
+  }
+
+  .kayak-payment-meta-item {
+    flex-wrap: wrap;
+  }
+
+  .kayak-payment-empty {
+    padding: var(--spacing-8) var(--spacing-4);
+  }
+
+  .kayak-card-icons {
+    flex-wrap: wrap;
+  }
+}
