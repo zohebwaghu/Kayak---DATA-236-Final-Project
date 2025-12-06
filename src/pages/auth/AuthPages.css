@@ -1,0 +1,352 @@
+/* AuthPages.css - Using Kayak Design Tokens */
+
+.kayak-auth-page {
+  min-height: 100vh;
+  background: var(--color-bg-secondary);
+  display: flex;
+}
+
+/* Main Content */
+.kayak-auth-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-10) var(--spacing-5);
+}
+
+/* Auth Card */
+.kayak-auth-card {
+  width: 100%;
+  max-width: 440px;
+  background: var(--color-bg-page);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-default);
+  padding: var(--card-padding);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Wide card for signup with more fields */
+.kayak-auth-card-wide {
+  max-width: 540px;
+}
+
+/* Headline */
+.kayak-auth-headline {
+  font-size: var(--font-size-3xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  line-height: var(--line-height-tight);
+  margin: 0 0 var(--spacing-4);
+}
+
+.kayak-auth-dot {
+  color: var(--color-brand-primary);
+}
+
+/* Benefits */
+.kayak-auth-benefits-intro {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin: 0 0 var(--spacing-3);
+}
+
+.kayak-auth-benefits {
+  margin: 0 0 var(--spacing-5);
+  padding: 0 0 0 20px;
+  list-style: disc;
+}
+
+.kayak-auth-benefits li {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  margin-bottom: var(--spacing-1);
+}
+
+/* Alert */
+.kayak-auth-alert {
+  padding: var(--spacing-3) var(--spacing-4);
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: var(--radius-sm);
+  color: var(--color-error);
+  font-size: var(--font-size-sm);
+  margin-bottom: var(--spacing-4);
+}
+
+/* Social Buttons */
+.kayak-auth-social-buttons {
+  display: flex;
+  gap: var(--spacing-3);
+  margin-bottom: var(--spacing-4);
+}
+
+.kayak-auth-social-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-3) var(--spacing-4);
+  background: var(--color-bg-page);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.kayak-auth-social-btn:hover:not(:disabled) {
+  background: var(--color-bg-secondary);
+  border-color: var(--color-border-default);
+}
+
+.kayak-auth-social-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Divider */
+.kayak-auth-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-4);
+  margin-bottom: var(--spacing-4);
+}
+
+.kayak-auth-divider::before,
+.kayak-auth-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--color-border-default);
+}
+
+.kayak-auth-divider span {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+/* Email Button */
+.kayak-auth-email-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-3) var(--spacing-4);
+  background: var(--color-bg-page);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.kayak-auth-email-btn:hover {
+  background: var(--color-bg-secondary);
+  border-color: var(--color-border-default);
+}
+
+.kayak-auth-email-btn svg {
+  stroke: var(--color-text-secondary);
+}
+
+/* Form */
+.kayak-auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-4);
+}
+
+.kayak-auth-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+}
+
+.kayak-auth-label {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+}
+
+.kayak-auth-input {
+  width: 100%;
+  padding: var(--spacing-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  transition: border-color var(--transition-fast);
+}
+
+.kayak-auth-input:focus {
+  outline: none;
+  border-color: var(--color-brand-primary);
+}
+
+.kayak-auth-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+/* Submit Button */
+.kayak-auth-submit-btn {
+  width: 100%;
+  padding: var(--spacing-3) var(--spacing-4);
+  background: var(--color-brand-primary);
+  color: var(--color-text-inverse);
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.kayak-auth-submit-btn:hover {
+  background: var(--color-brand-primary-hover);
+}
+
+.kayak-auth-submit-btn:disabled {
+  background: var(--color-border-default);
+  cursor: not-allowed;
+}
+
+/* Back Button */
+.kayak-auth-back-btn {
+  width: 100%;
+  padding: var(--spacing-2);
+  background: none;
+  border: none;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-brand-primary);
+  cursor: pointer;
+}
+
+.kayak-auth-back-btn:hover {
+  text-decoration: underline;
+}
+
+/* Terms */
+.kayak-auth-terms {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  margin: var(--spacing-5) 0 0;
+  text-align: center;
+}
+
+.kayak-auth-terms a {
+  color: var(--color-info);
+  text-decoration: none;
+}
+
+.kayak-auth-terms a:hover {
+  text-decoration: underline;
+}
+
+/* Footer */
+.kayak-auth-footer {
+  margin-top: var(--spacing-5);
+  padding-top: var(--spacing-5);
+  border-top: 1px solid var(--color-border-default);
+  text-align: center;
+}
+
+.kayak-auth-footer p {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+.kayak-auth-link {
+  color: var(--color-brand-primary);
+  font-weight: var(--font-weight-semibold);
+  text-decoration: none;
+}
+
+.kayak-auth-link:hover {
+  text-decoration: underline;
+}
+
+/* ============================================
+   Responsive Styles
+   ============================================ */
+
+/* 768px - Tablets */
+@media (max-width: 768px) {
+  .kayak-auth-main {
+    padding: var(--spacing-5) var(--spacing-4);
+  }
+
+  .kayak-auth-card {
+    padding: var(--spacing-5);
+  }
+
+  .kayak-auth-card-wide {
+    max-width: 100%;
+  }
+
+  .kayak-auth-headline {
+    font-size: var(--font-size-2xl);
+  }
+
+  .kayak-auth-social-buttons {
+    flex-direction: column;
+  }
+}
+
+/* 480px - Small phones */
+@media (max-width: 480px) {
+  .kayak-auth-main {
+    padding: var(--spacing-4) var(--spacing-3);
+    align-items: flex-start;
+  }
+
+  .kayak-auth-card {
+    padding: var(--spacing-4);
+    border-radius: var(--radius-sm);
+  }
+
+  .kayak-auth-headline {
+    font-size: var(--font-size-xl);
+  }
+
+  .kayak-auth-benefits {
+    margin-bottom: var(--spacing-4);
+  }
+
+  .kayak-auth-benefits li {
+    font-size: var(--font-size-xs);
+  }
+
+  .kayak-auth-input {
+    padding: var(--spacing-3);
+    font-size: 16px; /* Prevents iOS zoom */
+  }
+
+  .kayak-auth-social-btn {
+    padding: var(--spacing-3);
+    min-height: 48px;
+  }
+
+  .kayak-auth-submit-btn {
+    padding: var(--spacing-4);
+    min-height: 48px;
+  }
+
+  .kayak-auth-email-btn {
+    padding: var(--spacing-3);
+    min-height: 48px;
+  }
+
+  .kayak-auth-alert {
+    padding: var(--spacing-2) var(--spacing-3);
+    font-size: var(--font-size-xs);
+  }
+}

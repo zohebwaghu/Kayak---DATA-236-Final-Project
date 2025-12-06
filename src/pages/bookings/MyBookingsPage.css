@@ -1,0 +1,627 @@
+/* src/pages/bookings/MyBookingsPage.css - Using Kayak Design Tokens */
+
+.kayak-trips-page {
+  min-height: 100vh;
+  background: var(--color-bg-secondary);
+}
+
+/* Header */
+.kayak-trips-hero {
+  background: var(--color-bg-page);
+  padding: var(--card-padding);
+  border-bottom: 1px solid var(--color-border-default);
+}
+
+.kayak-trips-hero::before {
+  display: none;
+}
+
+.kayak-trips-hero-content {
+  max-width: var(--container-max-width);
+  margin: 0 auto;
+}
+
+.kayak-trips-greeting {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  margin-bottom: var(--spacing-1);
+}
+
+.kayak-trips-title {
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+/* Container */
+.kayak-trips-container {
+  max-width: var(--container-max-width);
+  margin: 0 auto;
+  padding: var(--card-padding);
+}
+
+/* Tabs */
+.kayak-trips-tabs {
+  display: flex;
+  gap: var(--spacing-2);
+  margin-bottom: var(--spacing-4);
+  flex-wrap: wrap;
+}
+
+.kayak-trips-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-2) var(--spacing-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-page);
+  cursor: pointer;
+}
+
+.kayak-trips-tab:hover {
+  border-color: var(--color-border-default);
+  background: var(--color-bg-secondary);
+}
+
+.kayak-trips-tab.active {
+  background: var(--color-text-primary);
+  border-color: var(--color-text-primary);
+  color: var(--color-text-inverse);
+}
+
+.kayak-trips-tab-icon {
+  font-size: var(--font-size-base);
+}
+
+/* Filters */
+.kayak-trips-filters {
+  display: flex;
+  gap: var(--spacing-2);
+  margin-bottom: var(--spacing-6);
+  flex-wrap: wrap;
+}
+
+.kayak-trips-filter {
+  padding: var(--spacing-2) var(--spacing-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-page);
+  cursor: pointer;
+}
+
+.kayak-trips-filter:hover {
+  border-color: var(--color-border-default);
+}
+
+.kayak-trips-filter.active {
+  border-color: var(--color-brand-primary);
+  color: var(--color-brand-primary);
+  background: var(--color-brand-primary-light);
+}
+
+/* Grid */
+.kayak-trips-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: var(--spacing-4);
+  margin-bottom: var(--spacing-6);
+}
+
+/* Responsive moved to bottom */
+
+/* Trip Card */
+.kayak-trip-card {
+  background: var(--color-bg-page);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-default);
+  overflow: hidden;
+}
+
+.kayak-trip-card:hover {
+  box-shadow: var(--shadow-md);
+}
+
+.kayak-trip-card-header {
+  padding: var(--spacing-4) var(--spacing-4) 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.kayak-trip-type-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  padding: var(--spacing-1) var(--spacing-2);
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+}
+
+.kayak-trip-type-badge.flight {
+  background: var(--color-info-light);
+  color: var(--color-info);
+}
+
+.kayak-trip-type-badge.hotel {
+  background: var(--color-success-light);
+  color: var(--color-success);
+}
+
+.kayak-trip-type-badge.car {
+  background: rgba(139, 92, 246, 0.1);
+  color: #8b5cf6;
+}
+
+.kayak-trip-status {
+  padding: var(--spacing-1) var(--spacing-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+}
+
+.kayak-trip-status.confirmed {
+  background: var(--color-success-light);
+  color: var(--color-success);
+}
+
+.kayak-trip-status.pending {
+  background: rgba(245, 158, 11, 0.1);
+  color: var(--color-warning);
+}
+
+.kayak-trip-status.cancelled {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--color-error);
+}
+
+.kayak-trip-card-body {
+  padding: var(--spacing-3) var(--spacing-4) var(--spacing-4);
+}
+
+.kayak-trip-title {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  margin: 0 0 2px;
+}
+
+.kayak-trip-subtitle {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  margin: 0 0 var(--spacing-3);
+}
+
+.kayak-trip-details {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+  padding-top: var(--spacing-3);
+  border-top: 1px solid var(--color-border-light);
+}
+
+.kayak-trip-detail {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.kayak-trip-detail-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.kayak-trip-detail-icon svg {
+  width: 14px;
+  height: 14px;
+  stroke: var(--color-text-secondary);
+}
+
+.kayak-trip-detail-label {
+  color: var(--color-text-muted);
+  min-width: 45px;
+}
+
+.kayak-trip-detail-value {
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.kayak-trip-price {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  margin-top: var(--spacing-3);
+}
+
+.kayak-trip-price-label {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  margin-left: var(--spacing-1);
+}
+
+.kayak-trip-card-footer {
+  padding: var(--spacing-3) var(--spacing-4);
+  background: var(--color-bg-secondary);
+  border-top: 1px solid var(--color-border-light);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.kayak-trip-id {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  font-family: var(--font-family-mono);
+}
+
+.kayak-trip-receipt-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  padding: var(--spacing-2) var(--spacing-3);
+  background: var(--color-bg-page);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.kayak-trip-receipt-btn:hover {
+  background: var(--color-bg-secondary);
+  border-color: var(--color-border-default);
+}
+
+.kayak-trip-receipt-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Empty State */
+.kayak-trips-empty {
+  text-align: center;
+  padding: var(--spacing-12) var(--card-padding);
+  background: var(--color-bg-page);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-default);
+}
+
+.kayak-trips-empty-icon {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto var(--spacing-4);
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-pill);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-size-3xl);
+}
+
+.kayak-trips-empty-title {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  margin: 0 0 var(--spacing-2);
+}
+
+.kayak-trips-empty-text {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin: 0 0 var(--spacing-5);
+  max-width: 360px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.kayak-trips-search-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-3) var(--spacing-5);
+  background: var(--color-brand-primary);
+  color: var(--color-text-inverse);
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+}
+
+.kayak-trips-search-btn:hover {
+  background: var(--color-brand-primary-hover);
+}
+
+/* Loading & Error */
+.kayak-trips-loading {
+  text-align: center;
+  padding: var(--spacing-12) var(--card-padding);
+}
+
+.kayak-trips-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--color-border-default);
+  border-top-color: var(--color-brand-primary);
+  border-radius: var(--radius-pill);
+  animation: tripsSpin 0.8s linear infinite;
+  margin: 0 auto var(--spacing-3);
+}
+
+@keyframes tripsSpin {
+  to { transform: rotate(360deg); }
+}
+
+.kayak-trips-loading-text {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.kayak-trips-error {
+  padding: var(--spacing-3) var(--spacing-4);
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: var(--radius-md);
+  color: var(--color-error);
+  font-size: var(--font-size-sm);
+  margin-bottom: var(--spacing-4);
+}
+
+/* Invoice Modal */
+.kayak-invoice-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: var(--z-modal);
+  padding: var(--card-padding);
+}
+
+.kayak-invoice-modal {
+  background: var(--color-bg-page);
+  border-radius: var(--radius-lg);
+  width: 100%;
+  max-width: 480px;
+  box-shadow: var(--shadow-xl);
+  overflow: hidden;
+}
+
+.kayak-invoice-header {
+  padding: var(--spacing-4) var(--spacing-5);
+  border-bottom: 1px solid var(--color-border-light);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.kayak-invoice-title {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.kayak-invoice-close {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-pill);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-base);
+}
+
+.kayak-invoice-close:hover {
+  background: var(--color-border-default);
+}
+
+.kayak-invoice-body {
+  padding: var(--spacing-5);
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.kayak-invoice-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+}
+
+.kayak-invoice-item {
+  padding: var(--spacing-3);
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-light);
+}
+
+.kayak-invoice-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--spacing-1) 0;
+}
+
+.kayak-invoice-row:not(:last-child) {
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.kayak-invoice-label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.kayak-invoice-value {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.kayak-invoice-empty {
+  text-align: center;
+  padding: var(--spacing-6);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.kayak-invoice-footer {
+  padding: var(--spacing-3) var(--spacing-5);
+  border-top: 1px solid var(--color-border-light);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.kayak-invoice-close-btn {
+  padding: var(--spacing-2) var(--spacing-4);
+  background: var(--color-bg-secondary);
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.kayak-invoice-close-btn:hover {
+  background: var(--color-border-default);
+}
+
+/* ============================================
+   Responsive Styles
+   ============================================ */
+
+/* 768px - Tablets */
+@media (max-width: 768px) {
+  .kayak-trips-hero {
+    padding: var(--spacing-4);
+  }
+
+  .kayak-trips-title {
+    font-size: var(--font-size-xl);
+  }
+
+  .kayak-trips-container {
+    padding: var(--spacing-4);
+  }
+
+  .kayak-trips-tabs {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: var(--spacing-2);
+  }
+
+  .kayak-trips-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .kayak-trips-tab {
+    flex-shrink: 0;
+  }
+
+  .kayak-trips-filters {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .kayak-trips-filter {
+    flex-shrink: 0;
+  }
+
+  .kayak-invoice-modal {
+    max-width: 100%;
+    margin: var(--spacing-3);
+  }
+}
+
+/* 480px - Small phones */
+@media (max-width: 480px) {
+  .kayak-trips-hero {
+    padding: var(--spacing-3);
+  }
+
+  .kayak-trips-title {
+    font-size: var(--font-size-lg);
+  }
+
+  .kayak-trips-container {
+    padding: var(--spacing-3);
+  }
+
+  .kayak-trips-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .kayak-trip-card-header {
+    padding: var(--spacing-3) var(--spacing-3) 0;
+    flex-wrap: wrap;
+    gap: var(--spacing-2);
+  }
+
+  .kayak-trip-card-body {
+    padding: var(--spacing-3);
+  }
+
+  .kayak-trip-card-footer {
+    padding: var(--spacing-3);
+    flex-direction: column;
+    gap: var(--spacing-2);
+    align-items: flex-start;
+  }
+
+  .kayak-trip-receipt-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .kayak-trips-empty {
+    padding: var(--spacing-8) var(--spacing-4);
+  }
+
+  .kayak-trips-search-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .kayak-invoice-backdrop {
+    padding: var(--spacing-3);
+  }
+
+  .kayak-invoice-header,
+  .kayak-invoice-body,
+  .kayak-invoice-footer {
+    padding: var(--spacing-3);
+  }
+}

@@ -1,0 +1,593 @@
+/* src/pages/user/ProfilePage.css - Using Kayak Design Tokens */
+
+.kayak-profile-page {
+  min-height: 100vh;
+  background: var(--color-bg-secondary);
+}
+
+/* Header */
+.kayak-profile-hero {
+  background: var(--color-bg-page);
+  padding: var(--card-padding);
+  border-bottom: 1px solid var(--color-border-default);
+}
+
+.kayak-profile-hero::before {
+  display: none;
+}
+
+.kayak-profile-hero-content {
+  max-width: 800px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-4);
+}
+
+.kayak-profile-avatar-large {
+  width: 64px;
+  height: 64px;
+  border-radius: var(--radius-pill);
+  background: var(--color-brand-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-inverse);
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.kayak-profile-avatar-large img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.kayak-profile-hero-info {
+  flex: 1;
+}
+
+.kayak-profile-name {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  margin: 0 0 2px;
+}
+
+.kayak-profile-email {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+/* Container */
+.kayak-profile-container {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: var(--card-padding);
+}
+
+/* Tabs */
+.kayak-profile-tabs {
+  display: flex;
+  gap: var(--spacing-1);
+  margin-bottom: var(--spacing-5);
+  padding: var(--spacing-1);
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  width: fit-content;
+}
+
+.kayak-profile-tab {
+  padding: var(--spacing-2) var(--spacing-4);
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.kayak-profile-tab:hover {
+  color: var(--color-text-primary);
+}
+
+.kayak-profile-tab.active {
+  background: var(--color-bg-page);
+  color: var(--color-text-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Profile Card */
+.kayak-profile-card {
+  background: var(--color-bg-page);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-default);
+  overflow: hidden;
+}
+
+.kayak-profile-card-body {
+  padding: var(--card-padding);
+}
+
+/* Sections */
+.kayak-profile-section {
+  margin-bottom: var(--spacing-6);
+}
+
+.kayak-profile-section:last-child {
+  margin-bottom: 0;
+}
+
+.kayak-profile-section-title {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  margin: 0 0 var(--spacing-3);
+  padding-bottom: var(--spacing-3);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+/* Form Grid */
+.kayak-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--spacing-4);
+}
+
+.kayak-profile-grid.full-width {
+  grid-template-columns: 1fr;
+}
+
+/* Responsive moved to bottom */
+
+.kayak-profile-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+}
+
+.kayak-profile-field.span-2 {
+  grid-column: span 2;
+}
+
+/* Responsive moved to bottom */
+
+.kayak-profile-label {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+}
+
+.kayak-profile-input {
+  width: 100%;
+  padding: var(--spacing-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  background: var(--color-bg-page);
+}
+
+.kayak-profile-input:focus {
+  outline: none;
+  border-color: var(--color-border-focus);
+}
+
+.kayak-profile-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.kayak-profile-select {
+  width: 100%;
+  padding: var(--spacing-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  background: var(--color-bg-page);
+  cursor: pointer;
+}
+
+.kayak-profile-select:focus {
+  outline: none;
+  border-color: var(--color-border-focus);
+}
+
+/* Read-only value display */
+.kayak-profile-value {
+  padding: var(--spacing-3);
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-light);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+}
+
+.kayak-profile-value.muted {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+/* Avatar Upload */
+.kayak-profile-avatar-section {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+  margin-top: var(--spacing-3);
+  padding-top: var(--spacing-3);
+  border-top: 1px solid var(--color-border-light);
+}
+
+.kayak-profile-avatar-preview {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-pill);
+  background: var(--color-brand-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-inverse);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.kayak-profile-avatar-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.kayak-profile-avatar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-2);
+  align-items: center;
+}
+
+.kayak-profile-avatar-btn {
+  padding: var(--spacing-2) var(--spacing-3);
+  border: 1px solid var(--color-border-default);
+  background: var(--color-bg-page);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.kayak-profile-avatar-btn:hover {
+  background: var(--color-bg-secondary);
+  border-color: var(--color-border-default);
+}
+
+.kayak-profile-avatar-btn.remove {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: var(--color-error);
+}
+
+.kayak-profile-avatar-btn.remove:hover {
+  background: #fee2e2;
+}
+
+.kayak-profile-avatar-help {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+/* Footer & Timestamps */
+.kayak-profile-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: var(--spacing-5);
+  margin-top: var(--spacing-5);
+  border-top: 1px solid var(--color-border-light);
+}
+
+.kayak-profile-timestamps {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.kayak-profile-actions {
+  display: flex;
+  gap: var(--spacing-2);
+}
+
+/* Buttons */
+.kayak-profile-btn {
+  padding: var(--spacing-3) var(--spacing-4);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2);
+}
+
+.kayak-profile-btn-primary {
+  background: var(--color-brand-primary);
+  color: var(--color-text-inverse);
+  border: none;
+}
+
+.kayak-profile-btn-primary:hover {
+  background: var(--color-brand-primary-hover);
+}
+
+.kayak-profile-btn-primary:disabled {
+  background: var(--color-border-default);
+  cursor: not-allowed;
+}
+
+.kayak-profile-btn-secondary {
+  background: var(--color-bg-page);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border-default);
+}
+
+.kayak-profile-btn-secondary:hover {
+  background: var(--color-bg-secondary);
+  border-color: var(--color-border-default);
+}
+
+.kayak-profile-btn-outline {
+  background: transparent;
+  color: var(--color-brand-primary);
+  border: 1px solid var(--color-brand-primary);
+}
+
+.kayak-profile-btn-outline:hover {
+  background: var(--color-brand-primary-light);
+}
+
+/* Alerts */
+.kayak-profile-alert {
+  padding: var(--spacing-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  margin-bottom: var(--spacing-4);
+}
+
+.kayak-profile-alert-success {
+  background: var(--color-success-light);
+  color: var(--color-success);
+  border: 1px solid #bbf7d0;
+}
+
+.kayak-profile-alert-error {
+  background: #fef2f2;
+  color: var(--color-error);
+  border: 1px solid #fecaca;
+}
+
+/* Loading State */
+.kayak-profile-loading {
+  text-align: center;
+  padding: var(--spacing-12) var(--card-padding);
+}
+
+.kayak-profile-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--color-border-default);
+  border-top-color: var(--color-brand-primary);
+  border-radius: var(--radius-pill);
+  animation: profileSpin 0.8s linear infinite;
+  margin: 0 auto var(--spacing-3);
+}
+
+@keyframes profileSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* Payment Tab */
+.kayak-profile-payment-helper {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  margin-bottom: var(--spacing-4);
+  padding: var(--spacing-3);
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-light);
+}
+
+.kayak-profile-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  margin-bottom: var(--spacing-3);
+}
+
+.kayak-profile-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-brand-primary);
+  cursor: pointer;
+}
+
+.kayak-profile-checkbox-label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+/* Danger Zone */
+.kayak-profile-danger-zone {
+  margin-top: var(--spacing-5);
+}
+
+.kayak-profile-danger-card {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: var(--radius-md);
+  padding: var(--spacing-4);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-4);
+}
+
+/* Responsive moved to bottom */
+
+.kayak-profile-danger-info {
+  flex: 1;
+}
+
+.kayak-profile-danger-title {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-error);
+  margin: 0 0 2px;
+}
+
+.kayak-profile-danger-text {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+.kayak-profile-btn-danger {
+  padding: var(--spacing-2) var(--spacing-4);
+  background: var(--color-error);
+  color: var(--color-text-inverse);
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.kayak-profile-btn-danger:hover {
+  background: #b91c1c;
+}
+
+.kayak-profile-btn-danger:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* ============================================
+   Responsive Styles
+   ============================================ */
+
+/* 768px - Tablets */
+@media (max-width: 768px) {
+  .kayak-profile-hero {
+    padding: var(--spacing-4);
+  }
+
+  .kayak-profile-container {
+    padding: var(--spacing-4);
+  }
+
+  .kayak-profile-tabs {
+    overflow-x: auto;
+    width: 100%;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .kayak-profile-tab {
+    flex-shrink: 0;
+  }
+
+  .kayak-profile-card-body {
+    padding: var(--spacing-4);
+  }
+}
+
+/* 480px - Small phones */
+@media (max-width: 480px) {
+  .kayak-profile-hero {
+    padding: var(--spacing-3);
+  }
+
+  .kayak-profile-hero-content {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .kayak-profile-avatar-large {
+    width: 56px;
+    height: 56px;
+    font-size: var(--font-size-xl);
+  }
+
+  .kayak-profile-name {
+    font-size: var(--font-size-lg);
+  }
+
+  .kayak-profile-container {
+    padding: var(--spacing-3);
+  }
+
+  .kayak-profile-card-body {
+    padding: var(--spacing-3);
+  }
+
+  .kayak-profile-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .kayak-profile-field.span-2 {
+    grid-column: span 1;
+  }
+
+  .kayak-profile-input,
+  .kayak-profile-select {
+    font-size: 16px; /* Prevents iOS zoom */
+  }
+
+  .kayak-profile-footer {
+    flex-direction: column;
+    gap: var(--spacing-3);
+    align-items: stretch;
+  }
+
+  .kayak-profile-actions {
+    justify-content: stretch;
+  }
+
+  .kayak-profile-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .kayak-profile-danger-card {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .kayak-profile-btn-danger {
+    width: 100%;
+  }
+
+  .kayak-profile-avatar-section {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .kayak-profile-avatar-actions {
+    width: 100%;
+  }
+
+  .kayak-profile-avatar-btn {
+    flex: 1;
+    justify-content: center;
+  }
+}

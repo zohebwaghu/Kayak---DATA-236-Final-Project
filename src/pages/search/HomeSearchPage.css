@@ -1,0 +1,1920 @@
+/* HomeSearchPage - Using Kayak Design Tokens */
+
+.kayak-home {
+  min-height: 100vh;
+  background: var(--color-bg-page);
+}
+
+/* HERO - Matching real Kayak.com */
+.kayak-hero {
+  position: relative;
+  background: #f5f5f5;
+  padding: var(--spacing-5) var(--container-padding) var(--spacing-8);
+  overflow: visible;
+}
+
+.kayak-hero-container {
+  position: relative;
+  z-index: 1;
+  max-width: 1200px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--spacing-6);
+  align-items: start;
+}
+
+.kayak-hero-main {
+  background: var(--color-bg-page);
+  border-radius: 16px;
+  padding: var(--spacing-8) var(--spacing-8) var(--spacing-6);
+}
+
+.kayak-headline {
+  font-size: 32px;
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  margin: 0 0 var(--spacing-5);
+  line-height: 1.2;
+}
+
+.kayak-headline-dot {
+  color: var(--color-brand-primary);
+}
+
+/* Tabs - Smaller square icons like real Kayak */
+.kayak-tabs {
+  display: flex;
+  gap: var(--spacing-4);
+  margin-bottom: var(--spacing-5);
+}
+
+.kayak-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.kayak-tab-icon-box {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  background: var(--color-bg-secondary);
+  border: none;
+  border-radius: 8px;
+  color: var(--color-text-primary);
+  transition: all 0.15s ease;
+}
+
+.kayak-tab:hover .kayak-tab-icon-box {
+  background: #e8e8e8;
+}
+
+.kayak-tab.active .kayak-tab-icon-box {
+  background: var(--color-brand-primary);
+  color: var(--color-text-inverse);
+}
+
+.kayak-tab-icon-box.ai-mode {
+  border: 1px solid var(--color-border-default);
+  background: var(--color-bg-page);
+}
+
+.kayak-tab.active .kayak-tab-icon-box.ai-mode {
+  border: none;
+  background: var(--color-brand-primary);
+}
+
+.kayak-tab-label {
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+}
+
+.kayak-tab.active .kayak-tab-label {
+  color: var(--color-brand-primary);
+}
+
+/* Search shell - no extra styling, just container */
+.kayak-search-shell {
+  background: transparent;
+  border: none;
+  padding: 0;
+  box-shadow: none;
+}
+
+/* Form top row - Round-trip / bags dropdowns */
+.kayak-form-toprow {
+  display: flex;
+  gap: var(--spacing-4);
+  margin-bottom: var(--spacing-3);
+}
+
+.kayak-dropdown-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  font-size: 14px;
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.kayak-dropdown-trigger:hover {
+  color: var(--color-text-primary);
+}
+
+.kayak-dropdown-trigger svg {
+  opacity: 0.6;
+}
+
+/* Single horizontal search bar - Real Kayak style */
+.kayak-search-bar {
+  display: flex;
+  align-items: center;
+  background: var(--color-bg-page);
+  border: 1px solid var(--color-border-default);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.kayak-search-field {
+  display: flex;
+  align-items: center;
+  padding: 0 var(--spacing-4);
+  min-height: 48px;
+  position: relative;
+}
+
+.kayak-search-field input {
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+  outline: none;
+  width: 100%;
+  padding: 0;
+}
+
+.kayak-search-field input::placeholder {
+  color: var(--color-text-secondary);
+}
+
+.kayak-search-field-from {
+  flex: 1;
+  min-width: 140px;
+}
+
+.kayak-search-field-to {
+  flex: 1;
+  min-width: 100px;
+}
+
+.kayak-search-field-destination {
+  flex: 1.5;
+  min-width: 160px;
+}
+
+.kayak-search-field-dates {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 var(--spacing-3);
+  min-width: 260px;
+}
+
+/* Date wrapper for overlay placeholder */
+.kayak-date-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.kayak-date-wrapper input[type="date"] {
+  width: 100px;
+  padding: 8px 4px;
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+/* Hide the date input text when empty - show placeholder instead */
+.kayak-date-wrapper input[type="date"]:not(:focus)::-webkit-datetime-edit {
+  color: transparent;
+}
+
+/* Show date text when has value */
+.kayak-date-wrapper input[type="date"][value]:not([value=""])::-webkit-datetime-edit {
+  color: var(--color-text-primary);
+}
+
+/* Custom placeholder overlay */
+.kayak-date-placeholder {
+  position: absolute;
+  left: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 14px;
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* Calendar picker icon */
+.kayak-date-wrapper input[type="date"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.5;
+  padding: 2px;
+}
+
+.kayak-date-wrapper input[type="date"]:hover::-webkit-calendar-picker-indicator {
+  opacity: 0.8;
+}
+
+.kayak-date-separator {
+  color: var(--color-text-muted);
+  font-weight: var(--font-weight-medium);
+  font-size: 16px;
+  flex-shrink: 0;
+  padding: 0 4px;
+}
+
+.kayak-search-field-travelers {
+  min-width: 140px;
+  color: var(--color-text-primary);
+  font-size: 14px;
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+}
+
+.kayak-search-divider {
+  width: 1px;
+  height: 28px;
+  background: var(--color-border-default);
+  flex-shrink: 0;
+}
+
+.kayak-swap-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg-page);
+  border: 1px solid var(--color-border-default);
+  border-radius: 50%;
+  cursor: pointer;
+  margin: 0 var(--spacing-2);
+  flex-shrink: 0;
+}
+
+.kayak-swap-btn:hover {
+  background: var(--color-bg-secondary);
+}
+
+.kayak-field-clear {
+  position: absolute;
+  right: 8px;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg-secondary);
+  border: none;
+  border-radius: 50%;
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.kayak-field-clear:hover {
+  background: var(--color-border-default);
+}
+
+.kayak-search-btn {
+  background: var(--color-brand-primary);
+  color: var(--color-text-inverse);
+  border: none;
+  padding: 12px 24px;
+  font-size: 15px;
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  white-space: nowrap;
+  border-radius: 8px;
+  margin: 4px;
+}
+
+.kayak-search-btn:hover {
+  background: var(--color-brand-primary-hover);
+}
+
+.kayak-search-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Compare vs KAYAK section */
+.kayak-compare-section {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--spacing-3);
+  padding-top: var(--spacing-3);
+  border-top: 1px solid var(--color-border-light);
+}
+
+.kayak-compare-left {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-4);
+}
+
+.kayak-compare-label {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+}
+
+.kayak-compare-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.kayak-compare-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-brand-primary);
+}
+
+.kayak-trip-toggle {
+  display: inline-flex;
+  gap: var(--spacing-2);
+  margin-bottom: var(--spacing-3);
+}
+
+.kayak-toggle-btn {
+  padding: var(--spacing-2) var(--spacing-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-secondary);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.kayak-toggle-btn.active {
+  border-color: var(--color-brand-primary);
+  background: var(--color-brand-primary-light);
+  color: var(--color-brand-primary);
+}
+
+.pill-row {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-3);
+  overflow: hidden;
+}
+
+.kayak-search-form {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr) auto;
+  gap: var(--spacing-3);
+  align-items: end;
+}
+
+.kayak-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+  min-width: 140px;
+}
+
+.kayak-field-wide {
+  grid-column: span 2;
+}
+
+.kayak-field-label {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-secondary);
+}
+
+.kayak-input,
+.kayak-select {
+  width: 100%;
+  padding: var(--spacing-3) var(--spacing-4);
+  border: 2px solid var(--color-border-default);
+  border-radius: var(--radius-input);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  background: var(--color-bg-secondary);
+  transition: all var(--transition-fast);
+}
+
+.kayak-input:hover,
+.kayak-select:hover {
+  border-color: var(--color-border-default);
+  background: var(--color-bg-page);
+}
+
+.kayak-input:focus,
+.kayak-select:focus {
+  outline: none;
+  border-color: var(--color-border-focus);
+  background: var(--color-bg-page);
+  box-shadow: 0 0 0 4px rgba(255, 106, 6, 0.12);
+}
+
+.kayak-input::placeholder {
+  color: var(--color-text-muted);
+  font-weight: var(--font-weight-medium);
+}
+
+/* Date inputs - custom styling */
+.kayak-input[type="date"] {
+  cursor: pointer;
+}
+
+.kayak-input[type="date"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity var(--transition-fast);
+}
+
+.kayak-input[type="date"]:hover::-webkit-calendar-picker-indicator {
+  opacity: 1;
+}
+
+.traveler-field .traveler-pill {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--spacing-3);
+  border: 2px solid var(--color-border-default);
+  border-radius: var(--radius-input);
+  background: var(--color-bg-secondary);
+  gap: var(--spacing-3);
+  transition: all var(--transition-fast);
+  min-height: 50px;
+}
+
+.traveler-field .traveler-pill:hover {
+  border-color: var(--color-border-default);
+  background: var(--color-bg-page);
+}
+
+.traveler-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  font-weight: var(--font-weight-bold);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+}
+
+.traveler-summary .divider {
+  color: var(--color-text-muted);
+}
+
+.traveler-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2);
+}
+
+.traveler-controls button {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-default);
+  background: var(--color-bg-secondary);
+  cursor: pointer;
+  font-weight: var(--font-weight-bold);
+}
+
+.traveler-controls button:hover {
+  border-color: var(--color-border-default);
+}
+
+.traveler-select {
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-2) var(--spacing-3);
+  background: var(--color-bg-page);
+  font-weight: var(--font-weight-semibold);
+}
+
+.kayak-search-btn {
+  padding: var(--spacing-3) var(--spacing-6);
+  border-radius: var(--radius-button);
+  border: none;
+  background: var(--color-brand-primary);
+  color: var(--color-text-inverse);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  cursor: pointer;
+  min-width: 130px;
+  transition: all var(--transition-fast);
+  box-shadow: 0 2px 8px rgba(255, 106, 6, 0.25);
+}
+
+.kayak-search-btn.primary {
+  background: var(--color-brand-primary);
+  color: var(--color-text-inverse);
+}
+
+.kayak-search-btn:hover:not(:disabled) {
+  background: var(--color-brand-primary-hover);
+  box-shadow: 0 6px 20px rgba(255, 106, 6, 0.35);
+  transform: translateY(-1px);
+}
+
+.kayak-search-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.kayak-search-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+.kayak-inline-meta {
+  margin-top: var(--spacing-3);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.kayak-inline-chips {
+  display: flex;
+  gap: var(--spacing-2);
+  flex-wrap: wrap;
+  overflow: hidden;
+}
+
+.kayak-filters-toggle {
+  border: none;
+  background: transparent;
+  color: var(--color-brand-primary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  cursor: pointer;
+  padding: var(--spacing-2) 0;
+  transition: color var(--transition-fast);
+}
+
+.kayak-filters-toggle:hover {
+  color: var(--color-brand-primary-hover);
+  text-decoration: underline;
+}
+
+.kayak-advanced-filters {
+  display: flex;
+  gap: var(--spacing-3);
+  margin-top: var(--spacing-3);
+  padding-top: var(--spacing-3);
+  border-top: 1px solid var(--color-border-light);
+  flex-wrap: wrap;
+}
+
+.kayak-advanced-filters .kayak-field {
+  min-width: 180px;
+  max-width: 220px;
+}
+
+/* Chips */
+.kayak-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-3) var(--spacing-4);
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  border: 1px solid transparent;
+}
+
+.kayak-pill:hover {
+  background: var(--color-border-default);
+}
+
+.kayak-pill.muted {
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border-default);
+}
+
+.kayak-pill.muted:hover {
+  background: var(--color-border-light);
+  border-color: var(--color-border-default);
+}
+
+.kayak-pill.outline {
+  border: 2px solid var(--color-text-primary);
+  background: var(--color-bg-page);
+  color: var(--color-text-primary);
+}
+
+.kayak-pill.outline:hover {
+  background: var(--color-text-primary);
+  color: var(--color-text-inverse);
+}
+
+/* Collage - Blob-style rounded images like real Kayak */
+.kayak-hero-collage {
+  width: 340px;
+  flex-shrink: 0;
+}
+
+.kayak-collage-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 140px 90px 90px;
+  gap: 8px;
+}
+
+.kayak-collage-item {
+  border-radius: 24px;
+  overflow: hidden;
+  position: relative;
+}
+
+.kayak-collage-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.kayak-collage-main {
+  grid-column: 1;
+  grid-row: 1 / 3;
+  border-radius: 24px;
+}
+
+.kayak-collage-tall {
+  grid-column: 2;
+  grid-row: 2 / 4;
+  border-radius: 24px;
+}
+
+/* Feature Cards Section */
+.kayak-features {
+  background: var(--color-bg-page);
+  padding: var(--spacing-12) var(--card-padding);
+  border-top: 1px solid var(--color-border-light);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.kayak-features-container {
+  max-width: 1100px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--spacing-5);
+}
+
+.kayak-feature-card {
+  background: var(--color-bg-page);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-xl);
+  padding: var(--spacing-8) var(--spacing-6);
+  text-align: center;
+  transition: all var(--transition-normal);
+  box-shadow: var(--shadow-sm);
+}
+
+.kayak-feature-card:hover {
+  box-shadow: var(--shadow-xl);
+  transform: translateY(-4px);
+  border-color: var(--color-border-default);
+}
+
+.kayak-feature-icons {
+  display: flex;
+  justify-content: center;
+  gap: var(--spacing-2);
+  margin-bottom: var(--spacing-4);
+}
+
+.kayak-airline-logo {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-page);
+  padding: var(--spacing-1);
+}
+
+.kayak-feature-avatars {
+  display: flex;
+  justify-content: center;
+  margin-bottom: var(--spacing-4);
+}
+
+.kayak-avatar-circle {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-pill);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-inverse);
+  font-weight: var(--font-weight-bold);
+  font-size: var(--font-size-xs);
+  margin-left: -8px;
+  border: 2px solid var(--color-bg-page);
+}
+
+.kayak-avatar-circle:first-child {
+  margin-left: 0;
+}
+
+.kayak-feature-stars {
+  display: flex;
+  justify-content: center;
+  gap: 2px;
+  margin-bottom: var(--spacing-4);
+}
+
+.kayak-star {
+  color: var(--color-warning);
+  font-size: var(--font-size-2xl);
+}
+
+.kayak-feature-title {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  margin: 0 0 var(--spacing-2);
+}
+
+.kayak-feature-text {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+/* Travel Deals Section */
+.kayak-deals {
+  background: var(--color-bg-secondary);
+  padding: var(--spacing-8) var(--card-padding) var(--spacing-4);
+}
+
+.kayak-deals-header {
+  max-width: 1280px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.kayak-deals-title {
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.kayak-deals-link {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-1);
+}
+
+.kayak-deals-link:hover {
+  color: var(--color-brand-primary);
+}
+
+/* RESULTS */
+.kayak-results {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: var(--spacing-6) var(--card-padding) var(--spacing-20);
+}
+
+.kayak-results-header {
+  margin-bottom: var(--spacing-3);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+
+.kayak-results-count {
+  color: var(--color-text-secondary);
+}
+
+.kayak-results-toolbar {
+  position: sticky;
+  top: 112px;
+  z-index: 5;
+  background: var(--color-bg-page);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-3) var(--spacing-4);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-4);
+  margin-bottom: var(--spacing-4);
+  box-shadow: var(--shadow-md);
+}
+
+.toolbar-left {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+}
+
+.toolbar-title {
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+
+.toolbar-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-2);
+  max-width: 100%;
+}
+
+.kayak-chip {
+  padding: var(--spacing-2) var(--spacing-3);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-default);
+  background: var(--color-bg-page);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.kayak-chip.active {
+  border-color: var(--color-brand-primary);
+  color: var(--color-brand-primary);
+  box-shadow: 0 8px 16px rgba(255, 106, 6, 0.18);
+}
+
+.toolbar-right {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-3);
+}
+
+.toolbar-label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  font-weight: var(--font-weight-bold);
+}
+
+.toolbar-select {
+  padding: var(--spacing-3);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-default);
+  font-weight: var(--font-weight-bold);
+}
+
+.kayak-status-bar {
+  position: sticky;
+  top: 60px;
+  z-index: var(--z-modal);
+  background: var(--color-bg-hero);
+  color: var(--color-text-inverse);
+  padding: var(--spacing-3) var(--spacing-5);
+  text-align: center;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.3px;
+  box-shadow: var(--shadow-md);
+}
+
+.kayak-results-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr);
+  gap: var(--spacing-4);
+}
+
+.kayak-results-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+  width: 100%;
+}
+
+/* Side rail */
+.kayak-rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+}
+
+.rail-card {
+  background: var(--color-bg-page);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-3);
+  box-shadow: var(--shadow-md);
+}
+
+.rail-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.rail-title {
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+
+.rail-pill {
+  padding: var(--spacing-1) var(--spacing-2);
+  background: var(--color-brand-primary-light);
+  color: var(--color-brand-primary);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+}
+
+.rail-sparkline {
+  height: 54px;
+  margin: var(--spacing-3) 0;
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(180deg, rgba(255, 106, 6, 0.12), transparent);
+  border-radius: var(--radius-md);
+}
+
+.rail-sparkline-line {
+  position: absolute;
+  inset: 12px 8px 12px 8px;
+  background: linear-gradient(90deg, var(--color-brand-primary-light), var(--color-brand-primary));
+  opacity: 0.7;
+  border-radius: var(--radius-lg);
+}
+
+.rail-map-placeholder {
+  height: 120px;
+  border: 1px dashed var(--color-border-default);
+  border-radius: var(--radius-lg);
+  display: grid;
+  place-items: center;
+  color: var(--color-text-muted);
+  font-weight: var(--font-weight-bold);
+}
+
+.rail-text {
+  color: var(--color-text-secondary);
+  margin: var(--spacing-2) 0 var(--spacing-3);
+}
+
+.rail-button {
+  width: 100%;
+  padding: var(--spacing-3);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-brand-primary);
+  background: var(--color-brand-primary);
+  color: var(--color-text-inverse);
+  font-weight: var(--font-weight-bold);
+  cursor: pointer;
+}
+
+.rail-card ul {
+  padding-left: var(--spacing-4);
+  margin: var(--spacing-2) 0 0;
+  color: var(--color-text-secondary);
+  font-weight: var(--font-weight-semibold);
+}
+
+/* Skeletons */
+.kayak-skeleton-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+}
+
+.kayak-skeleton-card {
+  display: grid;
+  grid-template-columns: 80px 1fr 90px;
+  gap: var(--spacing-3);
+  background: var(--color-bg-page);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-3);
+}
+
+.kayak-skeleton-card.hotel,
+.kayak-skeleton-card.car {
+  grid-template-columns: 140px 1fr 90px;
+}
+
+.sk-left,
+.sk-price {
+  background: linear-gradient(90deg, var(--color-bg-secondary), var(--color-border-default), var(--color-bg-secondary));
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+  border-radius: var(--radius-md);
+}
+
+.sk-left {
+  height: 64px;
+}
+
+.sk-price {
+  height: 24px;
+}
+
+.sk-body {
+  display: grid;
+  gap: var(--spacing-2);
+}
+
+.sk-line {
+  height: 12px;
+  background: linear-gradient(90deg, var(--color-bg-secondary), var(--color-border-default), var(--color-bg-secondary));
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+  border-radius: var(--radius-md);
+}
+
+.sk-line.short {
+  width: 60%;
+}
+
+@keyframes shimmer {
+  0% { background-position: -150% 0; }
+  100% { background-position: 150% 0; }
+}
+
+/* Badges */
+.kayak-badge {
+  padding: var(--spacing-2) var(--spacing-3);
+  border-radius: var(--radius-lg);
+  font-weight: var(--font-weight-bold);
+  font-size: var(--font-size-xs);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+}
+
+.kayak-badge.primary {
+  background: var(--color-brand-primary-light);
+  color: var(--color-brand-primary);
+}
+
+.kayak-badge.muted {
+  background: var(--color-info-light);
+  color: var(--color-text-primary);
+}
+
+/* Flight cards */
+.kayak-flight-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 170px;
+  gap: var(--spacing-3);
+  padding: var(--spacing-4);
+  background: var(--color-bg-page);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.kayak-flight-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+}
+
+.kayak-flight-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+}
+
+.kayak-flight-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.kayak-flight-airline {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+}
+
+.kayak-flight-airline-logo {
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-lg);
+  background: var(--color-info-light);
+  display: grid;
+  place-items: center;
+}
+
+.kayak-flight-airline-name {
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+
+.kayak-flight-meta-small {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.kayak-flight-main {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  align-items: center;
+  gap: var(--spacing-3);
+}
+
+.kayak-flight-time {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+
+.kayak-flight-airport {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.kayak-flight-duration {
+  text-align: center;
+}
+
+.kayak-flight-duration-text {
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  margin-bottom: var(--spacing-1);
+}
+
+.kayak-flight-duration-line {
+  height: 2px;
+  background: linear-gradient(90deg, var(--color-brand-primary-light), var(--color-brand-primary));
+  border-radius: var(--radius-pill);
+  position: relative;
+}
+
+.kayak-flight-duration-line::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: -3px;
+  width: 8px;
+  height: 8px;
+  background: var(--color-brand-primary);
+  border-radius: var(--radius-pill);
+}
+
+.kayak-flight-stops {
+  display: block;
+  margin-top: var(--spacing-2);
+  font-size: var(--font-size-xs);
+  color: var(--color-success);
+}
+
+.kayak-flight-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-2);
+}
+
+.kayak-flight-price {
+  text-align: right;
+  min-width: 140px;
+  display: grid;
+  gap: var(--spacing-2);
+  align-content: center;
+  justify-items: end;
+}
+
+.kayak-flight-price-amount {
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+
+.kayak-flight-price-label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.kayak-flight-select-btn {
+  padding: var(--spacing-3);
+  border: none;
+  border-radius: var(--radius-lg);
+  background: var(--color-brand-primary);
+  color: var(--color-text-inverse);
+  font-weight: var(--font-weight-bold);
+  cursor: pointer;
+}
+
+.kayak-save-btn {
+  border: 1px solid var(--color-border-default);
+  background: var(--color-bg-page);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-2);
+  cursor: pointer;
+  color: var(--color-text-secondary);
+}
+.kayak-save-btn:hover {
+  border-color: var(--color-brand-primary);
+  color: var(--color-brand-primary);
+}
+
+/* Hotel cards */
+.kayak-hotel-card,
+.kayak-car-card {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr) 170px;
+  gap: var(--spacing-3);
+  background: var(--color-bg-page);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-md);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.kayak-hotel-card:hover,
+.kayak-car-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+}
+
+.kayak-result-image {
+  height: 160px;
+  background: var(--color-bg-secondary);
+  position: relative;
+}
+
+.kayak-result-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.kayak-result-image-placeholder {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  font-size: var(--font-size-4xl);
+  background: var(--color-bg-secondary);
+}
+
+.kayak-image-badge {
+  position: absolute;
+  top: var(--spacing-3);
+  left: var(--spacing-3);
+  background: rgba(17, 17, 17, 0.8);
+  color: var(--color-text-inverse);
+  padding: var(--spacing-2) var(--spacing-3);
+  border-radius: var(--radius-lg);
+  font-weight: var(--font-weight-bold);
+  font-size: var(--font-size-xs);
+}
+
+.kayak-hotel-body,
+.kayak-car-body {
+  padding: var(--spacing-3) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+}
+
+.kayak-hotel-top,
+.kayak-car-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--spacing-3);
+}
+
+.kayak-result-title {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+}
+
+.kayak-result-subtitle {
+  margin: var(--spacing-1) 0 var(--spacing-2);
+  color: var(--color-text-secondary);
+  font-weight: var(--font-weight-semibold);
+}
+
+.kayak-hotel-perks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-2);
+}
+
+.kayak-rating-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  margin-bottom: var(--spacing-2);
+}
+
+.kayak-stars {
+  color: var(--color-warning);
+  font-weight: var(--font-weight-bold);
+}
+
+.kayak-rating-count {
+  color: var(--color-text-secondary);
+  font-weight: var(--font-weight-bold);
+  font-size: var(--font-size-xs);
+}
+
+.kayak-hotel-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-2);
+}
+
+.kayak-result-price-section {
+  padding: var(--spacing-3);
+  text-align: right;
+  display: grid;
+  gap: var(--spacing-2);
+  align-content: center;
+  justify-items: end;
+}
+
+.kayak-price-strike {
+  text-decoration: line-through;
+  color: var(--color-text-muted);
+  font-weight: var(--font-weight-semibold);
+}
+
+.kayak-result-price {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+}
+
+.kayak-result-price-label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.kayak-result-book-btn {
+  padding: var(--spacing-3);
+  border-radius: var(--radius-lg);
+  border: none;
+  background: var(--color-brand-primary);
+  color: var(--color-text-inverse);
+  font-weight: var(--font-weight-bold);
+  cursor: pointer;
+}
+
+/* AI panel (keep styles) */
+.kayak-ai-panel {
+  padding: var(--spacing-2) 0;
+}
+
+.kayak-ai-conversation {
+  max-height: 300px;
+  overflow-y: auto;
+  margin-bottom: var(--spacing-4);
+  padding: var(--spacing-3);
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-lg);
+}
+
+.kayak-ai-message {
+  display: flex;
+  gap: var(--spacing-3);
+  margin-bottom: var(--spacing-3);
+}
+
+.kayak-ai-message-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-pill);
+  background: var(--color-border-default);
+  display: grid;
+  place-items: center;
+}
+
+.kayak-ai-message.user .kayak-ai-message-avatar {
+  background: var(--color-brand-primary);
+  color: var(--color-text-inverse);
+}
+
+.kayak-ai-message-content {
+  flex: 1;
+  padding: var(--spacing-3);
+  background: var(--color-bg-page);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-light);
+}
+
+.kayak-ai-input-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+  background: var(--color-bg-page);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-3);
+}
+
+.kayak-ai-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  font-size: var(--font-size-sm);
+}
+
+.kayak-ai-send-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-pill);
+  border: none;
+  background: var(--color-brand-primary);
+  color: var(--color-text-inverse);
+  cursor: pointer;
+}
+
+.kayak-ai-suggestions {
+  display: flex;
+  gap: var(--spacing-2);
+  margin-top: var(--spacing-3);
+  flex-wrap: wrap;
+}
+
+.kayak-ai-suggestion {
+  padding: var(--spacing-2) var(--spacing-3);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-light);
+  background: var(--color-bg-secondary);
+  cursor: pointer;
+}
+
+/* States */
+.kayak-empty-state,
+.kayak-loading {
+  text-align: center;
+  padding: var(--spacing-16) var(--card-padding);
+}
+
+.kayak-empty-icon {
+  font-size: var(--font-size-hero);
+  margin-bottom: var(--spacing-3);
+}
+
+.kayak-empty-title {
+  font-weight: var(--font-weight-bold);
+  margin-bottom: var(--spacing-2);
+}
+
+.kayak-empty-text {
+  color: var(--color-text-secondary);
+}
+
+.kayak-loading-spinner {
+  width: 42px;
+  height: 42px;
+  border: 3px solid var(--color-border-default);
+  border-top-color: var(--color-brand-primary);
+  border-radius: var(--radius-pill);
+  margin: 0 auto var(--spacing-3);
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg);} }
+
+.kayak-error {
+  padding: var(--spacing-4);
+  background: #fef2f2;
+  border: 1px solid #fcdada;
+  border-radius: var(--radius-lg);
+  color: var(--color-error);
+}
+
+/* Pagination */
+.kayak-pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: var(--spacing-4);
+  margin-top: var(--spacing-6);
+  padding-top: var(--spacing-6);
+  border-top: 1px solid var(--color-border-default);
+}
+
+.kayak-pagination-btn {
+  padding: var(--spacing-3);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-default);
+  background: var(--color-bg-page);
+  font-weight: var(--font-weight-bold);
+  cursor: pointer;
+}
+
+.kayak-pagination-btn:hover:not(:disabled) {
+  background: var(--color-bg-secondary);
+}
+
+.kayak-pagination-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.kayak-pagination-info {
+  color: var(--color-text-secondary);
+  font-weight: var(--font-weight-bold);
+}
+
+/* ============================================
+   Responsive Styles (Standardized Breakpoints)
+   - 480px: Small phones
+   - 768px: Tablets
+   - 1024px: Small desktops
+   - 1280px: Large desktops
+   ============================================ */
+
+/* 1280px - Large desktops */
+@media (max-width: 1280px) {
+  .kayak-search-form {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .kayak-results-shell {
+    grid-template-columns: 1fr;
+  }
+  .kayak-rail {
+    display: none;
+  }
+}
+
+/* 1024px - Small desktops / Tablets landscape */
+@media (max-width: 1024px) {
+  .kayak-hero-container {
+    grid-template-columns: 1fr;
+  }
+
+  /* Show single collage image instead of hiding */
+  .kayak-hero-collage {
+    width: 100%;
+    max-width: 500px;
+    margin: var(--spacing-4) auto 0;
+  }
+
+  .kayak-collage-grid {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 120px 120px;
+  }
+
+  .kayak-collage-main {
+    grid-row: 1 / 2;
+  }
+
+  .kayak-collage-tall {
+    grid-row: 1 / 3;
+  }
+
+  .kayak-collage-item:nth-child(n+4) {
+    display: none;
+  }
+
+  .kayak-results-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .kayak-rail {
+    display: none;
+  }
+
+  .kayak-results-toolbar {
+    position: static;
+  }
+
+  .kayak-features-container {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .kayak-feature-card {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    text-align: left;
+    padding: 20px;
+  }
+
+  .kayak-feature-icons,
+  .kayak-feature-avatars,
+  .kayak-feature-stars {
+    margin-bottom: 0;
+    flex-shrink: 0;
+  }
+
+  .kayak-hotel-card,
+  .kayak-car-card {
+    grid-template-columns: 1fr;
+  }
+
+  .kayak-result-image {
+    height: 200px;
+  }
+
+  .kayak-flight-card {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 768px - Tablets / Large phones */
+@media (max-width: 768px) {
+  .kayak-hero {
+    padding: 24px 16px 32px;
+  }
+
+  .kayak-hero-main {
+    padding: var(--spacing-5);
+    border-radius: 12px;
+  }
+
+  .kayak-headline {
+    font-size: 24px;
+    margin-bottom: var(--spacing-4);
+  }
+
+  /* Tabs - horizontal scroll on mobile */
+  .kayak-tabs {
+    overflow-x: auto;
+    gap: var(--spacing-2);
+    padding-bottom: var(--spacing-2);
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .kayak-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .kayak-tab {
+    flex-shrink: 0;
+  }
+
+  .kayak-tab-icon-box {
+    width: 40px;
+    height: 40px;
+  }
+
+  .kayak-tab-label {
+    font-size: 11px;
+  }
+
+  /* Search bar - stack vertically */
+  .kayak-search-bar {
+    flex-direction: column;
+    border-radius: 12px;
+  }
+
+  .kayak-search-field {
+    width: 100%;
+    border-bottom: 1px solid var(--color-border-light);
+    min-height: 52px;
+  }
+
+  .kayak-search-field:last-of-type {
+    border-bottom: none;
+  }
+
+  .kayak-search-field-from,
+  .kayak-search-field-to,
+  .kayak-search-field-destination {
+    min-width: 100%;
+  }
+
+  .kayak-search-field-dates {
+    flex-direction: row;
+    justify-content: space-between;
+    width: 100%;
+    min-width: 100%;
+  }
+
+  .kayak-search-field-dates input[type="date"] {
+    flex: 1;
+    width: auto;
+  }
+
+  .kayak-search-divider {
+    display: none;
+  }
+
+  .kayak-swap-btn {
+    position: absolute;
+    right: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 1;
+  }
+
+  .kayak-search-field-from {
+    position: relative;
+    padding-right: 50px;
+  }
+
+  .kayak-search-btn {
+    width: 100%;
+    margin: 0;
+    border-radius: 0 0 12px 12px;
+    padding: 16px;
+  }
+
+  .kayak-form-toprow {
+    flex-wrap: wrap;
+    gap: var(--spacing-2);
+  }
+
+  /* Hide collage on tablets */
+  .kayak-hero-collage {
+    display: none;
+  }
+
+  .kayak-search-form {
+    grid-template-columns: 1fr;
+  }
+
+  .kayak-field,
+  .kayak-field-wide {
+    grid-column: span 1;
+  }
+
+  .kayak-results {
+    padding: 24px 16px 60px;
+  }
+
+  .kayak-results-toolbar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--spacing-3);
+  }
+
+  .toolbar-chips {
+    max-width: 100%;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    padding-bottom: var(--spacing-2);
+  }
+
+  .kayak-chip {
+    flex-shrink: 0;
+  }
+
+  .kayak-flight-main {
+    grid-template-columns: 1fr;
+  }
+
+  .kayak-flight-price {
+    text-align: left;
+    justify-items: start;
+    padding-top: var(--spacing-3);
+    border-top: 1px solid var(--color-border-light);
+  }
+
+  .kayak-deals-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--spacing-2);
+  }
+}
+
+/* 480px - Small phones */
+@media (max-width: 480px) {
+  .kayak-hero {
+    padding: 16px 12px 24px;
+  }
+
+  .kayak-hero-main {
+    padding: var(--spacing-4);
+  }
+
+  .kayak-headline {
+    font-size: 20px;
+    line-height: 1.3;
+  }
+
+  /* Tabs - even smaller on phones */
+  .kayak-tab-icon-box {
+    width: 36px;
+    height: 36px;
+  }
+
+  .kayak-tab-icon-box svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .kayak-tab-label {
+    font-size: 10px;
+  }
+
+  /* Search inputs - larger for touch */
+  .kayak-search-field {
+    min-height: 56px;
+  }
+
+  .kayak-search-field input {
+    font-size: 16px; /* Prevents iOS zoom */
+  }
+
+  .kayak-search-field-dates input[type="date"] {
+    font-size: 14px;
+    padding: 10px 4px;
+  }
+
+  .kayak-search-btn {
+    padding: 18px;
+    font-size: 16px;
+  }
+
+  /* Results - full width cards */
+  .kayak-results {
+    padding: 16px 12px 48px;
+  }
+
+  .kayak-flight-card,
+  .kayak-hotel-card,
+  .kayak-car-card {
+    border-radius: 12px;
+  }
+
+  .kayak-result-image {
+    height: 180px;
+  }
+
+  .kayak-result-title {
+    font-size: var(--font-size-base);
+  }
+
+  /* Features section */
+  .kayak-features {
+    padding: var(--spacing-6) var(--spacing-4);
+  }
+
+  .kayak-feature-card {
+    padding: 16px;
+  }
+
+  .kayak-feature-title {
+    font-size: var(--font-size-base);
+  }
+
+  /* Pagination - touch friendly */
+  .kayak-pagination {
+    flex-wrap: wrap;
+    gap: var(--spacing-2);
+  }
+
+  .kayak-pagination-btn {
+    min-width: 100px;
+    min-height: 44px;
+  }
+
+  /* AI panel */
+  .kayak-ai-suggestions {
+    flex-direction: column;
+  }
+
+  .kayak-ai-suggestion {
+    width: 100%;
+    text-align: center;
+  }
+}
