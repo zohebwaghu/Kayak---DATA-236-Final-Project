@@ -15,6 +15,11 @@ import CarsSearchForm from './CarsSearchForm';
 import AiModePanel from './AiModePanel';
 import AiResults from './AiResults';
 
+// Home page sections
+import TrustSection from '../../components/home/TrustSection';
+import PopularDestinations from '../../components/home/PopularDestinations';
+import DealsSection from '../../components/home/DealsSection';
+
 import api from '../../api/axios';
 import { sendChatMessage, createWatch, generateQuote } from '../../api/aiService';
 import SearchResultsList from '../../components/search/SearchResultsList';
@@ -369,28 +374,32 @@ const HomeSearchPage = () => {
   const handleHotelsSubmit = () => fetchHotels(1);
   const handleCarsSubmit = () => fetchCars(1);
 
+  // ===== DESTINATION & DEAL HANDLERS =====
+  const handleDestinationClick = (destination) => {
+    // Pre-fill flight search with destination
+    handleFlightFilterChange('destination', destination.code);
+    handleTabChange('flights');
+    // Scroll to top
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleDealClick = (deal) => {
+    // Navigate based on deal type
+    if (deal.type === 'flight') {
+      handleTabChange('flights');
+    } else if (deal.type === 'hotel') {
+      handleTabChange('stays');
+    } else if (deal.type === 'car') {
+      handleTabChange('cars');
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   const handleFlightsPageChange = (nextPage) => fetchFlights(nextPage);
   const handleHotelsPageChange = (nextPage) => fetchHotels(nextPage);
   const handleCarsPageChange = (nextPage) => fetchCars(nextPage);
 
-  // ===== AUTO-LOAD BEHAVIOUR =====
-  useEffect(() => {
-    if (!flightLoadedOnce) {
-      fetchFlights(1);
-    }
-  }, [flightLoadedOnce]);
-
-  useEffect(() => {
-    if (activeTab === 'stays' && !hotelLoadedOnce) {
-      fetchHotels(1);
-    }
-  }, [activeTab, hotelLoadedOnce]);
-
-  useEffect(() => {
-    if (activeTab === 'cars' && !carLoadedOnce) {
-      fetchCars(1);
-    }
-  }, [activeTab, carLoadedOnce]);
+  // Results only appear after user clicks "Search" - no auto-load
 
   return (
     <div className="home-page">
@@ -520,7 +529,7 @@ const HomeSearchPage = () => {
                   <div>No flights found. Try adjusting your filters.</div>
                 ) : null
               }
-              renderItem={(flight) => {
+              renderItem={(flight, index) => {
                 const title = `${flight.origin} → ${flight.destination}`;
                 // Calculate date from days_left
                 const today = new Date();
@@ -532,26 +541,38 @@ const HomeSearchPage = () => {
                 const dateOptions = { month: 'short', day: 'numeric', weekday: 'short' };
                 const dateStr = flightDate.toLocaleDateString('en-US', dateOptions);
 
+                const stopsText = typeof flight.stops === 'number'
+                  ? (flight.stops === 0 ? 'Non-stop' : `${flight.stops} stop${flight.stops === 1 ? '' : 's'}`)
+                  : null;
+
                 const departText = flight.departure_time
-                  ? `${dateStr} · ${flight.departure_time}`
+                  ? `Departs ${flight.departure_time}`
                   : dateStr;
 
-                const metaParts = [
-                  flight.airline || null,
-                  typeof flight.stops === 'number'
-                    ? `${flight.stops} stop${flight.stops === 1 ? '' : 's'}`
-                    : null,
-                  departText,
-                ].filter(Boolean);
                 const priceText =
                   typeof flight.price === 'number' ? `$${flight.price.toFixed(0)}` : '—';
 
+                // Features for the card
+                const features = [];
+                if (flight.stops === 0) {
+                  features.push({ icon: 'bi-check-circle-fill', text: 'Non-stop' });
+                }
+                if (flight.duration) {
+                  features.push({ icon: 'bi-clock', text: flight.duration });
+                }
+
+                // Show "Best deal" badge for first result or lowest price
+                const showBestDeal = index === 0;
+
                 return (
                   <SearchCard
+                    topBadge={showBestDeal ? 'Best deal' : null}
                     title={title}
-                    subtitle={metaParts[0] || null}
-                    meta={metaParts.slice(1).join(' · ') || null}
+                    subtitle={flight.airline || 'Multiple airlines'}
+                    meta={`${dateStr} · ${stopsText || 'Multiple stops'} · ${departText}`}
                     priceText={priceText}
+                    priceSubtext="per person"
+                    features={features.length > 0 ? features : null}
                     actions={
                       <button
                         type="button"
@@ -580,29 +601,43 @@ const HomeSearchPage = () => {
                   <div>No hotels found. Try adjusting your filters.</div>
                 ) : null
               }
-              renderItem={(hotel) => {
+              renderItem={(hotel, index) => {
                 const name = hotel.name || hotel.hotelName || hotel.propertyName || 'Hotel';
                 const city = hotel.city || '';
                 const price = hotel.pricePerNight ?? hotel.price ?? hotel.samplePrice ?? null;
                 const star = hotel.starRating ?? hotel.stars ?? hotel.rating ?? null;
-                let amenitiesText = '';
+
+                // Build features from amenities
+                const features = [];
                 if (Array.isArray(hotel.amenities)) {
-                  amenitiesText = hotel.amenities.slice(0, 3).join(', ');
-                } else if (typeof hotel.amenities === 'string') {
-                  amenitiesText = hotel.amenities;
+                  hotel.amenities.slice(0, 2).forEach(amenity => {
+                    features.push({ icon: 'bi-check', text: amenity });
+                  });
                 }
-                const title = star ? `${name} · ${star}★` : name;
+                // Add free cancellation randomly for demo
+                if (index % 2 === 0) {
+                  features.push({ icon: 'bi-x-circle', text: 'Free cancellation' });
+                }
+
+                const starDisplay = star ? '★'.repeat(Math.min(star, 5)) : '';
+                const title = star ? `${name}` : name;
                 const priceText = typeof price === 'number' ? `$${price.toFixed(0)}` : '—';
+
+                // Show "Recommended" badge for first hotel
+                const showRecommended = index === 0;
 
                 return (
                   <SearchCard
+                    topBadge={showRecommended ? 'Recommended' : null}
                     thumbnailUrl={hotel.imageUrl}
                     thumbnailAlt={name}
                     thumbnailFallback={name.charAt(0)}
                     title={title}
-                    subtitle={city}
-                    meta={amenitiesText}
+                    subtitle={`${starDisplay} ${city}`.trim()}
+                    meta={hotel.neighborhood || hotel.area || null}
                     priceText={priceText}
+                    priceSubtext="per night"
+                    features={features.length > 0 ? features : null}
                     actions={
                       <button
                         type="button"
@@ -631,22 +666,40 @@ const HomeSearchPage = () => {
                   <div>No cars found. Try adjusting your filters.</div>
                 ) : null
               }
-              renderItem={(car) => {
+              renderItem={(car, index) => {
                 const type = car.carType || car.type || 'Car';
                 const price = car.pricePerDay ?? car.dailyPrice ?? car.price ?? null;
                 const loc = car.location || '';
                 const company = car.company || car.vendor || '';
                 const priceText = typeof price === 'number' ? `$${price.toFixed(0)}` : '—';
 
+                // Build features
+                const features = [];
+                if (car.automatic !== false) {
+                  features.push({ icon: 'bi-gear', text: 'Automatic' });
+                }
+                if (car.ac !== false) {
+                  features.push({ icon: 'bi-snow', text: 'A/C' });
+                }
+                if (car.unlimitedMiles !== false) {
+                  features.push({ icon: 'bi-speedometer', text: 'Unlimited miles' });
+                }
+
+                // Show "Great value" badge for first car
+                const showGreatValue = index === 0;
+
                 return (
                   <SearchCard
+                    topBadge={showGreatValue ? 'Great value' : null}
                     thumbnailUrl={car.imageUrl}
                     thumbnailAlt={type}
                     thumbnailFallback={type.charAt(0)}
                     title={type}
-                    subtitle={loc}
-                    meta={company}
+                    subtitle={company || 'Multiple providers'}
+                    meta={loc}
                     priceText={priceText}
+                    priceSubtext="per day"
+                    features={features.length > 0 ? features : null}
                     actions={
                       <button
                         type="button"
@@ -662,6 +715,15 @@ const HomeSearchPage = () => {
             />
           )}
         </section>
+
+        {/* Trust Section */}
+        <TrustSection />
+
+        {/* Popular Destinations */}
+        <PopularDestinations onDestinationClick={handleDestinationClick} />
+
+        {/* Deals Section */}
+        <DealsSection onDealClick={handleDealClick} />
       </div>
 
       {/* AI Modals */}

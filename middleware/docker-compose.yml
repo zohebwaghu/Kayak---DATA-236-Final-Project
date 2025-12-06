@@ -64,7 +64,7 @@ services:
     image: redis:7-alpine
     container_name: kayak-redis
     ports:
-      - "6379:6379"
+      - "6380:6379"
     command: redis-server --appendonly yes
     volumes:
       - redis-data:/data
@@ -294,7 +294,8 @@ services:
       - "8000:8000"
     environment:
       - OPENAI_API_KEY=
-      - OPENAI_MODEL=gpt-3.5-turbo
+      - OPENAI_MODEL=qwen2.5:7b-instruct
+      - OPENAI_BASE_URL=http://host.docker.internal:11434/v1
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
       - OLLAMA_EMBEDDING_MODEL=mxbai-embed-large
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9093
@@ -332,6 +333,8 @@ services:
         condition: service_healthy
     networks:
       - kayak-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
 # ==================== NETWORKS ====================
