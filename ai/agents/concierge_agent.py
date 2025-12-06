@@ -875,11 +875,13 @@ class ConciergeAgent:
 
     def _init_llm(self):
         """Initialize LLM client"""
+        self.llm_type = None
         openai_key = os.getenv("OPENAI_API_KEY", "")
         if OPENAI_AVAILABLE and openai_key:
             try:
                 self.llm_client = OpenAI(api_key=openai_key)
                 self.llm_model = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
+                self.llm_type = "openai"
                 logger.info(f"Using OpenAI: {self.llm_model}")
                 return
             except Exception as e:
@@ -890,12 +892,96 @@ class ConciergeAgent:
                 ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
                 self.llm_client = OllamaClient(host=ollama_url)
                 self.llm_model = os.getenv("OLLAMA_MODEL", "llama3.2")
+                self.llm_type = "ollama"
                 logger.info(f"Using Ollama: {self.llm_model}")
                 return
             except Exception as e:
                 logger.warning(f"Ollama init failed: {e}")
         
-        logger.warning("No LLM available, using rule-based responses")
+        logger.warning("No LLM available, using rule-based fallback")
+
+    def _call_llm(self, prompt: str, system_prompt: str = None) -> Optional[str]:
+        """Call LLM for intent parsing or response generation"""
+        if not self.llm_client:
+            return None
+        
+        try:
+            if self.llm_type == "openai":
+                messages = []
+                if system_prompt:
+                    messages.append({"role": "system", "content": system_prompt})
+                messages.append({"role": "user", "content": prompt})
+                
+                response = self.llm_client.chat.completions.create(
+                    model=self.llm_model,
+                    messages=messages,
+                    temperature=0.3,
+                    max_tokens=500
+                )
+                return response.choices[0].message.content
+            
+            elif self.llm_type == "ollama":
+                messages = []
+                if system_prompt:
+                    messages.append({"role": "system", "content": system_prompt})
+                messages.append({"role": "user", "content": prompt})
+                
+                response = self.llm_client.chat(
+                    model=self.llm_model,
+                    messages=messages
+                )
+                return response['message']['content']
+        
+        except Exception as e:
+            logger.warning(f"LLM call failed: {e}")
+            return None
+    
+    def _llm_parse_intent(self, message: str) -> Optional[Dict[str, Any]]:
+        """Use LLM to parse user intent"""
+        system_prompt = """You are a travel intent parser. Extract structured information from user queries.
+Return ONLY valid JSON with these fields:
+{
+  "action": "search" | "watch" | "quote" | "analyze" | "policy" | "confirm" | null,
+  "destination": "city name" | null,
+  "origin": "city name" | null,
+  "budget": number | null,
+  "preferences": ["pet-friendly", "breakfast", "direct", "near-transit"],
+  "option_number": 1 | 2 | 3 | null
+}
+
+Action meanings:
+- search: find flights/hotels/bundles
+- watch: create price alert
+- quote: get full booking quote  
+- analyze: check if price is good
+- policy: ask about cancellation/pets/baggage
+- confirm: proceed with booking
+
+Examples:
+"Find trips from Delhi to Mumbai with breakfast" -> {"action": "search", "destination": "Mumbai", "origin": "Delhi", "budget": null, "preferences": ["breakfast"], "option_number": null}
+"Is this a good deal?" -> {"action": "analyze", "destination": null, "origin": null, "budget": null, "preferences": [], "option_number": null}
+"Watch option 1 if price drops below $2000" -> {"action": "watch", "destination": null, "origin": null, "budget": 2000, "preferences": [], "option_number": 1}
+"Can I bring pets?" -> {"action": "policy", "destination": null, "origin": null, "budget": null, "preferences": ["pet-friendly"], "option_number": null}
+"Book it" -> {"action": "confirm", "destination": null, "origin": null, "budget": null, "preferences": [], "option_number": null}"""
+
+        response = self._call_llm(message, system_prompt)
+        if not response:
+            return None
+        
+        try:
+            import json
+            # Handle markdown code blocks
+            if "```json" in response:
+                response = response.split("```json")[1].split("```")[0]
+            elif "```" in response:
+                response = response.split("```")[1].split("```")[0]
+            
+            intent = json.loads(response.strip())
+            logger.info(f"LLM parsed intent: {intent}")
+            return intent
+        except Exception as e:
+            logger.warning(f"Failed to parse LLM response: {e}")
+            return None
 
     def chat(self, message: str, context: Optional[Dict] = None) -> ChatResponse:
         """Process user message and return response."""
@@ -917,7 +1003,25 @@ class ConciergeAgent:
         return self._execute_intent(merged_intent, message)
 
     def _parse_intent(self, message: str) -> Dict[str, Any]:
-        """Parse user intent from message"""
+        """Parse user intent from message - LLM first, rule-based fallback"""
+        
+        # Try LLM parsing first
+        llm_intent = self._llm_parse_intent(message)
+        if llm_intent:
+            # Normalize LLM output
+            return {
+                "action": llm_intent.get("action"),
+                "destination": llm_intent.get("destination"),
+                "origin": llm_intent.get("origin"),
+                "budget": llm_intent.get("budget"),
+                "preferences": llm_intent.get("preferences", []),
+                "bundle_id": None,
+                "quote_id": None,
+                "option_number": llm_intent.get("option_number")
+            }
+        
+        # Fallback to rule-based parsing
+        logger.info("Using rule-based intent parsing (LLM unavailable)")
         intent = {"action": None, "destination": None, "origin": None, "budget": None, "preferences": [], "bundle_id": None, "quote_id": None, "option_number": None}
         msg_lower = message.lower()
         
