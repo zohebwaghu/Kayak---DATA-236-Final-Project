@@ -1,7 +1,8 @@
 # interfaces/deals_cache.py
 """
 Deals Cache for storing and retrieving processed deals.
-Now reads from MongoDB for real data.
+Now reads from SQLite (SQLModel) - Assignment requirement.
+Falls back to MongoDB if SQLite not available.
 """
 
 import json
@@ -22,6 +23,18 @@ try:
     MONGO_AVAILABLE = True
 except ImportError:
     MONGO_AVAILABLE = False
+
+# SQLModel imports - Primary data source (Assignment requirement)
+try:
+    from sqlmodel import Session, select
+    from models.database import get_engine, init_db
+    from models.deals_entities import FlightDeal, HotelDeal
+    SQLMODEL_AVAILABLE = True
+except ImportError:
+    SQLMODEL_AVAILABLE = False
+    FlightDeal = None  # Define as None to avoid NameError in type hints
+    HotelDeal = None
+    logger.warning("SQLModel not available, will use MongoDB as fallback")
 
 
 @dataclass
@@ -49,7 +62,7 @@ class Deal:
     deal_score: int = 0  # 0-100
 
     # Tags
-    tags: List[str] = field(default_factory=list)  # ["pet-friendly", "refundable", etc.]
+    tags: List[str] = field(default_factory=list)
 
     # Timestamps
     discovered_at: str = ""
@@ -73,7 +86,8 @@ class Deal:
 class DealsCache:
     """
     Cache for storing and querying deals.
-    Now loads data from MongoDB.
+    Primary: SQLite via SQLModel (Assignment requirement)
+    Fallback: MongoDB
     """
 
     def __init__(self, redis_host: str = "localhost", redis_port: int = 6379,
@@ -83,6 +97,7 @@ class DealsCache:
         self.redis_client = None
         self.mongo_client = None
         self.mongo_db = None
+        self.use_sqlite = SQLMODEL_AVAILABLE
 
         # In-memory storage
         self._deals: Dict[str, Deal] = {}
@@ -90,7 +105,7 @@ class DealsCache:
         self._by_type: Dict[str, List[str]] = {}
         self._by_tag: Dict[str, List[str]] = {}
 
-        # Connect to Redis
+        # Connect to Redis (for caching)
         if REDIS_AVAILABLE:
             try:
                 self.redis_client = redis.Redis(
@@ -104,12 +119,11 @@ class DealsCache:
                 logger.warning(f"DealsCache Redis connection failed: {e}")
                 self.redis_client = None
 
-        # Connect to MongoDB
+        # Connect to MongoDB (fallback)
         if MONGO_AVAILABLE:
             try:
                 self.mongo_client = MongoClient(mongo_uri)
                 self.mongo_db = self.mongo_client[mongo_db]
-                # Test connection
                 self.mongo_db.list_collection_names()
                 logger.info(f"DealsCache connected to MongoDB: {mongo_uri}/{mongo_db}")
             except Exception as e:
@@ -117,11 +131,133 @@ class DealsCache:
                 self.mongo_client = None
                 self.mongo_db = None
 
-        # Load deals from MongoDB
-        self._load_deals_from_mongo()
+        # Load deals - prefer SQLite (Assignment requirement)
+        if self.use_sqlite:
+            logger.info("Loading deals from SQLite (SQLModel) - Assignment requirement")
+            self._load_deals_from_sqlite()
+        else:
+            logger.info("Loading deals from MongoDB (SQLite not available)")
+            self._load_deals_from_mongo()
+
+    def _load_deals_from_sqlite(self):
+        """Load flights and hotels from SQLite and convert to deals"""
+        try:
+            # Initialize database first (create tables if not exist)
+            from models.database import init_db
+            init_db()
+            
+            engine = get_engine()
+            
+            with Session(engine) as session:
+                # Load flights
+                flights = session.exec(select(FlightDeal)).all()
+                logger.info(f"Loading {len(flights)} flights from SQLite")
+                
+                for flight in flights:
+                    deal = self._sqlite_flight_to_deal(flight)
+                    if deal:
+                        self.add_deal(deal)
+                
+                # Load hotels
+                hotels = session.exec(select(HotelDeal)).all()
+                logger.info(f"Loading {len(hotels)} hotels from SQLite")
+                
+                for hotel in hotels:
+                    deal = self._sqlite_hotel_to_deal(hotel)
+                    if deal:
+                        self.add_deal(deal)
+            
+            logger.info(f"Loaded {len(self._deals)} deals from SQLite")
+            
+        except Exception as e:
+            logger.error(f"Error loading deals from SQLite: {e}")
+            # Fallback to MongoDB
+            if self.mongo_db is not None:
+                logger.info("Falling back to MongoDB")
+                self._load_deals_from_mongo()
+            else:
+                self._init_sample_deals()
+
+    def _sqlite_flight_to_deal(self, flight) -> Optional[Deal]:
+        """Convert SQLModel FlightDeal to Deal"""
+        try:
+            tags = json.loads(flight.tags) if flight.tags else []
+            
+            return Deal(
+                deal_id=f"flight_{flight.flight_id}",
+                listing_type="flight",
+                listing_id=flight.flight_id,
+                name=f"{flight.origin} → {flight.destination} ({flight.airline})",
+                origin=flight.origin,
+                destination=flight.destination,
+                current_price=flight.price,
+                original_price=flight.avg_30d_price,
+                avg_30d_price=flight.avg_30d_price,
+                discount_percent=flight.discount_percent,
+                availability=flight.available_seats,
+                deal_score=flight.deal_score,
+                tags=tags,
+                has_promo=flight.has_promo,
+                promo_end_date=flight.promo_end_date,
+                discovered_at=datetime.utcnow().isoformat(),
+                metadata={
+                    "airline": flight.airline,
+                    "flight_number": flight.flight_number,
+                    "stops": flight.stops,
+                    "duration": flight.duration,
+                    "class": flight.flight_class,
+                    "origin_city": flight.origin_city,
+                    "destination_city": flight.destination_city
+                }
+            )
+        except Exception as e:
+            logger.error(f"Error converting SQLite flight to deal: {e}")
+            return None
+
+    def _sqlite_hotel_to_deal(self, hotel) -> Optional[Deal]:
+        """Convert SQLModel HotelDeal to Deal"""
+        try:
+            tags = json.loads(hotel.tags) if hotel.tags else []
+            amenities = json.loads(hotel.amenities) if hotel.amenities else []
+            
+            return Deal(
+                deal_id=f"hotel_{hotel.hotel_id}",
+                listing_type="hotel",
+                listing_id=hotel.hotel_id,
+                name=hotel.name,
+                origin=None,
+                destination=hotel.city_code,  # Use city_code for matching
+                current_price=hotel.price_per_night,
+                original_price=hotel.avg_30d_price,
+                avg_30d_price=hotel.avg_30d_price,
+                discount_percent=hotel.discount_percent,
+                availability=hotel.available_rooms,
+                deal_score=hotel.deal_score,
+                tags=tags,
+                has_promo=hotel.has_promo,
+                promo_end_date=hotel.promo_end_date,
+                discovered_at=datetime.utcnow().isoformat(),
+                metadata={
+                    "hotel_type": hotel.hotel_type,
+                    "star_rating": hotel.star_rating,
+                    "city": hotel.city,
+                    "city_code": hotel.city_code,
+                    "neighbourhood": hotel.neighbourhood,  # Assignment requirement!
+                    "amenities": amenities,
+                    "rating": hotel.rating,
+                    "is_refundable": hotel.is_refundable,
+                    "pet_friendly": hotel.pet_friendly,
+                    "breakfast_included": hotel.breakfast_included,
+                    "near_transit": hotel.near_transit,  # Assignment requirement!
+                    "parking_available": hotel.parking_available
+                }
+            )
+        except Exception as e:
+            logger.error(f"Error converting SQLite hotel to deal: {e}")
+            return None
 
     def _load_deals_from_mongo(self):
-        """Load flights and hotels from MongoDB and convert to deals"""
+        """Load flights and hotels from MongoDB and convert to deals (fallback)"""
         if self.mongo_db is None:
             logger.warning("MongoDB not available, using sample deals")
             self._init_sample_deals()
@@ -155,9 +291,8 @@ class DealsCache:
             self._init_sample_deals()
 
     def _flight_to_deal(self, flight: Dict) -> Optional[Deal]:
-        """Convert MongoDB flight document to Deal - reads pre-calculated fields"""
+        """Convert MongoDB flight document to Deal"""
         try:
-            # Read directly from database (pre-calculated in import_data.py)
             price = float(flight.get("price", 0))
             avg_30d_price = float(flight.get("avg_30d_price", price * 1.15))
             discount_percent = float(flight.get("discount_percent", 13))
@@ -166,14 +301,15 @@ class DealsCache:
             has_promo = flight.get("has_promo", False)
             promo_end_date = flight.get("promo_end_date")
 
-            # Build tags
-            tags = []
-            if flight.get("stops", 0) == 0:
-                tags.append("direct-flight")
-            if flight.get("class", "").lower() == "business":
-                tags.append("business-class")
-            if has_promo:
-                tags.append("promo")
+            tags = flight.get("tags", [])
+            if isinstance(tags, str):
+                tags = json.loads(tags)
+            if not tags:
+                tags = []
+                if flight.get("stops", 0) == 0:
+                    tags.append("direct-flight")
+                if has_promo:
+                    tags.append("promo")
 
             return Deal(
                 deal_id=f"flight_{flight.get('flight_id', '')}",
@@ -183,7 +319,7 @@ class DealsCache:
                 origin=flight.get("origin", ""),
                 destination=flight.get("destination", ""),
                 current_price=price,
-                original_price=avg_30d_price,  # Use avg as "original"
+                original_price=avg_30d_price,
                 avg_30d_price=avg_30d_price,
                 discount_percent=discount_percent,
                 availability=available_seats,
@@ -207,9 +343,8 @@ class DealsCache:
             return None
 
     def _hotel_to_deal(self, hotel: Dict) -> Optional[Deal]:
-        """Convert MongoDB hotel document to Deal - reads pre-calculated fields"""
+        """Convert MongoDB hotel document to Deal"""
         try:
-            # Read directly from database (pre-calculated in import_data.py)
             price = float(hotel.get("price_per_night", 0))
             avg_30d_price = float(hotel.get("avg_30d_price", price * 1.15))
             discount_percent = float(hotel.get("discount_percent", 13))
@@ -217,23 +352,14 @@ class DealsCache:
             available_rooms = int(hotel.get("available_rooms", 10))
             has_promo = hotel.get("has_promo", False)
             promo_end_date = hotel.get("promo_end_date")
-            star_rating = hotel.get("star_rating", 3)
 
-            # Get tags from amenities
-            tags = hotel.get("tags", []) or hotel.get("amenities", [])
-            if isinstance(tags, list):
-                tags = tags.copy()  # Don't modify original
-            else:
-                tags = []
-            
-            if hotel.get("is_refundable") and "refundable" not in tags:
-                tags.append("refundable")
-            if has_promo and "promo" not in tags:
-                tags.append("promo")
+            tags = hotel.get("tags", [])
+            if isinstance(tags, str):
+                tags = json.loads(tags)
 
-            # Map city/country to airport code
-            city = hotel.get("city", "")
-            destination = self._city_to_airport(city)
+            amenities = hotel.get("amenities", [])
+            if isinstance(amenities, str):
+                amenities = json.loads(amenities)
 
             return Deal(
                 deal_id=f"hotel_{hotel.get('hotel_id', '')}",
@@ -241,9 +367,9 @@ class DealsCache:
                 listing_id=hotel.get("hotel_id", ""),
                 name=hotel.get("name", "Hotel"),
                 origin=None,
-                destination=destination,
+                destination=hotel.get("city_code", hotel.get("city", "")),
                 current_price=price,
-                original_price=avg_30d_price,  # Use avg as "original"
+                original_price=avg_30d_price,
                 avg_30d_price=avg_30d_price,
                 discount_percent=discount_percent,
                 availability=available_rooms,
@@ -253,108 +379,73 @@ class DealsCache:
                 promo_end_date=promo_end_date,
                 discovered_at=datetime.utcnow().isoformat(),
                 metadata={
-                    "star_rating": star_rating,
-                    "hotel_type": hotel.get("hotel_type", ""),
-                    "room_type": hotel.get("room_type", ""),
-                    "meal_plan": hotel.get("meal_plan", ""),
+                    "hotel_type": hotel.get("hotel_type", "Hotel"),
+                    "star_rating": hotel.get("star_rating", 3),
+                    "city": hotel.get("city", ""),
+                    "city_code": hotel.get("city_code", ""),
+                    "neighbourhood": hotel.get("neighbourhood", ""),
+                    "amenities": amenities,
                     "rating": hotel.get("rating", 4.0),
-                    "city": city,
-                    "country": hotel.get("country", "")
+                    "is_refundable": hotel.get("is_refundable", True),
+                    "pet_friendly": hotel.get("pet_friendly", False),
+                    "breakfast_included": hotel.get("breakfast_included", False),
+                    "near_transit": hotel.get("near_transit", False),
+                    "parking_available": hotel.get("parking_available", False)
                 }
             )
         except Exception as e:
             logger.error(f"Error converting hotel to deal: {e}")
             return None
 
-    def _city_to_airport(self, city: str) -> str:
-        """Map city name to airport code"""
-        city_map = {
-            # India cities (from flight dataset)
-            "Delhi": "DEL",
-            "Mumbai": "BOM",
-            "Bangalore": "BLR",
-            "Kolkata": "CCU",
-            "Hyderabad": "HYD",
-            "Chennai": "MAA",
-            # Countries from hotel dataset -> major airport
-            "PRT": "LIS",  # Portugal -> Lisbon
-            "GBR": "LHR",  # UK -> London Heathrow
-            "USA": "JFK",  # USA -> New York JFK
-            "ESP": "MAD",  # Spain -> Madrid
-            "FRA": "CDG",  # France -> Paris CDG
-            "DEU": "FRA",  # Germany -> Frankfurt
-            "ITA": "FCO",  # Italy -> Rome
-            "BRA": "GRU",  # Brazil -> Sao Paulo
-            "CHE": "ZRH",  # Switzerland -> Zurich
-            "NLD": "AMS",  # Netherlands -> Amsterdam
-            "AUT": "VIE",  # Austria -> Vienna
-            "BEL": "BRU",  # Belgium -> Brussels
-            "IRL": "DUB",  # Ireland -> Dublin
-            "POL": "WAW",  # Poland -> Warsaw
-            "SWE": "ARN",  # Sweden -> Stockholm
-            "NOR": "OSL",  # Norway -> Oslo
-            "DNK": "CPH",  # Denmark -> Copenhagen
-            "FIN": "HEL",  # Finland -> Helsinki
-            "RUS": "SVO",  # Russia -> Moscow
-            "CHN": "PEK",  # China -> Beijing
-            "JPN": "NRT",  # Japan -> Tokyo Narita
-            "AUS": "SYD",  # Australia -> Sydney
-            "NZL": "AKL",  # New Zealand -> Auckland
-            "ZAF": "JNB",  # South Africa -> Johannesburg
-            "ARE": "DXB",  # UAE -> Dubai
-            "SGP": "SIN",  # Singapore
-            "HKG": "HKG",  # Hong Kong
-            "THA": "BKK",  # Thailand -> Bangkok
-            "MYS": "KUL",  # Malaysia -> Kuala Lumpur
-            "IDN": "CGK",  # Indonesia -> Jakarta
-            "PHL": "MNL",  # Philippines -> Manila
-            "VNM": "SGN",  # Vietnam -> Ho Chi Minh
-            "KOR": "ICN",  # South Korea -> Seoul Incheon
-            "TWN": "TPE",  # Taiwan -> Taipei
-            "IND": "DEL",  # India -> Delhi
-            "MEX": "MEX",  # Mexico -> Mexico City
-            "ARG": "EZE",  # Argentina -> Buenos Aires
-            "CHL": "SCL",  # Chile -> Santiago
-            "COL": "BOG",  # Colombia -> Bogota
-            "PER": "LIM",  # Peru -> Lima
-        }
-        if not city:
-            return "XXX"
-        # Try exact match first
-        if city in city_map:
-            return city_map[city]
-        # Try uppercase
-        if city.upper() in city_map:
-            return city_map[city.upper()]
-        # Default: first 3 chars uppercase
-        return city[:3].upper() if len(city) >= 3 else city.upper()
-
     def _init_sample_deals(self):
-        """Initialize with sample deals if MongoDB not available"""
-        logger.info("Initializing sample deals")
-        # Keep minimal sample deals for fallback
+        """Initialize with sample deals if no database available"""
+        logger.warning("Initializing with sample deals (no database)")
+        
         sample_flights = [
             Deal(
                 deal_id="flight_sample_1",
                 listing_type="flight",
-                listing_id="sample_1",
-                name="SFO → MIA (United)",
-                origin="SFO",
-                destination="MIA",
-                current_price=299,
-                original_price=399,
-                avg_30d_price=350,
-                discount_percent=15,
-                availability=12,
+                listing_id="FL_SAMPLE_1",
+                name="DEL → BOM (Sample Airline)",
+                origin="DEL",
+                destination="BOM",
+                current_price=5000,
+                avg_30d_price=6000,
+                discount_percent=17,
+                availability=20,
                 deal_score=75,
                 tags=["direct-flight"],
-                discovered_at=datetime.utcnow().isoformat()
+                metadata={"airline": "Sample Airline", "stops": 0, "duration": 2.0}
             )
         ]
-        for deal in sample_flights:
+        
+        sample_hotels = [
+            Deal(
+                deal_id="hotel_sample_1",
+                listing_type="hotel",
+                listing_id="HT_SAMPLE_1",
+                name="Sample Hotel - Mumbai",
+                destination="BOM",
+                current_price=100,
+                avg_30d_price=120,
+                discount_percent=17,
+                availability=5,
+                deal_score=70,
+                tags=["wifi", "breakfast"],
+                metadata={
+                    "city": "Mumbai",
+                    "city_code": "BOM",
+                    "neighbourhood": "Bandra",
+                    "star_rating": 4
+                }
+            )
+        ]
+        
+        for deal in sample_flights + sample_hotels:
             self.add_deal(deal)
 
     def _get_key(self, deal_id: str) -> str:
+        """Get Redis key for deal"""
         return f"deal:{deal_id}"
 
     def add_deal(self, deal: Deal):
@@ -364,11 +455,10 @@ class DealsCache:
 
         # Index by destination
         if deal.destination:
-            dest_upper = deal.destination.upper()
-            if dest_upper not in self._by_destination:
-                self._by_destination[dest_upper] = []
-            if deal.deal_id not in self._by_destination[dest_upper]:
-                self._by_destination[dest_upper].append(deal.deal_id)
+            if deal.destination not in self._by_destination:
+                self._by_destination[deal.destination] = []
+            if deal.deal_id not in self._by_destination[deal.destination]:
+                self._by_destination[deal.destination].append(deal.deal_id)
 
         # Index by type
         if deal.listing_type not in self._by_type:
@@ -386,13 +476,13 @@ class DealsCache:
         # Add to Redis
         if self.redis_client:
             try:
-                key = self._get_key(deal.deal_id)
                 self.redis_client.setex(
-                    key,
+                    self._get_key(deal.deal_id),
                     self.ttl_seconds,
                     json.dumps(deal.to_dict())
                 )
-                self.redis_client.sadd(f"deals:dest:{deal.destination}", deal.deal_id)
+                if deal.destination:
+                    self.redis_client.sadd(f"deals:dest:{deal.destination}", deal.deal_id)
                 self.redis_client.sadd(f"deals:type:{deal.listing_type}", deal.deal_id)
                 for tag in deal.tags:
                     self.redis_client.sadd(f"deals:tag:{tag}", deal.deal_id)
@@ -401,7 +491,9 @@ class DealsCache:
 
     def get_deal(self, deal_id: str) -> Optional[Deal]:
         """Get a deal by ID"""
-        # Try Redis first
+        if deal_id in self._deals:
+            return self._deals[deal_id]
+
         if self.redis_client:
             try:
                 data = self.redis_client.get(self._get_key(deal_id))
@@ -410,22 +502,18 @@ class DealsCache:
             except Exception as e:
                 logger.error(f"Redis get deal error: {e}")
 
-        return self._deals.get(deal_id)
-
-    def get_deals_by_destination(self, destination: str) -> List[Deal]:
-        """Get all deals for a destination"""
-        deal_ids = self._by_destination.get(destination.upper(), [])
-        return [self._deals[did] for did in deal_ids if did in self._deals]
+        return None
 
     def get_deals_by_type(self, listing_type: str) -> List[Deal]:
-        """Get all deals of a type (flight/hotel)"""
+        """Get all deals of a type"""
         deal_ids = self._by_type.get(listing_type, [])
         return [self._deals[did] for did in deal_ids if did in self._deals]
 
-    def get_deals_by_tag(self, tag: str) -> List[Deal]:
-        """Get all deals with a specific tag"""
-        deal_ids = self._by_tag.get(tag, [])
-        return [self._deals[did] for did in deal_ids if did in self._deals]
+    def get_best_deals(self, limit: int = 10) -> List[Deal]:
+        """Get top deals by score"""
+        all_deals = list(self._deals.values())
+        all_deals.sort(key=lambda d: d.deal_score, reverse=True)
+        return all_deals[:limit]
 
     def search_deals(
         self,
@@ -437,23 +525,37 @@ class DealsCache:
         tags: Optional[List[str]] = None,
         limit: int = 10
     ) -> List[Deal]:
-        """
-        Search deals with multiple filters.
-        """
-        results = []
+        """Search deals with filters"""
+        candidates = set(self._deals.keys())
 
-        for deal in self._deals.values():
-            # Filter by destination
-            if destination and deal.destination.upper() != destination.upper():
+        # Filter by destination
+        if destination:
+            dest_deals = set(self._by_destination.get(destination, []))
+            candidates = candidates.intersection(dest_deals) if dest_deals else set()
+
+        # Filter by type
+        if listing_type:
+            type_deals = set(self._by_type.get(listing_type, []))
+            candidates = candidates.intersection(type_deals)
+
+        # Filter by tags
+        if tags:
+            for tag in tags:
+                tag_deals = set(self._by_tag.get(tag, []))
+                if tag_deals:
+                    candidates = candidates.intersection(tag_deals)
+
+        # Get deal objects and apply remaining filters
+        results = []
+        for deal_id in candidates:
+            deal = self._deals.get(deal_id)
+            if not deal:
                 continue
 
             # Filter by origin (for flights)
-            if origin and deal.origin and deal.origin.upper() != origin.upper():
-                continue
-
-            # Filter by type
-            if listing_type and deal.listing_type != listing_type:
-                continue
+            if origin and deal.listing_type == "flight":
+                if deal.origin != origin:
+                    continue
 
             # Filter by price
             if max_price and deal.current_price > max_price:
@@ -463,23 +565,11 @@ class DealsCache:
             if deal.deal_score < min_score:
                 continue
 
-            # Filter by tags (all must match)
-            if tags:
-                if not all(tag in deal.tags for tag in tags):
-                    continue
-
             results.append(deal)
 
-        # Sort by price for variety - different prices have different characteristics
-        results.sort(key=lambda d: d.current_price)
-
+        # Sort by deal score
+        results.sort(key=lambda d: d.deal_score, reverse=True)
         return results[:limit]
-
-    def get_best_deals(self, limit: int = 10) -> List[Deal]:
-        """Get top deals by score"""
-        deals = list(self._deals.values())
-        deals.sort(key=lambda d: d.deal_score, reverse=True)
-        return deals[:limit]
 
     def get_deals_for_bundle(
         self,
@@ -500,7 +590,7 @@ class DealsCache:
             listing_type="flight",
             max_price=max_flight_price,
             tags=[t for t in (tags or []) if t in ["direct-flight", "no-redeye"]],
-            limit=50  # Get more to select from
+            limit=50
         )
         
         # Get all matching hotels
@@ -509,7 +599,7 @@ class DealsCache:
             listing_type="hotel",
             max_price=max_hotel_price,
             tags=[t for t in (tags or []) if t not in ["direct-flight", "no-redeye"]],
-            limit=50  # Get more to select from
+            limit=50
         )
         
         # If no hotels for destination, get any hotels with tags
@@ -522,10 +612,10 @@ class DealsCache:
                 limit=50
             )
         
-        # Select diverse flights: Best Value, Best Deal, Best Quality
+        # Select diverse flights
         flights = self._select_diverse(all_flights, "flight")
         
-        # Select diverse hotels: Best Value, Best Deal, Best Quality
+        # Select diverse hotels
         hotels = self._select_diverse(all_hotels, "hotel")
         
         return {"flights": flights, "hotels": hotels}
@@ -535,7 +625,7 @@ class DealsCache:
         Select 3 diverse options:
         1. Best Value (lowest price)
         2. Best Deal (highest deal_score)
-        3. Best Quality (highest rating/stars for hotels, direct flight for flights)
+        3. Best Quality (highest rating/stars)
         """
         if not deals:
             return []
@@ -562,18 +652,16 @@ class DealsCache:
                 selected_ids.add(deal.deal_id)
                 break
         
-        # 3. Best Quality - depends on type
+        # 3. Best Quality
         if deal_type == "hotel":
-            # Highest star rating, then highest review rating
             by_quality = sorted(deals, key=lambda d: (
                 d.metadata.get("star_rating", 0),
                 d.metadata.get("rating", 0)
             ), reverse=True)
         else:
-            # For flights: direct flight first, then shortest duration
             by_quality = sorted(deals, key=lambda d: (
-                0 if d.metadata.get("stops", 1) == 0 else 1,  # Direct first
-                d.metadata.get("duration", 99)  # Then shortest
+                0 if d.metadata.get("stops", 1) == 0 else 1,
+                d.metadata.get("duration", 99)
             ))
         
         for deal in by_quality:
@@ -582,7 +670,7 @@ class DealsCache:
                 selected_ids.add(deal.deal_id)
                 break
         
-        # If still need more, add by price
+        # Fill remaining
         if len(selected) < 3:
             for deal in by_price:
                 if deal.deal_id not in selected_ids:
@@ -599,7 +687,6 @@ class DealsCache:
         if not deal:
             return
 
-        # Remove from Redis
         if self.redis_client:
             try:
                 self.redis_client.delete(self._get_key(deal_id))
@@ -610,7 +697,6 @@ class DealsCache:
             except Exception as e:
                 logger.error(f"Redis remove deal error: {e}")
 
-        # Remove from memory
         if deal_id in self._deals:
             del self._deals[deal_id]
 
@@ -648,7 +734,8 @@ class DealsCache:
             "total_deals": len(self._deals),
             "by_type": {k: len(v) for k, v in self._by_type.items()},
             "by_destination": {k: len(v) for k, v in self._by_destination.items()},
-            "top_tags": {k: len(v) for k, v in sorted(self._by_tag.items(), key=lambda x: -len(x[1]))[:10]}
+            "top_tags": {k: len(v) for k, v in sorted(self._by_tag.items(), key=lambda x: -len(x[1]))[:10]},
+            "data_source": "SQLite" if self.use_sqlite else "MongoDB"
         }
 
 
@@ -656,14 +743,17 @@ class DealsCache:
 # Global Instance
 # ============================================
 
-from config import settings
-
-deals_cache = DealsCache(
-    redis_host=settings.REDIS_HOST,
-    redis_port=settings.REDIS_PORT,
-    mongo_uri=getattr(settings, 'MONGO_URI', 'mongodb://mongodb:27017'),
-    mongo_db=getattr(settings, 'MONGO_DB', 'kayak_doc')
-)
+try:
+    from config import settings
+    deals_cache = DealsCache(
+        redis_host=settings.REDIS_HOST,
+        redis_port=settings.REDIS_PORT,
+        mongo_uri=getattr(settings, 'MONGO_URI', 'mongodb://mongodb:27017'),
+        mongo_db=getattr(settings, 'MONGO_DB', 'kayak_doc')
+    )
+except Exception as e:
+    logger.warning(f"Could not load settings, using defaults: {e}")
+    deals_cache = DealsCache()
 
 
 # ============================================

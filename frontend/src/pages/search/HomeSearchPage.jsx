@@ -270,32 +270,32 @@ const HomeSearchPage = () => {
         setAiSessionId(response.session_id);
       }
 
-      // Check if this is a booking_confirmation - redirect to booking page
-      if (response.type === 'booking_confirmation') {
+      // Check if this is a booking response - redirect to confirmation page
+      if (response.type === 'booking' || response.booking_reference) {
         console.log('Booking confirmation received:', response);
         
         // Add confirmation message to conversation
         setAiConversation(prev => [...prev, {
           role: 'assistant',
-          content: response.response || 'Great! Redirecting you to complete your booking...'
+          content: response.response || `✅ Booking confirmed! Reference: ${response.booking_reference}`
         }]);
 
-        // Save booking data to localStorage for BookingSummaryPage
-        const bookingData = {
-          quote: lastAiQuote || {
-            response: response.response,
-            bundles: response.bundles,
-            timestamp: new Date().toISOString()
-          },
-          sessionId: aiSessionId,
-          userId: userId
-        };
-        localStorage.setItem('aiBookingData', JSON.stringify(bookingData));
+        // Show success message
+        setAiResponse(response.response || `✅ Booking confirmed! Reference: ${response.booking_reference}`);
 
-        // Redirect to booking summary page
+        // Redirect to booking confirmation page with booking data
         setTimeout(() => {
-          navigate('/booking/summary');
-        }, 500);
+          navigate('/booking/confirmation', {
+            state: {
+              booking: {
+                booking_reference: response.booking_reference,
+                response: response.response,
+                quote: lastAiQuote,
+                timestamp: new Date().toISOString()
+              }
+            }
+          });
+        }, 1500);
 
         setAiLoading(false);
         return;

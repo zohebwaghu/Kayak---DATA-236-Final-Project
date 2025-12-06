@@ -42,7 +42,8 @@ MYSQL_PASSWORD = os.getenv("DB_PASSWORD", "password")
 MYSQL_DB = os.getenv("DB_NAME_USERS", "kayak_users")
 
 # Data directory
-DATA_DIR = os.getenv("DATA_DIR", "./data")
+# In Docker: data/ is mounted to /data
+DATA_DIR = os.getenv("DATA_DIR", "/data")
 
 # ============================================
 # City/Country Mapping for Hotels
