@@ -1,4 +1,3 @@
-// src/pages/search/HomeSearchPage.jsx
 /**
  * Home Search Page - Updated with AI Integration
  * Adds AI state management and connects to AI service
@@ -262,10 +261,13 @@ const HomeSearchPage = () => {
     setAiError(null);
 
     // Add user message to conversation
-    setAiConversation(prev => [...prev, {
-      role: 'user',
-      content: prompt
-    }]);
+    setAiConversation((prev) => [
+      ...prev,
+      {
+        role: 'user',
+        content: prompt,
+      },
+    ]);
 
     try {
       const response = await sendChatMessage(prompt, userId, aiSessionId);
@@ -275,31 +277,57 @@ const HomeSearchPage = () => {
         setAiSessionId(response.session_id);
       }
 
-      // Check if this is a booking response - redirect to confirmation page
+      // ✅ Check if this is a booking response - now store data for BookingSummaryPage
       if (response.type === 'booking' || response.booking_reference) {
         console.log('Booking confirmation received:', response);
-        
+
+        // Build a robust quote object:
+        let quoteForStorage = lastAiQuote;
+        if (!quoteForStorage) {
+          quoteForStorage = {
+            response: response.response,
+            bundles: response.bundles || [],
+            quote: response.quote || null,
+            timestamp: new Date().toISOString(),
+          };
+        }
+
+        // Prepare a compact payload for the summary page
+        const aiBookingData = {
+          booking_reference: response.booking_reference || null,
+          response: response.response,
+          quote: quoteForStorage,
+          // keep bundles at top level as well for convenience
+          bundles: quoteForStorage.bundles || response.bundles || [],
+          createdAt: new Date().toISOString(),
+        };
+
+        try {
+          localStorage.setItem('aiBookingData', JSON.stringify(aiBookingData));
+        } catch (storageErr) {
+          console.error('Failed to persist AI booking data:', storageErr);
+        }
+
         // Add confirmation message to conversation
-        setAiConversation(prev => [...prev, {
-          role: 'assistant',
-          content: response.response || `✅ Booking confirmed! Reference: ${response.booking_reference}`
-        }]);
+        setAiConversation((prev) => [
+          ...prev,
+          {
+            role: 'assistant',
+            content:
+              response.response ||
+              `✅ Booking confirmed! Reference: ${response.booking_reference}`,
+          },
+        ]);
 
         // Show success message
-        setAiResponse(response.response || `✅ Booking confirmed! Reference: ${response.booking_reference}`);
+        setAiResponse(
+          response.response ||
+            `✅ Booking confirmed! Reference: ${response.booking_reference}`
+        );
 
-        // Redirect to booking confirmation page with booking data
+        // 👉 Redirect to BOOKING SUMMARY (not confirmation) so user can review & pay
         setTimeout(() => {
-          navigate('/booking/confirmation', {
-            state: {
-              booking: {
-                booking_reference: response.booking_reference,
-                response: response.response,
-                quote: lastAiQuote,
-                timestamp: new Date().toISOString()
-              }
-            }
-          });
+          navigate('/booking/summary');
         }, 1500);
 
         setAiLoading(false);
@@ -312,7 +340,7 @@ const HomeSearchPage = () => {
           response: response.response,
           bundles: response.bundles,
           quote: response.quote,
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
         });
         console.log('Quote saved for booking');
       }
@@ -323,20 +351,25 @@ const HomeSearchPage = () => {
       setAiSuggestions(response.suggestions || []);
 
       // Add AI response to conversation
-      setAiConversation(prev => [...prev, {
-        role: 'assistant',
-        content: response.response || ''
-      }]);
-
+      setAiConversation((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: response.response || '',
+        },
+      ]);
     } catch (err) {
       console.error('AI search error:', err);
       setAiError('Failed to get AI recommendations. Please try again.');
 
       // Add error message to conversation
-      setAiConversation(prev => [...prev, {
-        role: 'assistant',
-        content: 'Sorry, I encountered an error. Please try again.'
-      }]);
+      setAiConversation((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: 'Sorry, I encountered an error. Please try again.',
+        },
+      ]);
     } finally {
       setAiLoading(false);
     }
@@ -359,9 +392,9 @@ const HomeSearchPage = () => {
         listing_name: bundle.name,
         watch_type: 'price',
         threshold: bundle.total_price * 0.9, // Alert if 10% drop
-        current_value: bundle.total_price
+        current_value: bundle.total_price,
       });
-      alert('Watch created! You\'ll be notified when the price drops.');
+      alert("Watch created! You'll be notified when the price drops.");
     } catch (err) {
       console.error('Failed to create watch:', err);
       alert('Failed to create watch. Please try again.');
@@ -393,8 +426,8 @@ const HomeSearchPage = () => {
         bookingType: 'bundle',
         listing: bundle,
         flight: bundle.flight,
-        hotel: bundle.hotel
-      }
+        hotel: bundle.hotel,
+      },
     });
   };
 
@@ -457,7 +490,9 @@ const HomeSearchPage = () => {
             <div className="home-tabs-row">
               <button
                 type="button"
-                className={`home-tab ${activeTab === 'flights' ? 'home-tab--active' : ''}`}
+                className={`home-tab ${
+                  activeTab === 'flights' ? 'home-tab--active' : ''
+                }`}
                 onClick={() => handleTabChange('flights')}
               >
                 <span className="home-tab-icon" aria-hidden="true">
@@ -468,7 +503,9 @@ const HomeSearchPage = () => {
 
               <button
                 type="button"
-                className={`home-tab ${activeTab === 'stays' ? 'home-tab--active' : ''}`}
+                className={`home-tab ${
+                  activeTab === 'stays' ? 'home-tab--active' : ''
+                }`}
                 onClick={() => handleTabChange('stays')}
               >
                 <span className="home-tab-icon" aria-hidden="true">
@@ -479,7 +516,9 @@ const HomeSearchPage = () => {
 
               <button
                 type="button"
-                className={`home-tab ${activeTab === 'cars' ? 'home-tab--active' : ''}`}
+                className={`home-tab ${
+                  activeTab === 'cars' ? 'home-tab--active' : ''
+                }`}
                 onClick={() => handleTabChange('cars')}
               >
                 <span className="home-tab-icon" aria-hidden="true">
@@ -490,7 +529,9 @@ const HomeSearchPage = () => {
 
               <button
                 type="button"
-                className={`home-tab ${activeTab === 'ai' ? 'home-tab--active' : ''}`}
+                className={`home-tab ${
+                  activeTab === 'ai' ? 'home-tab--active' : ''
+                }`}
                 onClick={() => handleTabChange('ai')}
               >
                 <span className="home-tab-icon" aria-hidden="true">
@@ -582,24 +623,41 @@ const HomeSearchPage = () => {
                   flightDate.setDate(today.getDate() + flight.days_left);
                 }
 
-                const dateOptions = { month: 'short', day: 'numeric', weekday: 'short' };
-                const dateStr = flightDate.toLocaleDateString('en-US', dateOptions);
+                const dateOptions = {
+                  month: 'short',
+                  day: 'numeric',
+                  weekday: 'short',
+                };
+                const dateStr = flightDate.toLocaleDateString(
+                  'en-US',
+                  dateOptions
+                );
 
-                const stopsText = typeof flight.stops === 'number'
-                  ? (flight.stops === 0 ? 'Non-stop' : `${flight.stops} stop${flight.stops === 1 ? '' : 's'}`)
-                  : null;
+                const stopsText =
+                  typeof flight.stops === 'number'
+                    ? flight.stops === 0
+                      ? 'Non-stop'
+                      : `${flight.stops} stop${
+                          flight.stops === 1 ? '' : 's'
+                        }`
+                    : null;
 
                 const departText = flight.departure_time
                   ? `Departs ${flight.departure_time}`
                   : dateStr;
 
                 const priceText =
-                  typeof flight.price === 'number' ? `$${flight.price.toFixed(0)}` : '—';
+                  typeof flight.price === 'number'
+                    ? `$${flight.price.toFixed(0)}`
+                    : '—';
 
                 // Features for the card
                 const features = [];
                 if (flight.stops === 0) {
-                  features.push({ icon: 'bi-check-circle-fill', text: 'Non-stop' });
+                  features.push({
+                    icon: 'bi-check-circle-fill',
+                    text: 'Non-stop',
+                  });
                 }
                 if (flight.duration) {
                   features.push({ icon: 'bi-clock', text: flight.duration });
@@ -613,7 +671,9 @@ const HomeSearchPage = () => {
                     topBadge={showBestDeal ? 'Best deal' : null}
                     title={title}
                     subtitle={flight.airline || 'Multiple airlines'}
-                    meta={`${dateStr} · ${stopsText || 'Multiple stops'} · ${departText}`}
+                    meta={`${dateStr} · ${
+                      stopsText || 'Multiple stops'
+                    } · ${departText}`}
                     priceText={priceText}
                     priceSubtext="per person"
                     features={features.length > 0 ? features : null}
@@ -646,26 +706,41 @@ const HomeSearchPage = () => {
                 ) : null
               }
               renderItem={(hotel, index) => {
-                const name = hotel.name || hotel.hotelName || hotel.propertyName || 'Hotel';
+                const name =
+                  hotel.name ||
+                  hotel.hotelName ||
+                  hotel.propertyName ||
+                  'Hotel';
                 const city = hotel.city || '';
-                const price = hotel.pricePerNight ?? hotel.price ?? hotel.samplePrice ?? null;
-                const star = hotel.starRating ?? hotel.stars ?? hotel.rating ?? null;
+                const price =
+                  hotel.pricePerNight ??
+                  hotel.price ??
+                  hotel.samplePrice ??
+                  null;
+                const star =
+                  hotel.starRating ?? hotel.stars ?? hotel.rating ?? null;
 
                 // Build features from amenities
                 const features = [];
                 if (Array.isArray(hotel.amenities)) {
-                  hotel.amenities.slice(0, 2).forEach(amenity => {
+                  hotel.amenities.slice(0, 2).forEach((amenity) => {
                     features.push({ icon: 'bi-check', text: amenity });
                   });
                 }
                 // Add free cancellation randomly for demo
                 if (index % 2 === 0) {
-                  features.push({ icon: 'bi-x-circle', text: 'Free cancellation' });
+                  features.push({
+                    icon: 'bi-x-circle',
+                    text: 'Free cancellation',
+                  });
                 }
 
                 const starDisplay = star ? '★'.repeat(Math.min(star, 5)) : '';
                 const title = star ? `${name}` : name;
-                const priceText = typeof price === 'number' ? `$${price.toFixed(0)}` : '—';
+                const priceText =
+                  typeof price === 'number'
+                    ? `$${price.toFixed(0)}`
+                    : '—';
 
                 // Show "Recommended" badge for first hotel
                 const showRecommended = index === 0;
@@ -712,10 +787,14 @@ const HomeSearchPage = () => {
               }
               renderItem={(car, index) => {
                 const type = car.carType || car.type || 'Car';
-                const price = car.pricePerDay ?? car.dailyPrice ?? car.price ?? null;
+                const price =
+                  car.pricePerDay ?? car.dailyPrice ?? car.price ?? null;
                 const loc = car.location || '';
                 const company = car.company || car.vendor || '';
-                const priceText = typeof price === 'number' ? `$${price.toFixed(0)}` : '—';
+                const priceText =
+                  typeof price === 'number'
+                    ? `$${price.toFixed(0)}`
+                    : '—';
 
                 // Build features
                 const features = [];
@@ -726,7 +805,10 @@ const HomeSearchPage = () => {
                   features.push({ icon: 'bi-snow', text: 'A/C' });
                 }
                 if (car.unlimitedMiles !== false) {
-                  features.push({ icon: 'bi-speedometer', text: 'Unlimited miles' });
+                  features.push({
+                    icon: 'bi-speedometer',
+                    text: 'Unlimited miles',
+                  });
                 }
 
                 // Show "Great value" badge for first car

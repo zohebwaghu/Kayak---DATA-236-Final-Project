@@ -1,4 +1,3 @@
-// src/pages/bookings/BookingSummaryPage.jsx
 import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import './BookingSummaryPage.css';
@@ -17,7 +16,7 @@ import './BookingSummaryPage.css';
 const BookingSummaryPage = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  
+
   const [bookingData, setBookingData] = useState(null);
 
   // Check for AI booking data in localStorage
@@ -35,7 +34,8 @@ const BookingSummaryPage = () => {
     }
   }, []);
 
-  const bookingType = location.state?.bookingType || (bookingData ? 'bundle' : null);
+  const bookingType =
+    location.state?.bookingType || (bookingData ? 'bundle' : null);
   const listing = location.state?.listing || null;
   const aiQuote = bookingData?.quote || null;
 
@@ -63,38 +63,211 @@ const BookingSummaryPage = () => {
     );
   }
 
-  // Handle AI booking data
+  // ---------- AI BOOKING PATH (bundle from AI chat) ----------
   if (aiQuote) {
-    // Parse the quote response to extract details
-    const quoteText = aiQuote.response || '';
-    
-    // Extract title (first line after **)
-    const titleMatch = quoteText.match(/\*\*Complete Quote: (.+?)\*\*/);
-    const title = titleMatch ? titleMatch[1] : 'AI Travel Package';
-    
-    // Extract grand total
-    const totalMatch = quoteText.match(/\*\*Grand Total: \$(\d+)\*\*/);
-    const grandTotal = totalMatch ? parseInt(totalMatch[1]) : 0;
-    
-    // Extract flight info
-    const flightMatch = quoteText.match(/\*\*Flight:\*\*[\s\S]*?Total: \$(\d+)/);
-    const flightTotal = flightMatch ? parseInt(flightMatch[1]) : 0;
-    
-    // Extract hotel info
-    const hotelMatch = quoteText.match(/\*\*Hotel:\*\*[\s\S]*?Total: \$(\d+)/);
-    const hotelTotal = hotelMatch ? parseInt(hotelMatch[1]) : 0;
+    // 1️⃣ Try to use structured data from bundles / quote object first
+    const bundles =
+      bookingData?.bundles ||
+      aiQuote?.bundles ||
+      (Array.isArray(bookingData?.quote?.bundles)
+        ? bookingData.quote.bundles
+        : []);
+
+    let title = 'AI Travel Package';
+    let flightTotal = 0;
+    let hotelTotal = 0;
+    let grandTotal = 0;
+    let primaryBundle = null; // <-- keep reference so we can pull IDs later
+
+    if (bundles && bundles.length > 0) {
+      // Pick the first bundle as the selected one
+      const primary = bundles[0];
+      primaryBundle = primary;
+
+      // Title
+      title =
+        primary.name ||
+        primary.title ||
+        primary.package_name ||
+        'AI Travel Package';
+
+      // Try to get total from bundle-level fields
+      const bundleTotal =
+        primary.total_price ??
+        primary.totalPrice ??
+        primary.packageTotal ??
+        primary.grand_total ??
+        null;
+
+      if (typeof bundleTotal === 'number') {
+        grandTotal = bundleTotal;
+      }
+
+      // Flight price from nested flight object or explicit field
+      const flightPriceCandidate =
+        primary.flight_total ??
+        primary.flightTotal ??
+        primary.flight?.total_price ??
+        primary.flight?.totalPrice ??
+        primary.flight?.price ??
+        null;
+
+      if (typeof flightPriceCandidate === 'number') {
+        flightTotal = flightPriceCandidate;
+      }
+
+      // Hotel price from nested hotel object or explicit field
+      const hotelPriceCandidate =
+        primary.hotel_total ??
+        primary.hotelTotal ??
+        primary.hotel?.total_price ??
+        primary.hotel?.totalPrice ??
+        primary.hotel?.pricePerNight ??
+        primary.hotel?.price ??
+        null;
+
+      if (typeof hotelPriceCandidate === 'number') {
+        hotelTotal = hotelPriceCandidate;
+      }
+
+      // If bundle had no explicit grandTotal, derive it from parts
+      if (!grandTotal && (flightTotal || hotelTotal)) {
+        grandTotal = (flightTotal || 0) + (hotelTotal || 0);
+      }
+    }
+
+    // 2️⃣ If still zero, fall back to parsing Markdown / text response
+    if (!grandTotal || (!flightTotal && !hotelTotal)) {
+      const quoteText = aiQuote.response || '';
+
+      // Extract title (preferred: "Complete Quote: ...")
+      const titleMatch = quoteText.match(/\*\*Complete Quote: (.+?)\*\*/);
+      if (titleMatch && titleMatch[1]) {
+        title = titleMatch[1];
+      } else {
+        // Fallback: "**Quote Q-XXXX** Flight: ..."
+        const quoteIdMatch = quoteText.match(/\*\*Quote\s+([^\*]+)\*\*/i);
+        if (quoteIdMatch && quoteIdMatch[1]) {
+          title = `AI Package ${quoteIdMatch[1].trim()}`;
+        }
+      }
+
+      // Extract grand total: "**Grand Total: $2830.03**"
+      const totalMatch = quoteText.match(
+        /\*\*Grand Total:\s*\$(\d+(\.\d+)?)\s*\*\*/,
+      );
+      if (totalMatch && totalMatch[1]) {
+        grandTotal = parseFloat(totalMatch[1]);
+      }
+
+      // Extract flight info
+      let flightMatch = quoteText.match(
+        /\*\*Flight:\*\*[\s\S]*?Total:\s*\$(\d+(\.\d+)?)/,
+      );
+      if (flightMatch && flightMatch[1]) {
+        flightTotal = parseFloat(flightMatch[1]);
+      } else {
+        // Fallback for: "Flight: $2409.00 + $289.08 taxes"
+        const flightInlineMatch = quoteText.match(
+          /Flight:\s*\$(\d+(\.\d+)?)(?:\s*\+\s*\$(\d+(\.\d+)?)\s*taxes)?/i,
+        );
+        if (flightInlineMatch && flightInlineMatch[1]) {
+          const base = parseFloat(flightInlineMatch[1]);
+          const tax = flightInlineMatch[3]
+            ? parseFloat(flightInlineMatch[3])
+            : 0;
+          flightTotal = base + tax;
+        }
+      }
+
+      // Extract hotel info
+      let hotelMatch = quoteText.match(
+        /\*\*Hotel:\*\*[\s\S]*?Total:\s*\$(\d+(\.\d+)?)/,
+      );
+      if (hotelMatch && hotelMatch[1]) {
+        hotelTotal = parseFloat(hotelMatch[1]);
+      } else {
+        // Fallback for: "Hotel: $52.50 + $9.45 taxes"
+        const hotelInlineMatch = quoteText.match(
+          /Hotel:\s*\$(\d+(\.\d+)?)(?:\s*\+\s*\$(\d+(\.\d+)?)\s*taxes)?/i,
+        );
+        if (hotelInlineMatch && hotelInlineMatch[1]) {
+          const base = parseFloat(hotelInlineMatch[1]);
+          const tax = hotelInlineMatch[3]
+            ? parseFloat(hotelInlineMatch[3])
+            : 0;
+          hotelTotal = base + tax;
+        }
+      }
+
+      // If only grandTotal is known, split it roughly
+      if (grandTotal && !flightTotal && !hotelTotal) {
+        flightTotal = grandTotal / 2;
+        hotelTotal = grandTotal / 2;
+      } else if (grandTotal && flightTotal && !hotelTotal) {
+        hotelTotal = Math.max(grandTotal - flightTotal, 0);
+      } else if (grandTotal && !flightTotal && hotelTotal) {
+        flightTotal = Math.max(grandTotal - hotelTotal, 0);
+      }
+    }
+
+    // Final rounding
+    const safeGrand = Math.max(0, Math.round(grandTotal || 0));
+    const safeFlight = Math.max(0, Math.round(flightTotal || 0));
+    const safeHotel = Math.max(0, Math.round(hotelTotal || 0));
+
+    // 3️⃣ Build richer listing object (with listingId + primaryType) for PaymentPage
+    const primaryFlight =
+      primaryBundle?.flight ||
+      primaryBundle?.flightOption ||
+      primaryBundle?.flightListing ||
+      null;
+
+    const primaryHotel =
+      primaryBundle?.hotel ||
+      primaryBundle?.hotelOption ||
+      primaryBundle?.hotelListing ||
+      null;
+
+    const listingForPayment = {
+      name: title,
+      totalPrice: safeGrand,
+      flightPrice: safeFlight,
+      hotelPrice: safeHotel,
+      source: 'ai-assistant',
+
+      // Hint for PaymentPage → booking-service mapping
+      primaryType:
+        primaryBundle?.primaryType ||
+        (primaryFlight ? 'flight' : primaryHotel ? 'hotel' : 'flight'),
+
+      // Try to use a REAL listing id from the bundle (flight first, then hotel).
+      // Fallback to "ai-bundle" only if nothing is available.
+      listingId:
+        primaryBundle?.listingId ||
+        primaryFlight?.id ||
+        primaryFlight?.listingId ||
+        primaryFlight?._id ||
+        primaryHotel?.id ||
+        primaryHotel?.listingId ||
+        primaryHotel?._id ||
+        'ai-bundle',
+
+      // Optional date hints for PaymentPage when it builds start/end dates
+      departureTime:
+        primaryFlight?.departureTime ||
+        primaryFlight?.departure ||
+        primaryFlight?.startTime ||
+        null,
+      checkIn: primaryHotel?.checkIn || primaryHotel?.checkInDate || null,
+      checkOut: primaryHotel?.checkOut || primaryHotel?.checkOutDate || null,
+    };
 
     const handleContinueToPayment = () => {
       navigate('/booking/payment', {
         state: {
           bookingType: 'bundle',
-          listing: {
-            name: title,
-            totalPrice: grandTotal,
-            flightPrice: flightTotal,
-            hotelPrice: hotelTotal,
-            source: 'ai-assistant'
-          },
+          listing: listingForPayment,
         },
       });
     };
@@ -121,15 +294,23 @@ const BookingSummaryPage = () => {
               {/* Left: details */}
               <div className="booking-summary-details">
                 <h2 className="booking-summary-item-title">{title}</h2>
-                
+
                 <div className="booking-summary-breakdown">
                   <div className="booking-summary-breakdown-item">
-                    <span className="booking-summary-breakdown-label">✈️ Flight</span>
-                    <span className="booking-summary-breakdown-value">${flightTotal} USD</span>
+                    <span className="booking-summary-breakdown-label">
+                      ✈️ Flight
+                    </span>
+                    <span className="booking-summary-breakdown-value">
+                      ${safeFlight} USD
+                    </span>
                   </div>
                   <div className="booking-summary-breakdown-item">
-                    <span className="booking-summary-breakdown-label">🏨 Hotel</span>
-                    <span className="booking-summary-breakdown-value">${hotelTotal} USD</span>
+                    <span className="booking-summary-breakdown-label">
+                      🏨 Hotel
+                    </span>
+                    <span className="booking-summary-breakdown-value">
+                      ${safeHotel} USD
+                    </span>
                   </div>
                 </div>
 
@@ -152,7 +333,7 @@ const BookingSummaryPage = () => {
                       Package total
                     </span>
                     <span className="booking-summary-price-value">
-                      ${grandTotal} USD
+                      ${safeGrand} USD
                     </span>
                   </div>
                   <button
@@ -213,7 +394,9 @@ const BookingSummaryPage = () => {
         : listing.totalPrice ?? null;
     priceLabel = 'Trip total';
     priceValue =
-      typeof price === 'number' ? `$${price.toFixed(0)} USD` : 'Price pending';
+      typeof price === 'number'
+        ? `$${price.toFixed(0)} USD`
+        : 'Price pending';
   } else if (bookingType === 'hotel') {
     const name =
       listing.name ||
