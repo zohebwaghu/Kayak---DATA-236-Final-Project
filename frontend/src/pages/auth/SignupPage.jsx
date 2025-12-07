@@ -10,7 +10,6 @@ const initialState = {
   email: '',
   password: '',
   confirmPassword: '',
-  // kept for payload compatibility (not shown in UI)
   phone: '',
   street: '',
   line2: '',
@@ -54,16 +53,20 @@ const SignupPage = () => {
     try {
       setLoading(true);
 
-      // 🔧 Minimal fix: don't send address with undefined fields
       const payload = {
         userId: formData.userId.trim(),
         firstName: formData.firstName.trim(),
         lastName: formData.lastName.trim(),
         email: formData.email.trim(),
         password: formData.password,
-        // optional fields – user will fill on profile page
         phone: formData.phone?.trim() || '',
-        // NOTE: no `address` field here, backend treats it as optional
+        address: {
+          line1: formData.street.trim(),
+          line2: formData.line2?.trim() || '',
+          city: formData.city.trim(),
+          state: formData.state.trim(),
+          zipCode: formData.zipCode.trim(),
+        },
       };
 
       await api.post('/auth/register', payload);
@@ -98,7 +101,7 @@ const SignupPage = () => {
               Let&apos;s get you going<span className="kayak-accent-dot">.</span>
             </h5>
             <p className="text-muted mt-2 mb-0">
-              Just a few details to create your account. You can complete your profile later.
+              Just a few details to create your account.
             </p>
           </div>
 
@@ -206,6 +209,83 @@ const SignupPage = () => {
                   name="confirmPassword"
                   placeholder="Re-enter password"
                   value={formData.confirmPassword}
+                  onChange={handleChange}
+                  required
+                />
+              </div>
+            </div>
+
+            {/* Row 4: Address */}
+            <div className="row g-3 mt-1">
+              <div className="col-md-8">
+                <label className="form-label fw-semibold">
+                  Street Address <span className="text-danger">*</span>
+                </label>
+                <input
+                  type="text"
+                  className="form-control"
+                  name="street"
+                  placeholder="123 Main St"
+                  value={formData.street}
+                  onChange={handleChange}
+                  required
+                />
+              </div>
+              <div className="col-md-4">
+                <label className="form-label fw-semibold">
+                  Apt/Suite
+                </label>
+                <input
+                  type="text"
+                  className="form-control"
+                  name="line2"
+                  placeholder="Apt 4B"
+                  value={formData.line2}
+                  onChange={handleChange}
+                />
+              </div>
+            </div>
+
+            {/* Row 5: City, State, Zip */}
+            <div className="row g-3 mt-1">
+              <div className="col-md-5">
+                <label className="form-label fw-semibold">
+                  City <span className="text-danger">*</span>
+                </label>
+                <input
+                  type="text"
+                  className="form-control"
+                  name="city"
+                  placeholder="San Jose"
+                  value={formData.city}
+                  onChange={handleChange}
+                  required
+                />
+              </div>
+              <div className="col-md-3">
+                <label className="form-label fw-semibold">
+                  State <span className="text-danger">*</span>
+                </label>
+                <input
+                  type="text"
+                  className="form-control"
+                  name="state"
+                  placeholder="CA"
+                  value={formData.state}
+                  onChange={handleChange}
+                  required
+                />
+              </div>
+              <div className="col-md-4">
+                <label className="form-label fw-semibold">
+                  ZIP Code <span className="text-danger">*</span>
+                </label>
+                <input
+                  type="text"
+                  className="form-control"
+                  name="zipCode"
+                  placeholder="95112"
+                  value={formData.zipCode}
                   onChange={handleChange}
                   required
                 />
