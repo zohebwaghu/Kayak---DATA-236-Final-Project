@@ -16,6 +16,8 @@ import sys
 import random
 import json
 from datetime import datetime, timedelta
+import math
+from typing import Dict, Optional
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -44,6 +46,32 @@ MYSQL_DB = os.getenv("DB_NAME_USERS", "kayak_users")
 # Data directory
 # In Docker: data/ is mounted to /data
 DATA_DIR = os.getenv("DATA_DIR", "/data")
+
+
+# ============================================
+# Helpers
+# ============================================
+
+def load_airport_lookup(data_dir: str) -> Dict[str, Dict[str, str]]:
+    """
+    Build a lookup of airport code -> {city, country} from airports.csv.
+    Returns empty dict if file missing or unreadable.
+    """
+    lookup: Dict[str, Dict[str, str]] = {}
+    airports_path = os.path.join(data_dir, "airports.csv")
+    if not os.path.exists(airports_path):
+        return lookup
+    try:
+        df = pd.read_csv(airports_path)
+        for _, row in df.iterrows():
+            code = str(row.get("IATA", "")).strip().upper()
+            city = str(row.get("City", "")).strip()
+            country = str(row.get("Country_Name", "")).strip()
+            if code:
+                lookup[code] = {"city": city, "country": country}
+    except Exception:
+        pass
+    return lookup
 
 # ============================================
 # City/Country Mapping for Hotels
@@ -208,144 +236,206 @@ def import_airports(db, filepath):
     return len(airports)
 
 
-def import_flights(db, filepath, limit=10000):
-    """Import flights data to MongoDB and SQLite with Deal Score fields"""
+def _compute_price_from_distance(distance: float) -> float:
+    """
+    Synthetic price model for Kaggle flights (dataset lacks fare).
+    Rough heuristic: base 50 + 0.2 * miles + random [0,150].
+    """
+    base = 50 + 0.2 * distance
+    return round(max(75, base + random.uniform(0, 150)), 2)
+
+
+def _safe_float(val, default=0.0):
+    try:
+        f = float(val)
+        if math.isnan(f) or math.isinf(f):
+            return default
+        return f
+    except Exception:
+        return default
+
+
+def import_flights(db, filepath, data_dir: Optional[str] = None, chunk_size: int = 50000, limit: Optional[int] = None):
+    """
+    Import flights to MongoDB and SQLite.
+    - Supports Kaggle flight_delays schema (ORIGIN_AIRPORT/DESTINATION_AIRPORT).
+    - Streams in chunks to handle millions of rows.
+    """
     print(f"\n=== Importing Flights from {filepath} ===")
-    
-    df = pd.read_csv(filepath, nrows=limit)
-    print(f"Loaded {len(df)} flights")
-    
-    # Set random seed for reproducibility
-    random.seed(42)
-    
-    flights = []
-    sqlite_flights = []
-    
-    for idx, row in df.iterrows():
-        source = row.get("source_city", "")
-        dest = row.get("destination_city", "")
-        price = float(row.get("price", 0)) if pd.notna(row.get("price")) else 0
-        
-        # Generate Deal Score fields based on flight_id hash for consistency
-        hash_val = hash(f"FL{idx:06d}") % 100
-        
-        # 1. Discount: 5% to 30% (Assignment: >=15% below 30-day avg)
-        discount_percent = 5 + (hash_val % 26)
-        avg_30d_price = price / (1 - discount_percent / 100) if discount_percent < 100 else price * 1.2
-        
-        # 2. Inventory scarcity (Assignment: limited inventory)
-        available_seats = 3 + (hash_val % 50)
-        
-        # 3. Promo (Assignment: promo end date, -10% to -25% dips)
-        has_promo = hash_val % 3 == 0
-        promo_end_date = None
-        if has_promo:
-            days_until_end = 1 + (hash_val % 14)
-            promo_end_date = (datetime.now() + timedelta(days=days_until_end)).isoformat()
-        
-        # Parse stops
-        stops = 0 if row.get("stops") == "zero" else (1 if row.get("stops") == "one" else 2)
-        
-        # Build tags
-        tags = []
-        if stops == 0:
-            tags.append("direct-flight")
-        if has_promo:
-            tags.append("promo")
-        if row.get("class", "").lower() == "business":
-            tags.append("business-class")
-        
-        # Calculate Deal Score (0-100)
-        discount_score = min(30, discount_percent)
-        scarcity_score = 20 if available_seats < 10 else (10 if available_seats < 20 else 0)
-        promo_score = 15 if has_promo else 0
-        direct_score = 10 if stops == 0 else 0
-        deal_score = min(95, max(30, 25 + discount_score + scarcity_score + promo_score + direct_score))
-        
-        origin_code = CITY_TO_AIRPORT.get(source, source[:3].upper() if source else "XXX")
-        dest_code = CITY_TO_AIRPORT.get(dest, dest[:3].upper() if dest else "XXX")
-        
-        flight = {
-            "flight_id": f"FL{idx:06d}",
-            "airline": row.get("airline", "Unknown"),
-            "flight_number": row.get("flight", ""),
-            "origin": origin_code,
-            "origin_city": source,
-            "destination": dest_code,
-            "destination_city": dest,
-            "departure_time": row.get("departure_time", ""),
-            "arrival_time": row.get("arrival_time", ""),
-            "duration": float(row.get("duration", 0)) if pd.notna(row.get("duration")) else 0,
-            "stops": stops,
-            "class": row.get("class", "Economy"),
-            "price": price,
-            "days_left": int(row.get("days_left", 30)) if pd.notna(row.get("days_left")) else 30,
-            # Deal Score fields
-            "avg_30d_price": round(avg_30d_price, 2),
-            "discount_percent": discount_percent,
-            "available_seats": available_seats,
-            "has_promo": has_promo,
-            "promo_end_date": promo_end_date,
-            "deal_score": deal_score,
-            "tags": tags,
-            "rating": 4.0
-        }
-        flights.append(flight)
-        
-        # SQLModel entity
-        if SQLMODEL_AVAILABLE:
-            sqlite_flights.append(FlightDeal(
-                flight_id=f"FL{idx:06d}",
-                origin=origin_code,
-                origin_city=source,
-                destination=dest_code,
-                destination_city=dest,
-                airline=row.get("airline", "Unknown"),
-                flight_number=row.get("flight", "") or None,
-                departure_time=row.get("departure_time", "") or None,
-                arrival_time=row.get("arrival_time", "") or None,
-                duration=float(row.get("duration", 0)) if pd.notna(row.get("duration")) else 0,
-                stops=stops,
-                flight_class=row.get("class", "Economy"),
-                price=price,
-                avg_30d_price=round(avg_30d_price, 2),
-                discount_percent=discount_percent,
-                available_seats=available_seats,
-                has_promo=has_promo,
-                promo_end_date=promo_end_date,
-                deal_score=deal_score,
-                tags=json.dumps(tags),
-                rating=4.0,
-                days_left=int(row.get("days_left", 30)) if pd.notna(row.get("days_left")) else 30
-            ))
-    
-    # Insert to MongoDB
+    airport_lookup = load_airport_lookup(data_dir or DATA_DIR)
+
+    # Prep Mongo & SQLite targets
     collection = db["flights"]
     collection.drop()
-    if flights:
-        collection.insert_many(flights)
-        collection.create_index("flight_id", unique=True)
-        collection.create_index("origin")
-        collection.create_index("destination")
-        collection.create_index("price")
-        collection.create_index("deal_score")
-    
-    # Insert to SQLite
-    if SQLMODEL_AVAILABLE and sqlite_flights:
-        engine = get_engine()
-        with Session(engine) as session:
-            session.query(FlightDeal).delete()
+
+    engine = get_engine() if SQLMODEL_AVAILABLE else None
+    session = Session(engine) if engine else None
+    if session:
+        session.query(FlightDeal).delete()
+        session.commit()
+
+    total = 0
+    random.seed(42)
+
+    # Choose iterator: full read if limit small, else chunked
+    if limit and limit <= chunk_size:
+        reader = [pd.read_csv(filepath, nrows=limit)]
+    else:
+        reader = pd.read_csv(filepath, chunksize=chunk_size)
+
+    flight_id_counter = 0
+    for chunk in reader:
+        # If limit set, trim chunk to remaining rows
+        if limit:
+            remaining = limit - total
+            if remaining <= 0:
+                break
+            chunk = chunk.head(remaining)
+
+        flights_batch = []
+        sqlite_batch = []
+
+        # Detect schema
+        kaggle_mode = "ORIGIN_AIRPORT" in chunk.columns and "DESTINATION_AIRPORT" in chunk.columns
+
+        for row in chunk.itertuples(index=False):
+            if kaggle_mode:
+                origin_code = str(getattr(row, "ORIGIN_AIRPORT", "")).upper()
+                dest_code = str(getattr(row, "DESTINATION_AIRPORT", "")).upper()
+                origin_city = airport_lookup.get(origin_code, {}).get("city", "")
+                dest_city = airport_lookup.get(dest_code, {}).get("city", "")
+                airline = getattr(row, "AIRLINE", "Unknown")
+                flight_number = getattr(row, "FLIGHT_NUMBER", None)
+                distance = _safe_float(getattr(row, "DISTANCE", 0), 0.0)
+                sched_time = _safe_float(getattr(row, "SCHEDULED_TIME", 0), 0.0)
+                duration = sched_time / 60 if sched_time > 0 else max(1.0, distance / 500)
+                stops = 0  # Kaggle dataset is single-leg records
+                price = _compute_price_from_distance(distance)
+                departure_time = getattr(row, "SCHEDULED_DEPARTURE", None)
+                arrival_time = getattr(row, "SCHEDULED_ARRIVAL", None)
+                cabin = "Economy"
+                days_left = random.randint(1, 30)
+            else:
+                origin_city = getattr(row, "source_city", "")
+                dest_city = getattr(row, "destination_city", "")
+                origin_code = CITY_TO_AIRPORT.get(origin_city, origin_city[:3].upper() if origin_city else "XXX")
+                dest_code = CITY_TO_AIRPORT.get(dest_city, dest_city[:3].upper() if dest_city else "XXX")
+                airline = getattr(row, "airline", "Unknown")
+                flight_number = getattr(row, "flight", None)
+                price = _safe_float(getattr(row, "price", 0), 0.0)
+                duration = _safe_float(getattr(row, "duration", 0), 0.0)
+                stops_str = str(getattr(row, "stops", "")).lower()
+                stops = 0 if stops_str == "zero" else (1 if stops_str == "one" else 2)
+                distance = _safe_float(getattr(row, "distance", 0), 0.0)
+                departure_time = getattr(row, "departure_time", None)
+                arrival_time = getattr(row, "arrival_time", None)
+                cabin = getattr(row, "class", "Economy")
+                days_left = int(getattr(row, "days_left", 30) or 30)
+
+            # Ensure duration positive for DB constraint
+            if duration <= 0:
+                duration = max(1.0, distance / 500) if distance > 0 else 60.0
+
+            hash_val = hash(f"FL{flight_id_counter:07d}") % 100
+
+            discount_percent = 5 + (hash_val % 26)
+            avg_30d_price = price / (1 - discount_percent / 100) if discount_percent < 100 else price * 1.2
+            available_seats = 3 + (hash_val % 50)
+            has_promo = hash_val % 3 == 0
+            promo_end_date = (datetime.now() + timedelta(days=1 + (hash_val % 14))).isoformat() if has_promo else None
+
+            tags = []
+            if stops == 0:
+                tags.append("direct-flight")
+            if has_promo:
+                tags.append("promo")
+
+            discount_score = min(30, discount_percent)
+            scarcity_score = 20 if available_seats < 10 else (10 if available_seats < 20 else 0)
+            promo_score = 15 if has_promo else 0
+            direct_score = 10 if stops == 0 else 0
+            deal_score = min(95, max(30, 25 + discount_score + scarcity_score + promo_score + direct_score))
+
+            flight_id = f"FL{flight_id_counter:07d}"
+            flight_id_counter += 1
+
+            flight_doc = {
+                "flight_id": flight_id,
+                "airline": airline,
+                "flight_number": flight_number,
+                "origin": origin_code,
+                "origin_city": origin_city,
+                "destination": dest_code,
+                "destination_city": dest_city,
+                "departure_time": departure_time,
+                "arrival_time": arrival_time,
+                "duration": duration,
+                "stops": stops,
+                "class": cabin,
+                "price": price,
+                "distance": distance,
+                "days_left": days_left,
+                "avg_30d_price": round(avg_30d_price, 2),
+                "discount_percent": discount_percent,
+                "available_seats": available_seats,
+                "has_promo": has_promo,
+                "promo_end_date": promo_end_date,
+                "deal_score": deal_score,
+                "tags": tags,
+                "rating": 4.0
+            }
+            flights_batch.append(flight_doc)
+
+            if SQLMODEL_AVAILABLE:
+                sqlite_batch.append(FlightDeal(
+                    flight_id=flight_id,
+                    origin=origin_code,
+                    origin_city=origin_city,
+                    destination=dest_code,
+                    destination_city=dest_city,
+                    airline=airline,
+                    flight_number=flight_number or None,
+                    departure_time=departure_time or None,
+                    arrival_time=arrival_time or None,
+                    duration=duration,
+                    stops=stops,
+                    flight_class=cabin,
+                    price=price,
+                    avg_30d_price=round(avg_30d_price, 2),
+                    discount_percent=discount_percent,
+                    available_seats=available_seats,
+                    has_promo=has_promo,
+                    promo_end_date=promo_end_date,
+                    deal_score=deal_score,
+                    tags=json.dumps(tags),
+                    rating=4.0,
+                    days_left=days_left
+                ))
+
+        if flights_batch:
+            collection.insert_many(flights_batch)
+        if session and sqlite_batch:
+            session.add_all(sqlite_batch)
             session.commit()
-            for flight in sqlite_flights:
-                session.add(flight)
-            session.commit()
-        print(f"Imported {len(sqlite_flights)} flights to SQLite")
-    
-    print(f"Imported {len(flights)} flights to MongoDB")
-    return len(flights)
+
+        total += len(flights_batch)
+        print(f"Imported {total} flights so far...")
+
+    # Indexes
+    collection.create_index("flight_id", unique=True)
+    collection.create_index("origin")
+    collection.create_index("destination")
+    collection.create_index("price")
+    collection.create_index("deal_score")
+
+    if session:
+        session.close()
+
+    print(f"Imported {total} flights to SQLite/MongoDB")
+    return total
 
 
-def import_hotels(db, filepath, limit=10000):
+def import_hotels(db, filepath, limit=None):
     """
     Import hotels data to MongoDB and SQLite with:
     - Deal Score fields
@@ -355,7 +445,7 @@ def import_hotels(db, filepath, limit=10000):
     """
     print(f"\n=== Importing Hotels from {filepath} ===")
     
-    df = pd.read_csv(filepath, nrows=limit * 2)
+    df = pd.read_csv(filepath, nrows=(limit * 2) if limit else None)  # None => all rows
     print(f"Loaded {len(df)} hotel bookings")
     
     random.seed(123)
@@ -509,7 +599,7 @@ def import_hotels(db, filepath, limit=10000):
                 listing_date=listing_date
             ))
         
-        if len(hotels) >= limit:
+        if limit is not None and len(hotels) >= limit:
             break
     
     print(f"Skipped {skipped_zero_price} hotels with zero/null price")
@@ -630,7 +720,7 @@ def main():
     
     # File paths
     airports_file = os.path.join(DATA_DIR, "airports.csv")
-    flights_file = os.path.join(DATA_DIR, "Clean_Dataset.csv")
+    flights_file = os.path.join(DATA_DIR, "kaggle", "flight_delays", "flights.csv")
     hotels_file = os.path.join(DATA_DIR, "hotel_booking.csv")
     
     # Import data
@@ -642,12 +732,12 @@ def main():
         print(f"Warning: {airports_file} not found")
     
     if os.path.exists(flights_file):
-        total += import_flights(mongo_db, flights_file, limit=10000)
+        total += import_flights(mongo_db, flights_file, data_dir=DATA_DIR, chunk_size=50000, limit=None)
     else:
         print(f"Warning: {flights_file} not found")
     
     if os.path.exists(hotels_file):
-        total += import_hotels(mongo_db, hotels_file, limit=10000)
+        total += import_hotels(mongo_db, hotels_file, limit=None)
         total += import_users(mysql_conn, hotels_file, limit=10000)
     else:
         print(f"Warning: {hotels_file} not found")

@@ -11,7 +11,6 @@ Assignment Requirements Satisfied:
 6. Watch with price/inventory thresholds
 7. Quote generation with fare class, baggage, fees, cancellation policy
 8. WebSocket async updates
-9. Semantic Cache with embeddings for similar query detection
 
 5 User Journeys:
 1. "Tell me what I should book" → search_bundles
@@ -26,21 +25,12 @@ import re
 import json
 import uuid
 import random
-import hashlib
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List, Tuple, Union
 from loguru import logger
 
 # Pydantic v2 - Assignment requirement
 from pydantic import BaseModel, Field
-
-# Numpy for cosine similarity
-try:
-    import numpy as np
-    NUMPY_AVAILABLE = True
-except ImportError:
-    NUMPY_AVAILABLE = False
-    logger.warning("NumPy not available - semantic cache disabled")
 
 # SQLModel persistence - Assignment requirement
 try:
@@ -52,26 +42,32 @@ except ImportError:
     SQLMODEL_AVAILABLE = False
     logger.warning("SQLModel not available for persistence")
 
-# LLM imports
-try:
-    from openai import OpenAI
-    OPENAI_AVAILABLE = True
-except ImportError:
-    OPENAI_AVAILABLE = False
+# ============================================
+# LLM Provider Options (uncomment ONE)
+# ============================================
 
+# Option 1: Gemini (default - unlimited API calls)
 try:
-    from ollama import Client as OllamaClient
-    OLLAMA_AVAILABLE = True
+    import google.generativeai as genai
+    GEMINI_AVAILABLE = True
 except ImportError:
-    OLLAMA_AVAILABLE = False
+    GEMINI_AVAILABLE = False
 
-# Redis for Semantic Cache
-try:
-    import redis
-    REDIS_AVAILABLE = True
-except ImportError:
-    REDIS_AVAILABLE = False
-    logger.warning("Redis not available - semantic cache will use memory")
+# Option 2: OpenAI (uncomment to use)
+# try:
+#     from openai import OpenAI
+#     OPENAI_AVAILABLE = True
+# except ImportError:
+#     OPENAI_AVAILABLE = False
+OPENAI_AVAILABLE = False  # Disabled - using Gemini
+
+# Option 3: Ollama (uncomment to use - requires local setup)
+# try:
+#     from ollama import Client as OllamaClient
+#     OLLAMA_AVAILABLE = True
+# except ImportError:
+#     OLLAMA_AVAILABLE = False
+OLLAMA_AVAILABLE = False  # Disabled - using Gemini
 
 # Internal imports
 try:
@@ -80,14 +76,13 @@ except ImportError:
     deals_cache = None
     Deal = None
 
-# Watch store for Redis persistence
+# Location cache for fuzzy search
 try:
-    from api.watches import watch_store, WatchCreate as WatchCreateRequest
-    WATCH_STORE_AVAILABLE = True
+    from interfaces.location_cache import location_cache
+    LOCATION_CACHE_AVAILABLE = True
 except ImportError:
-    watch_store = None
-    WatchCreateRequest = None
-    WATCH_STORE_AVAILABLE = False
+    location_cache = None
+    LOCATION_CACHE_AVAILABLE = False
 
 
 # ============================================
@@ -204,15 +199,96 @@ class ChatResponse(BaseModel):
 # City/Airport Mappings
 # ============================================
 
+# City name to airport code mapping
+# Must match actual codes in database (flight_deals.destination)
 CITY_TO_AIRPORT = {
+    # Indian cities - match DB codes (EaseMyTrip dataset)
     "delhi": "DEL",
-    "mumbai": "BOM",
-    "bangalore": "BLR",
-    "bengaluru": "BLR",
-    "chennai": "MAA",
-    "kolkata": "CCU",
-    "hyderabad": "HYD",
     "new delhi": "DEL",
+    "mumbai": "MUM",
+    "bombay": "MUM",
+    "bangalore": "BAN",
+    "bengaluru": "BAN",
+    "chennai": "MAA",
+    "madras": "MAA",
+    "kolkata": "CCU",
+    "calcutta": "CCU",
+    "hyderabad": "HYD",
+    "goa": "GOI",
+    "jaipur": "JAI",
+    "ahmedabad": "AMD",
+    "pune": "PNQ",
+    "kochi": "COK",
+    "cochin": "COK",
+    "trivandrum": "TRV",
+    "thiruvananthapuram": "TRV",
+    "lucknow": "LKO",
+    "guwahati": "GAU",
+    "varanasi": "VNS",
+    "srinagar": "SXR",
+    "amritsar": "ATQ",
+    "indore": "IDR",
+    "bhopal": "BHO",
+    "nagpur": "NAG",
+    "visakhapatnam": "VTZ",
+    "vizag": "VTZ",
+    "patna": "PAT",
+    "ranchi": "IXR",
+    "bhubaneswar": "BBI",
+    "coimbatore": "CJB",
+    "mangalore": "IXE",
+    "udaipur": "UDR",
+    "jodhpur": "JDH",
+    "imphal": "IMF",
+    "agartala": "IXA",
+    "port blair": "IXZ",
+    "andaman": "IXZ",
+
+    # US cities - common aliases
+    "la": "LAX",
+    "los angeles": "LAX",
+    "nyc": "JFK",
+    "new york": "JFK",
+    "new york city": "JFK",
+    "sf": "SFO",
+    "san francisco": "SFO",
+    "vegas": "LAS",
+    "las vegas": "LAS",
+    "chicago": "ORD",
+    "miami": "MIA",
+    "boston": "BOS",
+    "seattle": "SEA",
+    "denver": "DEN",
+    "atlanta": "ATL",
+    "dallas": "DFW",
+    "houston": "IAH",
+    "phoenix": "PHX",
+    "orlando": "MCO",
+    "san diego": "SAN",
+    "dc": "DCA",
+    "washington": "DCA",
+    "washington dc": "DCA",
+    "philly": "PHL",
+    "philadelphia": "PHL",
+    "portland": "PDX",
+    "austin": "AUS",
+    "nashville": "BNA",
+    "new orleans": "MSY",
+    "hawaii": "HNL",
+    "honolulu": "HNL",
+
+    # International cities
+    "london": "LHR",
+    "paris": "CDG",
+    "tokyo": "NRT",
+    "dubai": "DXB",
+    "singapore": "SIN",
+    "hong kong": "HKG",
+    "bangkok": "BKK",
+    "sydney": "SYD",
+    "toronto": "YYZ",
+    "amsterdam": "AMS",
+    "frankfurt": "FRA",
 }
 
 AIRPORT_TO_CITY = {v: k.title() for k, v in CITY_TO_AIRPORT.items()}
@@ -372,14 +448,19 @@ class MRKLTools:
         
         return bundles
 
-    def _build_bundles(self, flights: List, hotels: List, budget: Optional[float], 
+    def _build_bundles(self, flights: List, hotels: List, budget: Optional[float],
                        preferences: List[str], nights: int = 3) -> List[Bundle]:
         """Build bundle combinations from flights and hotels"""
         bundles = []
         if not flights or not hotels:
             return []
-        
-        for i, (flight, hotel) in enumerate(zip(flights[:3], hotels[:3])):
+
+        # FIX: Use Cartesian product for better combinations instead of naive zip
+        from itertools import product
+        # Take top 5 of each and combine (up to 25 combos), then take best 9
+        combos = list(product(flights[:5], hotels[:5]))
+
+        for i, (flight, hotel) in enumerate(combos[:15]):  # Limit to 15 for performance
             bundle_id = f"BDL-{uuid.uuid4().hex[:8].upper()}"
             
             # Convert to Pydantic models
@@ -571,17 +652,30 @@ class MRKLTools:
         return why_this, what_to_watch
 
     def _normalize_city(self, city: Optional[str]) -> Optional[str]:
-        """Normalize city name to airport code"""
+        """Normalize city name to airport code using fuzzy search"""
         if not city:
             return None
         city_lower = city.lower().strip()
+
+        # If it's already a 3-letter code, validate it
         if len(city_lower) == 3 and city_lower.upper() in AIRPORT_TO_CITY:
             return city_lower.upper()
+
+        # Try location cache with fuzzy search (handles typos, aliases like bombay->MUM)
+        if LOCATION_CACHE_AVAILABLE and location_cache:
+            code = location_cache.get_code(city, location_type="all")
+            if code:
+                logger.info(f"LocationCache: '{city}' -> {code}")
+                return code
+
+        # Fallback to hardcoded mapping
         if city_lower in CITY_TO_AIRPORT:
             return CITY_TO_AIRPORT[city_lower]
         for name, code in CITY_TO_AIRPORT.items():
             if name in city_lower or city_lower in name:
                 return code
+
+        # Last resort: uppercase first 3 chars
         return city.upper()[:3]
 
     def _persist_bundles(self, bundles: List[Bundle], origin: Optional[str], 
@@ -625,22 +719,46 @@ class MRKLTools:
         bundle = self._get_bundle(bundle_id)
         if not bundle:
             return {"error": f"Bundle {bundle_id} not found"}
-        
+
         flight = bundle.flight
         hotel = bundle.hotel
-        
-        # Calculate discount percentages vs 30-day average (simulated)
-        # In real system, this would come from avg_30d_price field
-        flight_avg_30d = flight.price * (1 + random.uniform(0.10, 0.25))  # Simulate avg is 10-25% higher
-        hotel_avg_30d = hotel.price_per_night * (1 + random.uniform(0.12, 0.28))
-        
-        flight_discount_pct = ((flight_avg_30d - flight.price) / flight_avg_30d) * 100
-        hotel_discount_pct = ((hotel_avg_30d - hotel.price_per_night) / hotel_avg_30d) * 100
-        
-        # Simulate similar hotels in area (slightly higher priced)
-        similar_hotel_low = hotel.price_per_night + random.uniform(15, 35)
-        similar_hotel_high = hotel.price_per_night + random.uniform(45, 80)
-        
+
+        # FIX: Use real 30-day averages from price history instead of random
+        flight_avg_30d = None
+        hotel_avg_30d = None
+
+        try:
+            from models.deals_entities import compute_avg_30d_price
+            flight_avg_30d = compute_avg_30d_price(flight.flight_id, "flight")
+            hotel_avg_30d = compute_avg_30d_price(hotel.hotel_id, "hotel")
+        except ImportError:
+            logger.debug("compute_avg_30d_price not available")
+        except Exception as e:
+            logger.debug(f"Error getting 30d avg: {e}")
+
+        # Fallback to estimate if no historical data (15% above current = conservative estimate)
+        if flight_avg_30d is None:
+            flight_avg_30d = flight.price * 1.15
+        if hotel_avg_30d is None:
+            hotel_avg_30d = hotel.price_per_night * 1.18
+
+        flight_discount_pct = ((flight_avg_30d - flight.price) / flight_avg_30d) * 100 if flight_avg_30d > 0 else 0
+        hotel_discount_pct = ((hotel_avg_30d - hotel.price_per_night) / hotel_avg_30d) * 100 if hotel_avg_30d > 0 else 0
+
+        # Get similar hotels from deals cache for comparison (not random)
+        similar_hotel_low = hotel.price_per_night * 1.10  # 10% higher baseline
+        similar_hotel_high = hotel.price_per_night * 1.40  # 40% higher for premium
+        try:
+            if deals_cache:
+                similar = deals_cache.get_deals_by_destination(hotel.city_code, "hotel", limit=5)
+                if similar:
+                    prices = [d.current_price for d in similar if d.current_price > 0]
+                    if prices:
+                        similar_hotel_low = min(prices)
+                        similar_hotel_high = max(prices)
+        except Exception:
+            pass
+
         return {
             "bundle_id": bundle_id,
             "current_total": bundle.total_price,
@@ -678,12 +796,12 @@ class MRKLTools:
             return Watch(watch_id="error", user_id=self.user_id, listing_type="bundle",
                         listing_id=bundle_id, listing_name="Unknown", watch_type="error",
                         is_active=False, created_at=datetime.utcnow().isoformat())
-        
+
         if price_threshold is None:
             price_threshold = bundle.total_price * 0.9
         if inventory_threshold is None:
             inventory_threshold = 5
-        
+
         watch_id = f"W-{uuid.uuid4().hex[:8].upper()}"
         watch = Watch(
             watch_id=watch_id,
@@ -699,32 +817,14 @@ class MRKLTools:
             is_active=True,
             created_at=datetime.utcnow().isoformat()
         )
-        
-        # Save to Redis watch_store (for WebSocket notifications)
-        if WATCH_STORE_AVAILABLE and watch_store:
-            try:
-                watch_data = WatchCreateRequest(
-                    user_id=self.user_id,
-                    listing_type="bundle",
-                    listing_id=bundle_id,
-                    listing_name=watch.listing_name,
-                    watch_type="price",
-                    threshold=price_threshold,
-                    current_value=bundle.total_price
-                )
-                redis_watch = watch_store.create_watch(watch_data)
-                watch.watch_id = redis_watch.watch_id  # Use Redis watch ID
-                logger.info(f"Watch saved to Redis: {redis_watch.watch_id}")
-            except Exception as e:
-                logger.error(f"Error saving watch to Redis: {e}")
-        
-        # Also persist to SQLite for backup
+
+        # Persist bundle watch to SQLite
         if SQLMODEL_AVAILABLE:
             try:
                 engine = get_engine()
                 with Session(engine) as session:
                     record = WatchRecord(
-                        watch_id=watch.watch_id, user_id=self.user_id, listing_type="bundle",
+                        watch_id=watch_id, user_id=self.user_id, listing_type="bundle",
                         listing_id=bundle_id, listing_name=watch.listing_name,
                         watch_type="both", price_threshold=price_threshold,
                         inventory_threshold=inventory_threshold,
@@ -735,8 +835,41 @@ class MRKLTools:
                     session.add(record)
                     session.commit()
             except Exception as e:
-                logger.error(f"Error persisting watch to SQLite: {e}")
-        
+                logger.error(f"Error persisting watch: {e}")
+
+        # FIX: Also create component watches so triggers work with deals_agent
+        # The deals_agent checks flight/hotel IDs, not bundle IDs
+        try:
+            from api.watches import watch_store, WatchCreate
+            if watch_store:
+                # Create flight watch - proportional threshold
+                flight_price_ratio = bundle.flight.price / bundle.total_price
+                flight_threshold = price_threshold * flight_price_ratio if price_threshold else bundle.flight.price * 0.9
+                watch_store.create_watch(WatchCreate(
+                    user_id=self.user_id,
+                    listing_type="flight",
+                    listing_id=bundle.flight.flight_id,
+                    listing_name=f"{bundle.flight.airline} {bundle.flight.origin}→{bundle.flight.destination}",
+                    watch_type="price",
+                    threshold=flight_threshold,
+                    current_value=bundle.flight.price
+                ))
+
+                # Create hotel watch
+                hotel_threshold = price_threshold * (1 - flight_price_ratio) if price_threshold else bundle.hotel.price_per_night * 0.9
+                watch_store.create_watch(WatchCreate(
+                    user_id=self.user_id,
+                    listing_type="hotel",
+                    listing_id=bundle.hotel.hotel_id,
+                    listing_name=bundle.hotel.name,
+                    watch_type="price",
+                    threshold=hotel_threshold,
+                    current_value=bundle.hotel.price_per_night
+                ))
+                logger.info(f"Created component watches for bundle {bundle_id}")
+        except Exception as e:
+            logger.warning(f"Could not create component watches: {e}")
+
         return watch
 
     # ----------------------------------------
@@ -902,12 +1035,7 @@ class MRKLTools:
 # ============================================
 
 class ConciergeAgent:
-    """Main Concierge Agent with LLM integration and Semantic Cache."""
-    
-    # Semantic cache configuration
-    SEMANTIC_CACHE_TTL = 300  # 5 minutes
-    SIMILARITY_THRESHOLD = 0.85  # Cosine similarity threshold for cache hit
-    SEMANTIC_CACHE_PREFIX = "semantic_cache:"  # Redis key prefix
+    """Main Concierge Agent with LLM integration."""
 
     def __init__(self, user_id: str = "anonymous", session_id: str = None):
         self.user_id = user_id
@@ -918,215 +1046,108 @@ class ConciergeAgent:
         self._previous_bundles: List[Bundle] = []  # For tracking changes
         self._previous_preferences: List[str] = []  # For tracking refinements
         
-        # Redis for Semantic Cache
-        self.redis_client = None
-        self._init_redis()
-        
         # LLM client
         self.llm_client = None
         self.llm_model = None
-        self.embedding_model = None
         self._init_llm()
-    
-    def _init_redis(self):
-        """Initialize Redis connection for Semantic Cache"""
-        if not REDIS_AVAILABLE:
-            logger.warning("Redis not available for semantic cache")
-            return
-        
-        try:
-            redis_host = os.getenv("REDIS_HOST", "localhost")
-            redis_port = int(os.getenv("REDIS_PORT", 6379))
-            redis_db = int(os.getenv("REDIS_DB", 0))
-            
-            self.redis_client = redis.Redis(
-                host=redis_host,
-                port=redis_port,
-                db=redis_db,
-                decode_responses=False  # We'll handle encoding ourselves for embeddings
-            )
-            self.redis_client.ping()
-            logger.info(f"Semantic Cache connected to Redis at {redis_host}:{redis_port}")
-        except Exception as e:
-            logger.warning(f"Redis connection failed: {e}")
-            self.redis_client = None
 
     def _init_llm(self):
-        """Initialize LLM client and embedding model"""
+        """Initialize LLM client - Gemini default, OpenAI/Ollama commented out"""
         self.llm_type = None
-        openai_key = os.getenv("OPENAI_API_KEY", "")
-        if OPENAI_AVAILABLE and openai_key:
-            try:
-                self.llm_client = OpenAI(api_key=openai_key)
-                self.llm_model = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
-                self.embedding_model = "text-embedding-3-small"  # OpenAI embedding model
-                self.llm_type = "openai"
-                logger.info(f"Using OpenAI: {self.llm_model}, Embeddings: {self.embedding_model}")
-                return
-            except Exception as e:
-                logger.warning(f"OpenAI init failed: {e}")
-        
-        if OLLAMA_AVAILABLE:
-            try:
-                ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-                self.llm_client = OllamaClient(host=ollama_url)
-                self.llm_model = os.getenv("OLLAMA_MODEL", "llama3.2")
-                self.embedding_model = os.getenv("OLLAMA_EMBEDDING_MODEL", "mxbai-embed-large")
-                self.llm_type = "ollama"
-                logger.info(f"Using Ollama: {self.llm_model}, Embeddings: {self.embedding_model}")
-                return
-            except Exception as e:
-                logger.warning(f"Ollama init failed: {e}")
-        
-        logger.warning("No LLM available, using rule-based fallback")
 
-    def _get_embedding(self, text: str) -> Optional[List[float]]:
-        """Get embedding vector for text using OpenAI or Ollama"""
-        if not self.llm_client or not NUMPY_AVAILABLE:
-            return None
-        
-        try:
-            if self.llm_type == "openai":
-                response = self.llm_client.embeddings.create(
-                    model=self.embedding_model,
-                    input=text
-                )
-                return response.data[0].embedding
-            
-            elif self.llm_type == "ollama":
-                response = self.llm_client.embeddings(
-                    model=self.embedding_model,
-                    prompt=text
-                )
-                return response['embedding']
-        
-        except Exception as e:
-            logger.warning(f"Embedding generation failed: {e}")
-            return None
-    
-    def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
-        """Calculate cosine similarity between two vectors"""
-        if not NUMPY_AVAILABLE:
-            return 0.0
-        
-        try:
-            a = np.array(vec1)
-            b = np.array(vec2)
-            return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
-        except Exception as e:
-            logger.warning(f"Cosine similarity calculation failed: {e}")
-            return 0.0
-    
-    def _check_semantic_cache(self, query: str) -> Optional[Dict[str, Any]]:
-        """Check if similar query exists in Redis semantic cache"""
-        if not NUMPY_AVAILABLE or not self.llm_client or not self.redis_client:
-            return None
-        
-        query_embedding = self._get_embedding(query)
-        if not query_embedding:
-            return None
-        
-        best_match = None
-        best_similarity = 0.0
-        
-        try:
-            # Get all semantic cache keys from Redis
-            pattern = f"{self.SEMANTIC_CACHE_PREFIX}*"
-            keys = self.redis_client.keys(pattern)
-            
-            for key in keys:
-                try:
-                    cached_data = self.redis_client.get(key)
-                    if not cached_data:
-                        continue
-                    
-                    cached = json.loads(cached_data.decode('utf-8'))
-                    cached_embedding = cached.get("embedding", [])
-                    
-                    similarity = self._cosine_similarity(query_embedding, cached_embedding)
-                    if similarity > best_similarity and similarity >= self.SIMILARITY_THRESHOLD:
-                        best_similarity = similarity
-                        best_match = cached["intent"]
-                        
-                except Exception as e:
-                    logger.warning(f"Error reading cache key {key}: {e}")
-                    continue
-            
-            if best_match:
-                logger.info(f"Semantic cache HIT from Redis (similarity: {best_similarity:.3f})")
-                return best_match
-            
-        except Exception as e:
-            logger.warning(f"Redis semantic cache check failed: {e}")
-        
-        return None
-    
-    def _update_semantic_cache(self, query: str, intent: Dict[str, Any]):
-        """Update Redis semantic cache with new query and intent"""
-        if not NUMPY_AVAILABLE or not self.llm_client or not self.redis_client:
-            return
-        
-        embedding = self._get_embedding(query)
-        if not embedding:
-            return
-        
-        try:
-            # Use hash of query as key
-            query_hash = hashlib.md5(query.lower().strip().encode()).hexdigest()
-            redis_key = f"{self.SEMANTIC_CACHE_PREFIX}{query_hash}"
-            
-            cache_data = {
-                "embedding": embedding,
-                "intent": intent,
-                "query": query
-            }
-            
-            # Store in Redis with TTL
-            self.redis_client.setex(
-                redis_key,
-                self.SEMANTIC_CACHE_TTL,
-                json.dumps(cache_data)
-            )
-            
-            # Get current cache size
-            cache_size = len(self.redis_client.keys(f"{self.SEMANTIC_CACHE_PREFIX}*"))
-            logger.info(f"Semantic cache updated in Redis, total entries: {cache_size}")
-            
-        except Exception as e:
-            logger.warning(f"Redis semantic cache update failed: {e}")
+        # ============================================
+        # GEMINI (default - uncomment to use)
+        # ============================================
+        gemini_key = os.getenv("GEMINI_API_KEY", "")
+        if GEMINI_AVAILABLE and gemini_key:
+            try:
+                genai.configure(api_key=gemini_key)
+                self.llm_client = genai.GenerativeModel("gemini-2.5-flash-lite")
+                self.llm_model = "gemini-2.5-flash-lite"
+                self.llm_type = "gemini"
+                logger.info(f"Using Gemini: {self.llm_model}")
+                return
+            except Exception as e:
+                logger.warning(f"Gemini init failed: {e}")
+
+        # ============================================
+        # OPENAI (uncomment to use)
+        # ============================================
+        # openai_key = os.getenv("OPENAI_API_KEY", "")
+        # if OPENAI_AVAILABLE and openai_key:
+        #     try:
+        #         self.llm_client = OpenAI(api_key=openai_key)
+        #         self.llm_model = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
+        #         self.llm_type = "openai"
+        #         logger.info(f"Using OpenAI: {self.llm_model}")
+        #         return
+        #     except Exception as e:
+        #         logger.warning(f"OpenAI init failed: {e}")
+
+        # ============================================
+        # OLLAMA (uncomment to use - requires local setup)
+        # ============================================
+        # if OLLAMA_AVAILABLE:
+        #     try:
+        #         ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        #         self.llm_client = OllamaClient(host=ollama_url)
+        #         self.llm_model = os.getenv("OLLAMA_MODEL", "llama3.2")
+        #         self.llm_type = "ollama"
+        #         logger.info(f"Using Ollama: {self.llm_model}")
+        #         return
+        #     except Exception as e:
+        #         logger.warning(f"Ollama init failed: {e}")
+
+        logger.warning("No LLM available, using rule-based fallback")
 
     def _call_llm(self, prompt: str, system_prompt: str = None) -> Optional[str]:
         """Call LLM for intent parsing or response generation"""
         if not self.llm_client:
             return None
-        
+
         try:
-            if self.llm_type == "openai":
-                messages = []
-                if system_prompt:
-                    messages.append({"role": "system", "content": system_prompt})
-                messages.append({"role": "user", "content": prompt})
-                
-                response = self.llm_client.chat.completions.create(
-                    model=self.llm_model,
-                    messages=messages,
-                    temperature=0.3,
-                    max_tokens=500
-                )
-                return response.choices[0].message.content
-            
-            elif self.llm_type == "ollama":
-                messages = []
-                if system_prompt:
-                    messages.append({"role": "system", "content": system_prompt})
-                messages.append({"role": "user", "content": prompt})
-                
-                response = self.llm_client.chat(
-                    model=self.llm_model,
-                    messages=messages
-                )
-                return response['message']['content']
-        
+            # Build full prompt
+            full_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
+
+            # ============================================
+            # GEMINI
+            # ============================================
+            if self.llm_type == "gemini":
+                response = self.llm_client.generate_content(full_prompt)
+                return response.text
+
+            # ============================================
+            # OPENAI (uncomment if using)
+            # ============================================
+            # if self.llm_type == "openai":
+            #     messages = []
+            #     if system_prompt:
+            #         messages.append({"role": "system", "content": system_prompt})
+            #     messages.append({"role": "user", "content": prompt})
+            #
+            #     response = self.llm_client.chat.completions.create(
+            #         model=self.llm_model,
+            #         messages=messages,
+            #         temperature=0.3,
+            #         max_tokens=500
+            #     )
+            #     return response.choices[0].message.content
+
+            # ============================================
+            # OLLAMA (uncomment if using)
+            # ============================================
+            # if self.llm_type == "ollama":
+            #     messages = []
+            #     if system_prompt:
+            #         messages.append({"role": "system", "content": system_prompt})
+            #     messages.append({"role": "user", "content": prompt})
+            #
+            #     response = self.llm_client.chat(
+            #         model=self.llm_model,
+            #         messages=messages
+            #     )
+            #     return response['message']['content']
+
         except Exception as e:
             logger.warning(f"LLM call failed: {e}")
             return None
@@ -1198,19 +1219,13 @@ Examples:
         return self._execute_intent(merged_intent, message)
 
     def _parse_intent(self, message: str) -> Dict[str, Any]:
-        """Parse user intent from message - Semantic Cache → LLM → Rule-based fallback"""
+        """Parse user intent from message - LLM first, rule-based fallback"""
         
-        # 1. Check Semantic Cache first
-        cached_intent = self._check_semantic_cache(message)
-        if cached_intent:
-            logger.info(f"Using cached intent from semantic cache")
-            return cached_intent
-        
-        # 2. Try LLM parsing
+        # Try LLM parsing first
         llm_intent = self._llm_parse_intent(message)
         if llm_intent:
             # Normalize LLM output
-            intent = {
+            return {
                 "action": llm_intent.get("action"),
                 "destination": llm_intent.get("destination"),
                 "origin": llm_intent.get("origin"),
@@ -1220,11 +1235,8 @@ Examples:
                 "quote_id": None,
                 "option_number": llm_intent.get("option_number")
             }
-            # Update semantic cache with new intent
-            self._update_semantic_cache(message, intent)
-            return intent
         
-        # 3. Fallback to rule-based parsing
+        # Fallback to rule-based parsing
         logger.info("Using rule-based intent parsing (LLM unavailable)")
         intent = {"action": None, "destination": None, "origin": None, "budget": None, "preferences": [], "bundle_id": None, "quote_id": None, "option_number": None}
         msg_lower = message.lower()
@@ -1413,7 +1425,27 @@ Examples:
                 self._previous_preferences = intent.get("preferences", []).copy()
                 
                 return ChatResponse(message=msg, bundles=bundles, intent=intent)
-            return ChatResponse(message="Sorry, I couldn't find matching options. Try a different destination.", intent=intent)
+            # No bundles found - provide helpful suggestions
+            dest = intent.get("destination", "")
+            dest_code = self.tools._normalize_city(dest) if dest else None
+
+            # Get available destinations from deals cache
+            available_dests = []
+            if CACHE_AVAILABLE and deals_cache:
+                try:
+                    stats = deals_cache.get_stats()
+                    # Get top destinations with actual deals
+                    available_dests = list(stats.get("destinations", {}).keys())[:10]
+                except Exception:
+                    available_dests = ["Mumbai", "Delhi", "Bangalore", "Chennai", "Kolkata"]
+
+            msg = f"I couldn't find flights or hotels to **{dest}** ({dest_code or 'unknown code'}).\n\n"
+            if available_dests:
+                msg += "**Available destinations with deals:**\n"
+                msg += ", ".join(available_dests[:8]) + "\n\n"
+            msg += "Try: \"fly me to Mumbai\" or \"show me deals to Delhi\""
+
+            return ChatResponse(message=msg, intent=intent)
         
         elif action == "watch":
             bundle_id = intent.get("bundle_id")

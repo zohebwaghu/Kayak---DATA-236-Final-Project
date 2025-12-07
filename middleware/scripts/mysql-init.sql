@@ -253,5 +253,33 @@ GROUP BY userId;
 
 COMMIT;
 
+-- ==========================================
+-- CHECK CONSTRAINTS FOR DATA VALIDATION
+-- ==========================================
+
+-- Note: MySQL 8.0.16+ supports CHECK constraints
+-- Add validation for ZIP codes (format: ##### or #####-####)
+ALTER TABLE kayak_users.users
+  ADD CONSTRAINT chk_zipcode CHECK (zip_code REGEXP '^[0-9]{5}(-[0-9]{4})?$');
+
+-- Booking validation constraints
+ALTER TABLE kayak_bookings.bookings
+  ADD CONSTRAINT chk_guests CHECK (guests >= 1),
+  ADD CONSTRAINT chk_dates CHECK (endDate IS NULL OR startDate IS NULL OR endDate >= startDate),
+  ADD CONSTRAINT chk_total_price CHECK (totalPrice >= 0);
+
+-- Inventory validation constraints
+ALTER TABLE kayak_bookings.inventory
+  ADD CONSTRAINT chk_price CHECK (pricePerUnit >= 0),
+  ADD CONSTRAINT chk_available CHECK (availableCount >= 0);
+
+-- Payment validation constraints
+ALTER TABLE kayak_billing.payments
+  ADD CONSTRAINT chk_payment_amount CHECK (amount > 0);
+
+-- Invoice validation constraints
+ALTER TABLE kayak_billing.invoices
+  ADD CONSTRAINT chk_invoice_amount CHECK (amount > 0);
+
 -- Success message
 SELECT 'Database initialization completed successfully!' AS Status;

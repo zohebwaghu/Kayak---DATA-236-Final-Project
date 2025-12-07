@@ -408,10 +408,13 @@ const PaymentPage = () => {
         listing.passengers ||
         1;
 
-      const totalPrice =
-        typeof priceNumeric === 'number' && priceNumeric > 0
-          ? priceNumeric
-          : 1;
+      // Reject bookings with invalid prices instead of defaulting to $1
+      if (typeof priceNumeric !== 'number' || priceNumeric <= 0) {
+        setSubmitError('Unable to determine price. Please go back and select a valid listing.');
+        setSubmitting(false);
+        return;
+      }
+      const totalPrice = priceNumeric;
 
       const payload = {
         userId: user.userId,

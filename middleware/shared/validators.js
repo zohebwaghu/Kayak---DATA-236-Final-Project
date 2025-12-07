@@ -120,6 +120,48 @@ const validateDate = (date) => {
   return dateObj instanceof Date && !isNaN(dateObj);
 };
 
+// ==================== SPEC-REQUIRED ERROR CODES ====================
+// These throw exceptions with the exact error codes required by the project spec
+
+/**
+ * Validates User ID (SSN format) and throws if invalid
+ * @throws {object} Error with code 'invalid_driver_id' if invalid
+ */
+const requireValidUserId = (userId) => {
+  if (!userId || !validateUserId(userId)) {
+    const error = new Error('User ID must match SSN format: ###-##-####');
+    error.status = 400;
+    error.code = 'invalid_driver_id';
+    throw error;
+  }
+};
+
+/**
+ * Validates US state and throws if invalid
+ * @throws {object} Error with code 'malformed_state' if invalid
+ */
+const requireValidState = (state) => {
+  if (!state || !validateState(state)) {
+    const error = new Error('Invalid US state abbreviation or name');
+    error.status = 400;
+    error.code = 'malformed_state';
+    throw error;
+  }
+};
+
+/**
+ * Validates ZIP code and throws if invalid
+ * @throws {object} Error with code 'malformed_zip' if invalid
+ */
+const requireValidZip = (zipCode) => {
+  if (!zipCode || !validateZipCode(zipCode)) {
+    const error = new Error('ZIP code must be in format ##### or #####-####');
+    error.status = 400;
+    error.code = 'malformed_zip';
+    throw error;
+  }
+};
+
 module.exports = {
   validateUserId,
   validateZipCode,
@@ -128,6 +170,13 @@ module.exports = {
   validatePhone,
   validatePassword,
   validateDate,
-  normalizeState
+  normalizeState,
+  // Spec-required exception throwers
+  requireValidUserId,
+  requireValidState,
+  requireValidZip,
+  // Export constants for reuse
+  STATE_MAP,
+  VALID_STATE_CODES
 };
 

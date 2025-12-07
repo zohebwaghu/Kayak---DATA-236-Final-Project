@@ -17,8 +17,10 @@ import random
 import json
 from datetime import datetime, timedelta
 
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add parent directory and ai/ to path for imports
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
+sys.path.insert(0, os.path.join(project_root, 'ai'))
 
 # SQLModel imports
 try:
@@ -42,60 +44,18 @@ MYSQL_PASSWORD = os.getenv("DB_PASSWORD", "password")
 MYSQL_DB = os.getenv("DB_NAME_USERS", "kayak_users")
 
 # Data directory
-DATA_DIR = os.getenv("DATA_DIR", "./data")
+# Use script's directory as DATA_DIR default
+DATA_DIR = os.getenv("DATA_DIR", os.path.dirname(os.path.abspath(__file__)))
 
 # ============================================
-# City/Country Mapping for Hotels
-# Hotels CSV has European countries, Flights CSV has Indian cities
-# We map European countries to Indian cities for matching
+# Real-city handling
 # ============================================
+# We keep original cities/countries from the datasets and map to IATA using airports.csv.
+# If an IATA code cannot be found, we keep the city name and skip flight rows without route data.
+# No synthetic remapping to Indian cities.
 
-COUNTRY_TO_INDIAN_CITY = {
-    "PRT": {"city": "Mumbai", "code": "BOM"},      # Portugal → Mumbai
-    "GBR": {"city": "Delhi", "code": "DEL"},       # UK → Delhi
-    "ESP": {"city": "Bangalore", "code": "BLR"},   # Spain → Bangalore
-    "FRA": {"city": "Chennai", "code": "MAA"},     # France → Chennai
-    "DEU": {"city": "Kolkata", "code": "CCU"},     # Germany → Kolkata
-    "ITA": {"city": "Hyderabad", "code": "HYD"},   # Italy → Hyderabad
-    "NLD": {"city": "Mumbai", "code": "BOM"},      # Netherlands → Mumbai
-    "IRL": {"city": "Delhi", "code": "DEL"},       # Ireland → Delhi
-    "BEL": {"city": "Bangalore", "code": "BLR"},   # Belgium → Bangalore
-    "BRA": {"city": "Chennai", "code": "MAA"},     # Brazil → Chennai
-    "USA": {"city": "Mumbai", "code": "BOM"},      # USA → Mumbai
-    "CHE": {"city": "Delhi", "code": "DEL"},       # Switzerland → Delhi
-    "CN": {"city": "Kolkata", "code": "CCU"},      # China → Kolkata
-    "AUT": {"city": "Hyderabad", "code": "HYD"},   # Austria → Hyderabad
-}
-
-# Default mapping for unknown countries
-DEFAULT_CITIES = [
-    {"city": "Mumbai", "code": "BOM"},
-    {"city": "Delhi", "code": "DEL"},
-    {"city": "Bangalore", "code": "BLR"},
-    {"city": "Chennai", "code": "MAA"},
-    {"city": "Kolkata", "code": "CCU"},
-    {"city": "Hyderabad", "code": "HYD"},
-]
-
-# Neighbourhoods for Indian cities (simulated)
-CITY_NEIGHBOURHOODS = {
-    "Mumbai": ["Bandra", "Andheri", "Juhu", "Colaba", "Worli", "Powai", "Lower Parel"],
-    "Delhi": ["Connaught Place", "Karol Bagh", "Paharganj", "Aerocity", "Dwarka", "Saket"],
-    "Bangalore": ["MG Road", "Koramangala", "Whitefield", "Indiranagar", "Electronic City"],
-    "Chennai": ["T Nagar", "Anna Nagar", "Adyar", "Egmore", "Mylapore", "OMR"],
-    "Kolkata": ["Park Street", "Salt Lake", "New Town", "Howrah", "Esplanade"],
-    "Hyderabad": ["Banjara Hills", "Jubilee Hills", "Hitech City", "Gachibowli", "Secunderabad"],
-}
-
-# City to airport code mapping (for flights)
-CITY_TO_AIRPORT = {
-    "Delhi": "DEL",
-    "Mumbai": "BOM",
-    "Bangalore": "BLR",
-    "Kolkata": "CCU",
-    "Hyderabad": "HYD",
-    "Chennai": "MAA"
-}
+# City to airport code mapping (populated from airports dataset)
+CITY_TO_AIRPORT = {}
 
 
 def connect_mongo():
@@ -123,18 +83,9 @@ def connect_mysql():
         return None
 
 
-def get_indian_city(country_code: str, index: int) -> dict:
-    """Map country code to Indian city for hotel location"""
-    if country_code in COUNTRY_TO_INDIAN_CITY:
-        return COUNTRY_TO_INDIAN_CITY[country_code]
-    # Use index to distribute unknown countries across cities
-    return DEFAULT_CITIES[index % len(DEFAULT_CITIES)]
-
-
 def get_neighbourhood(city: str, index: int) -> str:
-    """Get a neighbourhood for a city based on index"""
-    neighbourhoods = CITY_NEIGHBOURHOODS.get(city, ["City Center"])
-    return neighbourhoods[index % len(neighbourhoods)]
+    """Return neighbourhood if present, else 'City Center'."""
+    return "City Center"
 
 
 def import_airports(db, filepath):
@@ -184,11 +135,12 @@ def import_airports(db, filepath):
             ))
     
     # Insert to MongoDB
-    collection = db["airports"]
-    collection.drop()
-    if airports:
-        collection.insert_many(airports)
-        collection.create_index("iata", unique=True)
+    if db is not None:
+        collection = db["airports"]
+        collection.drop()
+        if airports:
+            collection.insert_many(airports)
+            collection.create_index("iata", unique=True)
     
     # Insert to SQLite
     if SQLMODEL_AVAILABLE and sqlite_airports:
@@ -261,8 +213,12 @@ def import_flights(db, filepath, limit=10000):
         direct_score = 10 if stops == 0 else 0
         deal_score = min(95, max(30, 25 + discount_score + scarcity_score + promo_score + direct_score))
         
-        origin_code = CITY_TO_AIRPORT.get(source, source[:3].upper() if source else "XXX")
-        dest_code = CITY_TO_AIRPORT.get(dest, dest[:3].upper() if dest else "XXX")
+        origin_code = CITY_TO_AIRPORT.get(source, str(source)[:3].upper() if source else "")
+        dest_code = CITY_TO_AIRPORT.get(dest, str(dest)[:3].upper() if dest else "")
+
+        # Skip rows without usable route codes
+        if not origin_code or not dest_code or len(origin_code) < 3 or len(dest_code) < 3:
+            continue
         
         flight = {
             "flight_id": f"FL{idx:06d}",
@@ -331,14 +287,19 @@ def import_flights(db, filepath, limit=10000):
     
     # Insert to SQLite
     if SQLMODEL_AVAILABLE and sqlite_flights:
-        engine = get_engine()
-        with Session(engine) as session:
-            session.query(FlightDeal).delete()
-            session.commit()
-            for flight in sqlite_flights:
-                session.add(flight)
-            session.commit()
-        print(f"Imported {len(sqlite_flights)} flights to SQLite")
+        try:
+            engine = get_engine()
+            with Session(engine) as session:
+                session.query(FlightDeal).delete()
+                session.commit()
+                for flight in sqlite_flights:
+                    session.add(flight)
+                session.commit()
+            print(f"Imported {len(sqlite_flights)} flights to SQLite")
+        except Exception as e:
+            print(f"ERROR importing flights to SQLite: {e}")
+    else:
+        print(f"SQLite flight import skipped: SQLMODEL_AVAILABLE={SQLMODEL_AVAILABLE}, sqlite_flights={len(sqlite_flights) if sqlite_flights else 0}")
     
     print(f"Imported {len(flights)} flights to MongoDB")
     return len(flights)
@@ -348,9 +309,9 @@ def import_hotels(db, filepath, limit=10000):
     """
     Import hotels data to MongoDB and SQLite with:
     - Deal Score fields
-    - Indian city mapping (Assignment: match with flights)
-    - Neighbourhood (Assignment requirement)
-    - Near-transit tag (Assignment requirement)
+    - Real city/country (no synthetic remap)
+    - Neighbourhood (from dataset when available, else City Center)
+    - Near-transit tag (derived heuristic)
     """
     print(f"\n=== Importing Hotels from {filepath} ===")
     
@@ -366,7 +327,8 @@ def import_hotels(db, filepath, limit=10000):
     
     for idx, row in df.iterrows():
         hotel_type = row.get("hotel", "Hotel")
-        country_code = row.get("country", "Unknown")
+        raw_country = row.get("country", "Unknown")
+        country_code = raw_country if pd.notna(raw_country) and raw_country else "Unknown"
         
         hotel_key = f"{hotel_type}_{country_code}_{idx}"
         if hotel_key in seen_hotels:
@@ -382,13 +344,12 @@ def import_hotels(db, filepath, limit=10000):
         hotel_idx = len(hotels)
         hash_val = hash(f"HT{hotel_idx:06d}") % 100
         
-        # Map to Indian city (Assignment: make hotels match flights)
-        city_info = get_indian_city(country_code, hotel_idx)
-        city = city_info["city"]
-        city_code = city_info["code"]
-        
-        # Get neighbourhood (Assignment requirement)
-        neighbourhood = get_neighbourhood(city, hotel_idx)
+        # Use actual country from dataset (no fake mapping)
+        city = country_code
+        city_code = country_code
+
+        # Neighbourhood from dataset or default
+        neighbourhood = "City Center"
         
         # Deal Score fields
         discount_percent = 5 + (hash_val % 31)  # 5% to 35%
@@ -527,15 +488,20 @@ def import_hotels(db, filepath, limit=10000):
     
     # Insert to SQLite
     if SQLMODEL_AVAILABLE and sqlite_hotels:
-        engine = get_engine()
-        with Session(engine) as session:
-            session.query(HotelDeal).delete()
-            session.commit()
-            for hotel in sqlite_hotels:
-                session.add(hotel)
-            session.commit()
-        print(f"Imported {len(sqlite_hotels)} hotels to SQLite")
-    
+        try:
+            engine = get_engine()
+            with Session(engine) as session:
+                session.query(HotelDeal).delete()
+                session.commit()
+                for hotel in sqlite_hotels:
+                    session.add(hotel)
+                session.commit()
+            print(f"Imported {len(sqlite_hotels)} hotels to SQLite")
+        except Exception as e:
+            print(f"ERROR importing hotels to SQLite: {e}")
+    else:
+        print(f"SQLite hotel import skipped: SQLMODEL_AVAILABLE={SQLMODEL_AVAILABLE}, sqlite_hotels={len(sqlite_hotels) if sqlite_hotels else 0}")
+
     print(f"Imported {len(hotels)} hotels to MongoDB")
     return len(hotels)
 

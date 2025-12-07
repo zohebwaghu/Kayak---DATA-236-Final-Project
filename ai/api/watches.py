@@ -19,6 +19,15 @@ try:
 except ImportError:
     REDIS_AVAILABLE = False
 
+# SQLite persistence (Assignment requirement)
+try:
+    from sqlmodel import Session
+    from models.database import get_engine
+    from models.concierge_entities import WatchRecord
+    SQLITE_AVAILABLE = True
+except ImportError:
+    SQLITE_AVAILABLE = False
+
 
 # ============================================
 # Pydantic Models
@@ -147,7 +156,37 @@ class WatchStore:
     def _save_watch(self, watch: Watch):
         """Save watch to storage"""
         watch_dict = watch.model_dump()
-        
+
+        # Save to SQLite (Assignment requirement)
+        if SQLITE_AVAILABLE:
+            try:
+                engine = get_engine()
+                with Session(engine) as session:
+                    # Map threshold based on watch type
+                    price_threshold = watch.threshold if watch.watch_type in ("price", "both") else None
+                    inventory_threshold = watch.threshold if watch.watch_type in ("inventory", "both") else None
+                    current_price = watch.current_value if watch.watch_type in ("price", "both") else None
+                    current_inventory = watch.current_value if watch.watch_type in ("inventory", "both") else None
+
+                    record = WatchRecord(
+                        watch_id=watch.watch_id,
+                        user_id=watch.user_id,
+                        listing_type=watch.listing_type,
+                        listing_id=watch.listing_id,
+                        listing_name=watch.listing_name,
+                        watch_type=watch.watch_type,
+                        price_threshold=price_threshold,
+                        inventory_threshold=inventory_threshold,
+                        current_price=current_price,
+                        current_inventory=current_inventory,
+                        is_active=True
+                    )
+                    session.add(record)
+                    session.commit()
+                    logger.info(f"Saved watch {watch.watch_id} to SQLite")
+            except Exception as e:
+                logger.error(f"SQLite save error for watch: {e}")
+
         if self.redis_client:
             try:
                 # Save watch data

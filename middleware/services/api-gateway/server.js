@@ -17,6 +17,7 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const jwt = require('jsonwebtoken');
 const axios = require('axios');
+const { createProxyMiddleware } = require('http-proxy-middleware');
 
 const { createErrorResponse } = require('../../shared/errorHandler');
 
@@ -222,13 +223,15 @@ app.use('/api/v1/search', (req, res) => {
   proxyToService(req, res, 'Search Service', serviceUrl);
 });
 
-// ==================== LISTINGS SERVICE ROUTES (ADMIN ONLY) ====================
+// ==================== LISTINGS ROUTES (ADMIN ONLY) ====================
+// Note: Listings are managed by admin-service (MongoDB), not a separate listings-service
 
 app.use('/api/v1/listings', authenticateJWT, requireAdmin, (req, res) => {
+  // Route to admin-service which handles listing CRUD via MongoDB
   const serviceUrl =
-    process.env.LISTINGS_SERVICE_URL ||
-    `http://listings-service:${process.env.LISTINGS_SERVICE_PORT || 3002}`;
-  proxyToService(req, res, 'Listings Service', serviceUrl);
+    process.env.ADMIN_SERVICE_URL ||
+    `http://admin-service:${process.env.ADMIN_SERVICE_PORT || 3006}/api/v1/admin/listings`;
+  proxyToService(req, res, 'Admin Service (Listings)', serviceUrl);
 });
 
 // ==================== BOOKING SERVICE ROUTES ====================
@@ -272,15 +275,6 @@ app.use('/api/v1/admin', authenticateJWT, requireAdmin, (req, res) => {
   proxyToService(req, res, 'Admin Service', serviceUrl);
 });
 
-// ==================== AI SERVICE ROUTES (PUBLIC) ====================
-
-app.use('/api/v1/ai', (req, res) => {
-  const serviceUrl =
-    process.env.AI_SERVICE_URL ||
-    `http://ai-service:${process.env.AI_SERVICE_PORT || 8000}/api/ai`;
-  proxyToService(req, res, 'AI Service', serviceUrl);
-});
-
 // ==================== ERROR HANDLING ====================
 
 // 404 handler
@@ -307,6 +301,18 @@ app.use((err, req, res, next) => {
     )
   );
 });
+
+// ==================== WEBSOCKET PROXY FOR AI SERVICE ====================
+
+// WebSocket proxy for AI service real-time events
+const wsProxy = createProxyMiddleware('/api/v1/ai/events', {
+  target: process.env.AI_SERVICE_URL || 'http://ai-service:8000',
+  ws: true,
+  changeOrigin: true,
+  pathRewrite: { '^/api/v1/ai': '/api/ai' },
+  logLevel: 'warn'
+});
+app.use('/api/v1/ai/events', wsProxy);
 
 // ==================== SERVER STARTUP ====================
 

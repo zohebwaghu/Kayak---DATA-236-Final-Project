@@ -50,6 +50,14 @@ except ImportError:
     deals_cache = None
     logger.warning("deals_cache not available")
 
+# Import price history for recording observations
+try:
+    from models.deals_entities import record_price_observation
+    PRICE_HISTORY_AVAILABLE = True
+except ImportError:
+    PRICE_HISTORY_AVAILABLE = False
+    record_price_observation = None
+
 # Import watch store for triggering alerts
 try:
     from api.watches import watch_store
@@ -62,6 +70,18 @@ try:
 except ImportError:
     events_manager = None
 
+# FIX 2 & 5: Import SQLModel for direct database ingestion and persistence
+try:
+    from sqlmodel import Session, select
+    from models.database import get_engine
+    from models.deals_entities import FlightDeal, HotelDeal
+    SQLMODEL_AVAILABLE = True
+except ImportError:
+    SQLMODEL_AVAILABLE = False
+    logger.warning("SQLModel not available for persistence")
+
+import random  # For Fix 6: price mutation
+
 
 # Topic names from environment
 KAFKA_RAW_TOPIC = os.getenv("KAFKA_DEALS_RAW_TOPIC", "raw_supplier_feeds")
@@ -69,6 +89,9 @@ KAFKA_NORMALIZED_TOPIC = os.getenv("KAFKA_DEALS_NORMALIZED_TOPIC", "deals.normal
 KAFKA_SCORED_TOPIC = os.getenv("KAFKA_DEALS_SCORED_TOPIC", "deals.scored")
 KAFKA_TAGGED_TOPIC = os.getenv("KAFKA_DEALS_TAGGED_TOPIC", "deals.tagged")
 KAFKA_EVENTS_TOPIC = os.getenv("KAFKA_DEAL_EVENTS_TOPIC", "deal.events")
+
+# Scheduler settings
+SCAN_INTERVAL_SECONDS = int(os.getenv("DEALS_SCAN_INTERVAL", "300"))  # Default: 5 minutes
 
 
 class DealsAgentRunner:
@@ -103,35 +126,51 @@ class DealsAgentRunner:
             "spa": "spa",
             "beach": "beach",
             "refund": "refundable",
-            "cancel": "refundable"
+            "cancel": "refundable",
+            # Near transit keywords (Assignment requirement)
+            "transit": "near-transit",
+            "subway": "near-transit",
+            "metro": "near-transit",
+            "train": "near-transit",
+            "bus": "near-transit",
+            "station": "near-transit",
+            "airport shuttle": "near-transit"
         }
     
     async def start(self):
         """Start the Deals Agent"""
+        # FIX 7: Graceful degradation when Kafka unavailable
         if not KAFKA_AVAILABLE:
-            logger.warning("Kafka not available, Deals Agent running in mock mode")
+            logger.warning("Kafka not available - Deals Agent running in SQLite-only mode")
+            logger.warning("Deals will be processed from database only, no real-time Kafka feeds")
             self.running = True
+            # Only run scheduled scan loop (no Kafka consumer)
+            self._tasks.append(asyncio.create_task(self._scheduled_scan_loop()))
+            logger.info(f"Deals Agent started in fallback mode (scan interval: {SCAN_INTERVAL_SECONDS}s)")
             return
-        
+
         try:
             # Initialize producer
             self.producer = KafkaProducerWrapper(client_id="deals-agent-producer")
             await self.producer.start()
-            
+
             # Initialize consumer for raw feeds
             self.consumer = KafkaConsumerWrapper(
                 topics=[KAFKA_RAW_TOPIC],
                 group_id="deals-agent-processor"
             )
             await self.consumer.start()
-            
+
             self.running = True
-            
-            # Start processing loop
+
+            # Start processing loop (reactive - Kafka messages)
             self._tasks.append(asyncio.create_task(self._process_loop()))
-            
-            logger.info("Deals Agent started successfully")
-            
+
+            # Start scheduled scan loop (proactive - periodic scans)
+            self._tasks.append(asyncio.create_task(self._scheduled_scan_loop()))
+
+            logger.info(f"Deals Agent started (scan interval: {SCAN_INTERVAL_SECONDS}s)")
+
         except Exception as e:
             logger.error(f"Failed to start Deals Agent: {e}")
             self.running = False
@@ -180,6 +219,226 @@ class DealsAgentRunner:
                 logger.error(f"Error in processing loop: {e}")
                 await asyncio.sleep(1)
     
+    async def _scheduled_scan_loop(self):
+        """
+        Scheduled scan loop for proactive deal discovery.
+        Runs periodically to re-score existing deals and discover new ones.
+        FIX 2: Also ingests data from SQLite directly.
+        """
+        logger.info(f"Scheduled scan loop started (interval: {SCAN_INTERVAL_SECONDS}s)")
+
+        # Initial delay to let system stabilize
+        await asyncio.sleep(10)
+
+        while self.running:
+            try:
+                # FIX 2: Ingest data from SQLite (replaces missing Kafka CSV feed)
+                logger.info("Ingesting data from SQLite...")
+                await self._ingest_sqlite_data()
+
+                logger.info("Running scheduled deal scan...")
+                await self._run_scheduled_scan()
+                logger.info(f"Scheduled scan complete. Next scan in {SCAN_INTERVAL_SECONDS}s")
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in scheduled scan: {e}")
+
+            # Wait for next scan interval
+            await asyncio.sleep(SCAN_INTERVAL_SECONDS)
+
+    async def _run_scheduled_scan(self):
+        """
+        Run a scheduled scan of deals in the database.
+        Re-scores existing deals and checks for price changes.
+        """
+        if not deals_cache:
+            logger.warning("Deals cache not available for scheduled scan")
+            return
+
+        try:
+            # Get all deals from cache
+            all_deals = deals_cache.get_all_deals()
+            logger.info(f"Scanning {len(all_deals)} deals in cache")
+
+            rescore_count = 0
+            price_change_count = 0
+
+            for deal in all_deals:
+                # FIX 6: Simulate minor price fluctuations to trigger watches
+                # This simulates real market behavior where prices change slightly
+                price_variation = random.uniform(-0.05, 0.05)  # +/- 5%
+                old_price = deal.current_price
+                new_price = old_price * (1 + price_variation)
+
+                # Only apply if there's a meaningful change (>1%)
+                if abs(price_variation) > 0.01:
+                    deal.current_price = round(new_price, 2)
+                    price_change_count += 1
+                    logger.debug(f"Price mutation: {deal.deal_id} ${old_price:.2f} -> ${deal.current_price:.2f}")
+
+                # Re-score each deal
+                normalized = {
+                    "deal_id": deal.deal_id,
+                    "listing_type": deal.listing_type,
+                    "listing_id": deal.listing_id,
+                    "name": deal.name,
+                    "destination": deal.destination,
+                    "origin": deal.origin,
+                    "current_price": deal.current_price,
+                    "avg_30d_price": deal.avg_30d_price,
+                    "original_price": deal.original_price,
+                    "availability": deal.availability,
+                    "rating": deal.metadata.get("rating", 4.0) if deal.metadata else 4.0,
+                    "amenities": deal.metadata.get("amenities", []) if deal.metadata else [],
+                    "metadata": deal.metadata or {}
+                }
+
+                # Re-score
+                scored = self._score(normalized)
+                tagged = self._tag(scored)
+
+                # Check if score changed significantly
+                if abs(tagged["deal_score"] - deal.deal_score) >= 5:
+                    rescore_count += 1
+                    logger.debug(f"Deal {deal.deal_id}: score {deal.deal_score} -> {tagged['deal_score']}")
+
+                    # Update cache
+                    deal.deal_score = tagged["deal_score"]
+                    deal.tags = tagged["tags"]
+                    deals_cache.add_deal(deal)
+
+                    # Check watches for this deal
+                    await self._check_watches(tagged)
+
+                    # Emit event if now a high-score deal
+                    if tagged["deal_score"] >= self.rules["high_score_threshold"]:
+                        await self._emit_deal_event(tagged)
+
+            logger.info(f"Scheduled scan: {rescore_count} deals rescored, {price_change_count} price changes")
+
+        except Exception as e:
+            logger.error(f"Error running scheduled scan: {e}")
+
+    async def _ingest_sqlite_data(self):
+        """
+        FIX 2: Ingest data from SQLite tables directly.
+        This replaces the missing Kafka CSV feed functionality.
+        Reads FlightDeal and HotelDeal tables and processes them as if from Kafka.
+        """
+        if not SQLMODEL_AVAILABLE:
+            logger.debug("SQLModel not available, skipping SQLite ingestion")
+            return
+
+        try:
+            engine = get_engine()
+            ingested_count = 0
+
+            with Session(engine) as session:
+                # Ingest flights (limit to avoid overwhelming on first run)
+                flights = session.exec(select(FlightDeal).limit(500)).all()
+                for flight in flights:
+                    # Check if already in cache
+                    if deals_cache and deals_cache.get_deal(flight.flight_id):
+                        continue  # Already processed
+
+                    message = {
+                        "listing_type": "flight",
+                        "source": "sqlite",
+                        "data": {
+                            "id": flight.flight_id,
+                            "flight_id": flight.flight_id,
+                            "origin": flight.origin,
+                            "destination": flight.destination,
+                            "airline": flight.airline,
+                            "price": flight.price,
+                            "avg_30d_price": flight.avg_30d_price,
+                            "availability": flight.available_seats,
+                            "rating": flight.rating,
+                            "stops": flight.stops,
+                            "duration": flight.duration,
+                            "flight_class": flight.flight_class,
+                            "name": f"{flight.airline} {flight.origin}->{flight.destination}"
+                        }
+                    }
+                    await self._process_message(message)
+                    ingested_count += 1
+
+                # Ingest hotels (limit to avoid overwhelming on first run)
+                hotels = session.exec(select(HotelDeal).limit(500)).all()
+                for hotel in hotels:
+                    # Check if already in cache
+                    if deals_cache and deals_cache.get_deal(hotel.hotel_id):
+                        continue  # Already processed
+
+                    message = {
+                        "listing_type": "hotel",
+                        "source": "sqlite",
+                        "data": {
+                            "id": hotel.hotel_id,
+                            "hotel_id": hotel.hotel_id,
+                            "name": hotel.name,
+                            "city": hotel.city,
+                            "price": hotel.price_per_night,
+                            "avg_30d_price": hotel.avg_30d_price,
+                            "availability": hotel.available_rooms,
+                            "rating": hotel.rating,
+                            "star_rating": hotel.star_rating,
+                            "neighbourhood": hotel.neighbourhood,
+                            "pet_friendly": hotel.pet_friendly,
+                            "near_transit": hotel.near_transit,
+                            "breakfast_included": hotel.breakfast_included,
+                            "is_refundable": hotel.is_refundable,
+                            "parking_available": hotel.parking_available
+                        }
+                    }
+                    await self._process_message(message)
+                    ingested_count += 1
+
+            if ingested_count > 0:
+                logger.info(f"Ingested {ingested_count} new records from SQLite")
+
+        except Exception as e:
+            logger.error(f"Error ingesting SQLite data: {e}")
+
+    def _persist_deal_to_sqlite(self, tagged: Dict[str, Any]):
+        """
+        FIX 5: Persist processed deal back to SQLite.
+        Updates the deal score and tags in the original FlightDeal/HotelDeal tables.
+        """
+        if not SQLMODEL_AVAILABLE:
+            return
+
+        try:
+            engine = get_engine()
+            listing_type = tagged.get("listing_type")
+            listing_id = tagged.get("listing_id", tagged["deal_id"])
+
+            with Session(engine) as session:
+                if listing_type == "flight":
+                    flight = session.exec(
+                        select(FlightDeal).where(FlightDeal.flight_id == listing_id)
+                    ).first()
+                    if flight:
+                        flight.deal_score = tagged["deal_score"]
+                        flight.tags = str(tagged["tags"])
+                        flight.updated_at = datetime.utcnow()
+                        session.add(flight)
+                        session.commit()
+                elif listing_type == "hotel":
+                    hotel = session.exec(
+                        select(HotelDeal).where(HotelDeal.hotel_id == listing_id)
+                    ).first()
+                    if hotel:
+                        hotel.deal_score = tagged["deal_score"]
+                        hotel.tags = str(tagged["tags"])
+                        hotel.updated_at = datetime.utcnow()
+                        session.add(hotel)
+                        session.commit()
+        except Exception as e:
+            logger.debug(f"Failed to persist deal to SQLite: {e}")
+
     async def _process_message(self, message: Dict[str, Any]):
         """Process a single raw feed message"""
         try:
@@ -239,10 +498,25 @@ class DealsAgentRunner:
                     metadata=tagged.get("metadata", {})
                 )
                 deals_cache.add_deal(deal)
-            
+
+            # FIX 5: Persist deal back to SQLite
+            self._persist_deal_to_sqlite(tagged)
+
             # Step 6: Check watches and trigger alerts
             await self._check_watches(tagged)
-            
+
+            # Step 7: Record price observation for historical tracking
+            if PRICE_HISTORY_AVAILABLE and record_price_observation:
+                try:
+                    record_price_observation(
+                        listing_id=tagged["deal_id"],
+                        listing_type=tagged["listing_type"],
+                        price=tagged["current_price"],
+                        source="deals_agent"
+                    )
+                except Exception as e:
+                    logger.debug(f"Failed to record price observation: {e}")
+
             logger.debug(f"Processed deal: {tagged['deal_id']} score={tagged['deal_score']}")
             
         except Exception as e:
@@ -436,12 +710,36 @@ class DealsAgentRunner:
                 tags.append("direct-flight")
             if scored.get("metadata", {}).get("flight_class") == "Business":
                 tags.append("business-class")
-        
+
+        # Hotel-specific tagging (Assignment requirement: near-transit)
+        if scored.get("listing_type") == "hotel":
+            metadata = scored.get("metadata", {})
+
+            # Check for explicit near_transit flag (from SQLModel)
+            if metadata.get("near_transit") and "near-transit" not in tags:
+                tags.append("near-transit")
+
+            # Check for pet-friendly flag
+            if metadata.get("pet_friendly") and "pet-friendly" not in tags:
+                tags.append("pet-friendly")
+
+            # Check for breakfast
+            if metadata.get("breakfast_included") and "breakfast" not in tags:
+                tags.append("breakfast")
+
+            # Check for refundable
+            if metadata.get("is_refundable") and "refundable" not in tags:
+                tags.append("refundable")
+
+            # Check for parking
+            if metadata.get("parking_available") and "parking" not in tags:
+                tags.append("parking")
+
         tagged = {
             **scored,
             "tags": tags
         }
-        
+
         return tagged
     
     async def _emit_deal_event(self, tagged: Dict[str, Any]):

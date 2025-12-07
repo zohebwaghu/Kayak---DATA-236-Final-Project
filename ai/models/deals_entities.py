@@ -145,3 +145,91 @@ class HotelDeal(SQLModel, table=True):
     listing_date: Optional[str] = Field(default=None)  # Assignment: date field
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class PriceHistory(SQLModel, table=True):
+    """
+    Price history for computing real 30-day averages.
+    Stores actual price observations over time.
+    """
+    __tablename__ = "price_history"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    listing_id: str = Field(index=True, max_length=64)  # flight_xxx or hotel_xxx
+    listing_type: str = Field(max_length=16)  # "flight" or "hotel"
+    price: float
+    observed_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    source: str = Field(default="system", max_length=32)
+
+
+def compute_avg_30d_price(listing_id: str, listing_type: str) -> Optional[float]:
+    """
+    Compute actual 30-day average price from stored history.
+    Returns None if insufficient data.
+    """
+    from sqlmodel import Session, select
+    from datetime import datetime, timedelta
+    try:
+        from models.database import get_engine
+        engine = get_engine()
+
+        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+
+        with Session(engine) as session:
+            statement = select(PriceHistory).where(
+                PriceHistory.listing_id == listing_id,
+                PriceHistory.listing_type == listing_type,
+                PriceHistory.observed_at >= thirty_days_ago
+            )
+            results = session.exec(statement).all()
+
+            if not results or len(results) < 3:
+                return None
+
+            avg_price = sum(r.price for r in results) / len(results)
+            return round(avg_price, 2)
+
+    except Exception:
+        return None
+
+
+def record_price_observation(listing_id: str, listing_type: str, price: float, source: str = "system"):
+    """Record a price observation for historical tracking."""
+    from sqlmodel import Session
+    try:
+        from models.database import get_engine
+        engine = get_engine()
+
+        with Session(engine) as session:
+            observation = PriceHistory(
+                listing_id=listing_id,
+                listing_type=listing_type,
+                price=price,
+                source=source
+            )
+            session.add(observation)
+            session.commit()
+    except Exception:
+        pass
+
+
+def get_price_history(listing_id: str, listing_type: str, days: int = 30):
+    """Get price history for a listing."""
+    from sqlmodel import Session, select
+    from datetime import datetime, timedelta
+    try:
+        from models.database import get_engine
+        engine = get_engine()
+
+        cutoff = datetime.utcnow() - timedelta(days=days)
+
+        with Session(engine) as session:
+            statement = select(PriceHistory).where(
+                PriceHistory.listing_id == listing_id,
+                PriceHistory.listing_type == listing_type,
+                PriceHistory.observed_at >= cutoff
+            ).order_by(PriceHistory.observed_at)
+            return session.exec(statement).all()
+
+    except Exception:
+        return []

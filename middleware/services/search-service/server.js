@@ -153,14 +153,28 @@ const generateCacheKey = (listingType, query) => {
 
 /**
  * Invalidate all cache entries for a listing type
+ * Uses SCAN instead of KEYS to avoid blocking Redis in production
  */
 const invalidateCache = async (listingType) => {
   try {
     const pattern = `search:${listingType}*`;
-    const keys = await redisClient.keys(pattern);
-    if (keys.length > 0) {
-      await redisClient.del(keys);
-      console.log(`🗑️  Invalidated ${keys.length} cache entries for ${listingType}`);
+    let cursor = '0';
+    let deletedCount = 0;
+
+    // Use SCAN for non-blocking iteration instead of KEYS
+    do {
+      const result = await redisClient.scan(cursor, { MATCH: pattern, COUNT: 100 });
+      cursor = result.cursor.toString();
+      const keys = result.keys;
+
+      if (keys.length > 0) {
+        await redisClient.del(keys);
+        deletedCount += keys.length;
+      }
+    } while (cursor !== '0');
+
+    if (deletedCount > 0) {
+      console.log(`🗑️  Invalidated ${deletedCount} cache entries for ${listingType}`);
     }
   } catch (error) {
     console.error('Error invalidating cache:', error);
@@ -357,6 +371,11 @@ const handleFlightsSearch = async (req, res) => {
       maxPrice,
       airline,
       maxStops,
+      // SPEC REQUIREMENT: Flight time filters
+      departureTimeMin,
+      departureTimeMax,
+      arrivalTimeMin,
+      arrivalTimeMax,
       page = 1,
       limit = 20
     } = req.query;
@@ -422,6 +441,19 @@ const handleFlightsSearch = async (req, res) => {
 
     if (airline) query.airline = new RegExp(airline.trim(), 'i');
     if (maxStops !== undefined) query.stops = { $lte: parseInt(maxStops) };
+
+    // SPEC REQUIREMENT: Time-based filters for flights
+    // Time format expected: "HH:MM" (e.g., "06:00", "22:00")
+    if (departureTimeMin || departureTimeMax) {
+      query.departure_time = {};
+      if (departureTimeMin) query.departure_time.$gte = departureTimeMin;
+      if (departureTimeMax) query.departure_time.$lte = departureTimeMax;
+    }
+    if (arrivalTimeMin || arrivalTimeMax) {
+      query.arrival_time = {};
+      if (arrivalTimeMin) query.arrival_time.$gte = arrivalTimeMin;
+      if (arrivalTimeMax) query.arrival_time.$lte = arrivalTimeMax;
+    }
 
     // ===== EXECUTE QUERY =====
     const pageNum = Math.max(1, parseInt(page));

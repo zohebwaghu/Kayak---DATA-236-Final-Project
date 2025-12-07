@@ -24,6 +24,15 @@ try:
 except ImportError:
     explainer = None
 
+# Import price history functions for real 30-day averages
+try:
+    from models.deals_entities import get_price_history, compute_avg_30d_price
+    PRICE_HISTORY_AVAILABLE = True
+except ImportError:
+    PRICE_HISTORY_AVAILABLE = False
+    get_price_history = None
+    compute_avg_30d_price = None
+
 
 router = APIRouter(prefix="/api/ai/price-analysis", tags=["price-analysis"])
 
@@ -134,20 +143,54 @@ def calculate_verdict(current_price: float, avg_price: float) -> tuple[str, str]
         return "ABOVE_AVERAGE", f"At {diff_percent:.0f}% above average, you might find better deals by waiting or searching alternatives."
 
 
-def generate_mock_history(current_price: float, days: int = 30) -> List[PricePoint]:
-    """Generate mock price history for demo"""
+def get_real_price_history(listing_id: str, listing_type: str, days: int = 30) -> List[PricePoint]:
+    """Get real price history from database."""
+    if not PRICE_HISTORY_AVAILABLE or not get_price_history:
+        return []
+
+    try:
+        history_records = get_price_history(listing_id, listing_type, days)
+        if not history_records:
+            return []
+
+        return [
+            PricePoint(
+                date=record.observed_at.strftime("%Y-%m-%d"),
+                price=round(record.price, 2),
+                source="historical"
+            )
+            for record in history_records
+        ]
+    except Exception as e:
+        logger.warning(f"Error getting real price history: {e}")
+        return []
+
+
+def generate_mock_history(current_price: float, days: int = 30,
+                          listing_id: str = None, listing_type: str = None) -> List[PricePoint]:
+    """
+    Get price history - tries real data first, falls back to mock.
+    """
+    # Try real history first
+    if listing_id and listing_type:
+        real_history = get_real_price_history(listing_id, listing_type, days)
+        if len(real_history) >= 7:  # At least 7 data points for meaningful analysis
+            logger.info(f"Using real price history: {len(real_history)} points for {listing_id}")
+            return real_history
+
+    # Fall back to mock data
     import random
-    
+
     history = []
     base_price = current_price * 1.1  # Assume current is slightly below base
-    
+
     for i in range(days):
         date = (datetime.utcnow() - timedelta(days=days-i)).strftime("%Y-%m-%d")
         # Random variation +/- 15%
         variation = random.uniform(-0.15, 0.15)
         price = base_price * (1 + variation)
-        history.append(PricePoint(date=date, price=round(price, 2)))
-    
+        history.append(PricePoint(date=date, price=round(price, 2), source="simulated"))
+
     return history
 
 
@@ -235,8 +278,8 @@ async def analyze_price(
         original_price = current_price * 1.15
         listing_name = f"{listing_type.title()} {listing_id}"
     
-    # Generate price history
-    history = generate_mock_history(current_price)
+    # Generate price history (real if available, mock otherwise)
+    history = generate_mock_history(current_price, days=30, listing_id=listing_id, listing_type=listing_type)
     prices = [p.price for p in history]
     min_price = min(prices)
     max_price = max(prices)

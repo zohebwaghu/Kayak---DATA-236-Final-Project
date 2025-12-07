@@ -104,6 +104,14 @@ except ImportError as e:
     CHAT_AVAILABLE = False
     chat_router = None
 
+try:
+    from api.locations import router as locations_router
+    LOCATIONS_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Locations router not available: {e}")
+    LOCATIONS_AVAILABLE = False
+    locations_router = None
+
 # WebSocket Events
 try:
     from api.events_websocket import events_manager, websocket_endpoint, router as events_router
@@ -175,6 +183,7 @@ async def lifespan(app: FastAPI):
         "Price Analysis": PRICE_ANALYSIS_AVAILABLE,
         "Quotes API": QUOTES_AVAILABLE,
         "Chat API": CHAT_AVAILABLE,
+        "Locations API": LOCATIONS_AVAILABLE,
         "WebSocket Events": EVENTS_AVAILABLE and ENABLE_WEBSOCKET,
         "Deals Agent": DEALS_AGENT_AVAILABLE and ENABLE_DEALS_AGENT,
         "Concierge Agent": CONCIERGE_AVAILABLE,
@@ -295,6 +304,10 @@ if CHAT_AVAILABLE and chat_router:
     app.include_router(chat_router)
     logger.info("Registered: Chat API")
 
+if LOCATIONS_AVAILABLE and locations_router:
+    app.include_router(locations_router)
+    logger.info("Registered: Locations API")
+
 if EVENTS_AVAILABLE and events_router:
     app.include_router(events_router)
     logger.info("Events router registered")
@@ -318,6 +331,7 @@ async def root():
             "watches": "/api/ai/watches",
             "price_analysis": "/api/ai/price-analysis",
             "quotes": "/api/ai/quotes",
+            "locations": "/api/ai/locations/search",
             "events": "/api/ai/events (WebSocket)"
         }
     }
@@ -444,39 +458,6 @@ if not CHAT_AVAILABLE:
                 bundles=[],
                 timestamp=datetime.utcnow().isoformat()
             )
-
-
-# ============================================
-# WebSocket Endpoint
-# ============================================
-
-if EVENTS_AVAILABLE and ENABLE_WEBSOCKET:
-    from fastapi import Query
-
-    @app.websocket("/api/ai/events")
-    async def websocket_events(websocket: WebSocket, user_id: str = Query(...)):
-        """
-        WebSocket endpoint for real-time events.
-        
-        Connect with: ws://host/api/ai/events?user_id=xxx
-        
-        Event types:
-        - price_alert: Price dropped below threshold
-        - inventory_alert: Low inventory warning
-        - deal_found: New deal discovered
-        - watch_triggered: User's watch triggered
-        """
-        await websocket_endpoint(websocket, user_id=user_id)
-else:
-    @app.websocket("/api/ai/events")
-    async def websocket_events_disabled(websocket: WebSocket):
-        """WebSocket disabled"""
-        await websocket.accept()
-        await websocket.send_json({
-            "type": "error",
-            "message": "WebSocket events are not enabled"
-        })
-        await websocket.close()
 
 
 # ============================================

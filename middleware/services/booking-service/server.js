@@ -17,6 +17,7 @@ require('dotenv').config();
 const express = require('express');
 const mysql = require('mysql2/promise');
 const { randomUUID } = require('crypto');
+const redis = require('redis');
 
 const {
   createKafkaClient,
@@ -34,7 +35,7 @@ const {
   ConflictError,
 } = require('../../shared/errorHandler');
 
-const { validateDate } = require('../../shared/validators');
+const { validateDate, requireValidUserId } = require('../../shared/validators');
 
 const app = express();
 const PORT = process.env.BOOKING_SERVICE_PORT || 3004;
@@ -108,6 +109,101 @@ const bookingsPool = mysql.createPool({
   }
 })();
 
+// ==================== REDIS CACHE SETUP ====================
+
+const redisClient = redis.createClient({
+  url: process.env.REDIS_URL || 'redis://localhost:6379'
+});
+
+redisClient.on('error', (err) => console.error('❌ Redis error:', err));
+redisClient.on('connect', () => console.log('✅ Redis connected'));
+
+// Connect Redis
+(async () => {
+  try {
+    await redisClient.connect();
+  } catch (error) {
+    console.error('❌ Failed to connect to Redis:', error);
+  }
+})();
+
+// Cache TTL in seconds (2 minutes for booking data)
+const CACHE_TTL = 120;
+
+/**
+ * Get booking from cache or null
+ */
+async function getCachedBooking(bookingId) {
+  if (!redisClient.isOpen) return null;
+  try {
+    const cached = await redisClient.get(`booking:${bookingId}`);
+    return cached ? JSON.parse(cached) : null;
+  } catch (error) {
+    console.warn('Cache read error:', error);
+    return null;
+  }
+}
+
+/**
+ * Get user bookings from cache or null
+ */
+async function getCachedUserBookings(userId, cacheKey) {
+  if (!redisClient.isOpen) return null;
+  try {
+    const cached = await redisClient.get(cacheKey);
+    return cached ? JSON.parse(cached) : null;
+  } catch (error) {
+    console.warn('Cache read error:', error);
+    return null;
+  }
+}
+
+/**
+ * Cache booking data
+ */
+async function cacheBooking(bookingId, bookingData) {
+  if (!redisClient.isOpen) return;
+  try {
+    await redisClient.setEx(`booking:${bookingId}`, CACHE_TTL, JSON.stringify(bookingData));
+  } catch (error) {
+    console.warn('Cache write error:', error);
+  }
+}
+
+/**
+ * Cache user bookings list
+ */
+async function cacheUserBookings(cacheKey, bookingsData) {
+  if (!redisClient.isOpen) return;
+  try {
+    await redisClient.setEx(cacheKey, CACHE_TTL, JSON.stringify(bookingsData));
+  } catch (error) {
+    console.warn('Cache write error:', error);
+  }
+}
+
+/**
+ * Invalidate booking cache
+ */
+async function invalidateBookingCache(bookingId, userId) {
+  if (!redisClient.isOpen) return;
+  try {
+    // Delete specific booking
+    await redisClient.del(`booking:${bookingId}`);
+    // Invalidate user's booking list cache using SCAN
+    let cursor = '0';
+    do {
+      const result = await redisClient.scan(cursor, { MATCH: `bookings:user:${userId}:*`, COUNT: 100 });
+      cursor = result.cursor;
+      if (result.keys.length > 0) {
+        await redisClient.del(result.keys);
+      }
+    } while (cursor !== '0');
+  } catch (error) {
+    console.warn('Cache invalidation error:', error);
+  }
+}
+
 // ==================== KAFKA SETUP ====================
 
 let kafkaProducer;
@@ -180,6 +276,9 @@ app.post('/api/v1/bookings', async (req, res) => {
         'Missing required fields: userId, listingType, listingId, startDate, endDate, totalPrice'
       );
     }
+
+    // SPEC REQUIREMENT: User ID must match SSN pattern, throw 'invalid_driver_id' if not
+    requireValidUserId(userId);
 
     if (!['hotel', 'flight', 'car'].includes(listingType)) {
       throw new ValidationError('listingType must be one of: hotel, flight, car');
@@ -345,6 +444,17 @@ app.post('/api/v1/bookings', async (req, res) => {
   } catch (error) {
     console.error('Error creating booking:', error);
 
+    // Handle spec-required error codes (invalid_driver_id)
+    if (error.code === 'invalid_driver_id') {
+      return res.status(error.status || 400).json({
+        status: error.status || 400,
+        error: error.code,
+        message: error.message,
+        path: req.path,
+        timestamp: new Date().toISOString()
+      });
+    }
+
     if (
       error instanceof ValidationError ||
       error instanceof NotFoundError ||
@@ -377,11 +487,17 @@ app.post('/api/v1/bookings', async (req, res) => {
 
 /**
  * GET /api/v1/bookings/:bookingId
- * Retrieve booking details by ID
+ * Retrieve booking details by ID (with Redis caching)
  */
 app.get('/api/v1/bookings/:bookingId', async (req, res) => {
   try {
     const { bookingId } = req.params;
+
+    // Check cache first
+    const cachedBooking = await getCachedBooking(bookingId);
+    if (cachedBooking) {
+      return res.status(200).json({ ...cachedBooking, cached: true });
+    }
 
     const [bookings] = await bookingsPool.execute(
       `SELECT bookingId, userId, listingType, listingId,
@@ -413,7 +529,10 @@ app.get('/api/v1/bookings/:bookingId', async (req, res) => {
       updatedAt: row.updatedAt,
     };
 
-    res.status(200).json(booking);
+    // Cache the booking
+    await cacheBooking(bookingId, booking);
+
+    res.status(200).json({ ...booking, cached: false });
   } catch (error) {
     console.error('Error fetching booking:', error);
 
@@ -658,6 +777,9 @@ app.put('/api/v1/bookings/:bookingId/cancel', async (req, res) => {
           },
         });
       }
+
+      // STEP 6: Invalidate cache
+      await invalidateBookingCache(bookingId, booking.userId);
 
       res.status(200).json({
         bookingId,

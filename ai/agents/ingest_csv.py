@@ -80,9 +80,6 @@ async def ingest_flights(producer):
                 print(f"   Sent {count} flights...", end='\r')
                 await asyncio.sleep(0.01)
             
-            if count >= 1: # Limit for demo (User requested 1)
-                break
-    
     print(f"\n✅ Sent {count} flight records.")
 
 async def ingest_hotels(producer):
@@ -145,9 +142,6 @@ async def ingest_hotels(producer):
                 print(f"   Sent {count} hotels...", end='\r')
                 await asyncio.sleep(0.01)
                 
-            if count >= 1: # Limit for demo (User requested 1)
-                break
-    
     print(f"\n✅ Sent {count} hotel records.")
 
 async def ingest_cars(producer):
@@ -194,9 +188,7 @@ async def ingest_cars(producer):
             producer.send(TOPIC, value=message)
         
         count += 1
-        if count >= 1: # Limit for demo
-            break
-            
+
     print(f"✅ Sent {count} car records.")
 
 async def main():

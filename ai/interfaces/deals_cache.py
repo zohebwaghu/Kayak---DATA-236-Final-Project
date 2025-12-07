@@ -119,10 +119,15 @@ class DealsCache:
                 logger.warning(f"DealsCache Redis connection failed: {e}")
                 self.redis_client = None
 
-        # Connect to MongoDB (fallback)
-        if MONGO_AVAILABLE:
+        # Connect to MongoDB (fallback only when SQLite unavailable)
+        if not self.use_sqlite and MONGO_AVAILABLE:
             try:
-                self.mongo_client = MongoClient(mongo_uri)
+                # Keep timeouts small so failures don't stall startup
+                self.mongo_client = MongoClient(
+                    mongo_uri,
+                    serverSelectionTimeoutMS=500,
+                    connectTimeoutMS=500,
+                )
                 self.mongo_db = self.mongo_client[mongo_db]
                 self.mongo_db.list_collection_names()
                 logger.info(f"DealsCache connected to MongoDB: {mongo_uri}/{mongo_db}")
@@ -515,6 +520,10 @@ class DealsCache:
         all_deals.sort(key=lambda d: d.deal_score, reverse=True)
         return all_deals[:limit]
 
+    def get_all_deals(self) -> List[Deal]:
+        """Get all deals in cache (for scheduled scans)"""
+        return list(self._deals.values())
+
     def search_deals(
         self,
         destination: Optional[str] = None,
@@ -601,16 +610,6 @@ class DealsCache:
             tags=[t for t in (tags or []) if t not in ["direct-flight", "no-redeye"]],
             limit=50
         )
-        
-        # If no hotels for destination, get any hotels with tags
-        if not all_hotels:
-            hotel_tags = [t for t in (tags or []) if t not in ["direct-flight", "no-redeye"]]
-            all_hotels = self.search_deals(
-                listing_type="hotel",
-                max_price=max_hotel_price,
-                tags=hotel_tags if hotel_tags else None,
-                limit=50
-            )
         
         # Select diverse flights
         flights = self._select_diverse(all_flights, "flight")

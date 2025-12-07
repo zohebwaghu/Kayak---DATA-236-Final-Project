@@ -29,6 +29,11 @@ try:
 except ImportError:
     session_store = None
 
+try:
+    from interfaces.deals_cache import deals_cache
+except ImportError:
+    deals_cache = None
+
 
 router = APIRouter(prefix="/api/ai/quotes", tags=["quotes"])
 
@@ -301,12 +306,12 @@ def generate_important_notes(
 async def generate_quote(request: QuoteRequest):
     """
     Generate a complete quote for booking.
-    
+
     Returns itemized pricing, all fees, and policies.
     Implements "Book or hand off cleanly" user journey.
     """
     logger.info(f"Generating quote: {request.destination}, {request.departure_date}")
-    
+
     # Calculate nights
     try:
         dep_date = datetime.fromisoformat(request.departure_date)
@@ -316,25 +321,72 @@ async def generate_quote(request: QuoteRequest):
         nights = 3
         dep_date = datetime.utcnow() + timedelta(days=30)
         ret_date = dep_date + timedelta(days=3)
-    
+
     # Generate quote ID
     quote_id = f"Q{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
-    
-    # Flight details (would fetch from cache/API in production)
-    is_international = request.destination not in ["MIA", "LAX", "NYC", "ORD", "DFW", "SEA", "BOS"]
-    base_fare = 350 if not is_international else 650
-    airline = "American Airlines"
+
+    # Try to get real bundle data from cache
+    bundle_flight = None
+    bundle_hotel = None
+    if deals_cache and request.bundle_id:
+        # Parse bundle_id to get flight/hotel IDs (format: bundle_{dest}_{idx}_{hash})
+        # Look up actual deals from cache
+        flights = deals_cache.get_deals("flight", destination=request.destination, limit=10)
+        hotels = deals_cache.get_deals("hotel", destination=request.destination, limit=10)
+
+        # Extract index from bundle_id if possible
+        parts = request.bundle_id.split("_")
+        if len(parts) >= 3:
+            try:
+                idx = int(parts[2])
+                if idx < len(flights):
+                    bundle_flight = flights[idx]
+                if idx < len(hotels):
+                    bundle_hotel = hotels[idx]
+            except (ValueError, IndexError):
+                pass
+
+        # Fallback to first available
+        if not bundle_flight and flights:
+            bundle_flight = flights[0]
+        if not bundle_hotel and hotels:
+            bundle_hotel = hotels[0]
+
+    # Flight details - use real data if available
+    if bundle_flight:
+        airline = bundle_flight.get("airline", "Unknown Airline")
+        base_fare = bundle_flight.get("price", 350)
+        origin = bundle_flight.get("origin", request.origin)
+        destination = bundle_flight.get("destination", request.destination)
+        flight_id = bundle_flight.get("flight_id", f"FL{quote_id}")
+        stops = bundle_flight.get("stops", 0)
+        duration = bundle_flight.get("duration", 5.0)
+        is_international = destination not in ["MIA", "LAX", "NYC", "ORD", "DFW", "SEA", "BOS"]
+    else:
+        is_international = request.destination not in ["MIA", "LAX", "NYC", "ORD", "DFW", "SEA", "BOS"]
+        base_fare = 350 if not is_international else 650
+        airline = "American Airlines"
+        origin = request.origin
+        destination = request.destination
+        flight_id = f"FL{quote_id}"
+        stops = 0
+        duration = 5.0
     
     flight_pricing = calculate_flight_pricing(base_fare, is_international, airline)
-    
+
+    # Format duration
+    duration_hours = int(duration)
+    duration_mins = int((duration - duration_hours) * 60)
+    duration_str = f"{duration_hours}h {duration_mins}m"
+
     flight_quote = FlightQuoteDetail(
-        flight_id=request.flight_id or f"FL{quote_id}",
+        flight_id=request.flight_id or flight_id,
         airline=airline,
-        route=f"{request.origin} → {request.destination}",
+        route=f"{origin} → {destination}",
         departure=dep_date.strftime("%Y-%m-%d %H:%M"),
-        arrival=(dep_date + timedelta(hours=5)).strftime("%Y-%m-%d %H:%M"),
-        duration="5h 15m",
-        stops=0,
+        arrival=(dep_date + timedelta(hours=duration)).strftime("%Y-%m-%d %H:%M"),
+        duration=duration_str,
+        stops=stops,
         cabin_class="Economy",
         pricing=flight_pricing,
         baggage_policy="Personal item free. Carry-on $35. Checked bag $40.",
@@ -342,25 +394,45 @@ async def generate_quote(request: QuoteRequest):
         change_fee=200,
         refundable=False
     )
-    
-    # Hotel details
-    rate_per_night = 180
-    star_rating = 4.0
+
+    # Hotel details - use real data if available
+    if bundle_hotel:
+        rate_per_night = bundle_hotel.get("price_per_night", 180)
+        star_rating = bundle_hotel.get("star_rating", 4.0)
+        hotel_name = bundle_hotel.get("name", f"{destination} Grand Hotel")
+        hotel_id = bundle_hotel.get("hotel_id", f"HT{quote_id}")
+        hotel_city = bundle_hotel.get("city", destination)
+        neighbourhood = bundle_hotel.get("neighbourhood", "Downtown")
+        amenities = bundle_hotel.get("amenities", ["WiFi", "Pool", "Gym"])
+        if isinstance(amenities, str):
+            import json
+            try:
+                amenities = json.loads(amenities)
+            except:
+                amenities = ["WiFi", "Pool", "Gym"]
+    else:
+        rate_per_night = 180
+        star_rating = 4.0
+        hotel_name = f"{destination} Grand Hotel"
+        hotel_id = f"HT{quote_id}"
+        hotel_city = destination
+        neighbourhood = "Downtown"
+        amenities = ["WiFi", "Pool", "Gym", "Restaurant", "Parking"]
     
     hotel_pricing = calculate_hotel_pricing(rate_per_night, nights, star_rating)
-    
+
     cancel_deadline = (dep_date - timedelta(days=2)).strftime("%Y-%m-%d")
-    
+
     hotel_quote = HotelQuoteDetail(
-        hotel_id=request.hotel_id or f"HT{quote_id}",
-        name=f"{request.destination} Grand Hotel",
-        address=f"123 Beach Blvd, {request.destination}",
+        hotel_id=request.hotel_id or hotel_id,
+        name=hotel_name,
+        address=f"{neighbourhood}, {hotel_city}",
         star_rating=star_rating,
         check_in=dep_date.strftime("%Y-%m-%d") + " 15:00",
         check_out=ret_date.strftime("%Y-%m-%d") + " 11:00",
         room_type="Deluxe King Room",
         pricing=hotel_pricing,
-        amenities=["WiFi", "Pool", "Gym", "Restaurant", "Parking"],
+        amenities=amenities if isinstance(amenities, list) else ["WiFi", "Pool", "Gym"],
         cancellation_policy=f"Free cancellation until {cancel_deadline}",
         cancellation_deadline=cancel_deadline,
         refundable=True

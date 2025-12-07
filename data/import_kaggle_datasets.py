@@ -22,9 +22,9 @@ MONGO_DB = os.getenv("MONGO_DB", "kayak_doc")
 
 # Data directories
 KAGGLE_DIR = PROJECT_ROOT / "data" / "kaggle"
-ROUTES_DIR = KAGGLE_DIR / "Airlines, Airport, and Flight Routes"
-DELAYS_DIR = KAGGLE_DIR / "2015 Flight Delays and Cancellations"
-PRICE_DIR = KAGGLE_DIR / "Flight Price Prediction"
+ROUTES_DIR = KAGGLE_DIR / "openflights"  # Contains airports.csv, airlines.csv, routes.csv
+DELAYS_DIR = KAGGLE_DIR / "flight_delays"  # Contains flights.csv (592MB)
+PRICE_DIR = PROJECT_ROOT / "data"  # Clean_Dataset.csv is in data/ root
 
 def connect_mongo():
     """Connect to MongoDB"""
@@ -232,21 +232,20 @@ def import_airlines(db):
 
 def enhance_flights_with_price_data(db):
     """
-    Enhance existing flights with data from 'Flight Price Prediction/economy.csv' and 'business.csv'
+    Import flights from Clean_Dataset.csv (Flight Price Prediction India dataset)
     Adds realistic pricing and expands route coverage
     """
     print("\n" + "="*60)
-    print("📊 Enhancing Flights with Price Data")
+    print("📊 Importing Flights from Clean_Dataset.csv")
     print("="*60)
-    
-    economy_file = PRICE_DIR / "economy.csv"
-    business_file = PRICE_DIR / "business.csv"
-    
-    if not economy_file.exists() and not business_file.exists():
-        print(f"⚠️  Price data files not found")
-        print("   Skipping flight enhancement...")
+
+    clean_dataset = PRICE_DIR / "Clean_Dataset.csv"
+
+    if not clean_dataset.exists():
+        print(f"⚠️  Clean_Dataset.csv not found at {clean_dataset}")
+        print("   Skipping flight import...")
         return 0
-    
+
     # City to airport mapping (for India dataset)
     city_to_airport = {
         "Delhi": "DEL",
@@ -256,94 +255,111 @@ def enhance_flights_with_price_data(db):
         "Hyderabad": "HYD",
         "Chennai": "MAA"
     }
-    
+
     flights = []
     random.seed(42)
+
+    print(f"   Reading: {clean_dataset}")
+    try:
+        df = pd.read_csv(clean_dataset, low_memory=False)
+        print(f"   Loaded {len(df)} flight records")
+
+        for idx, row in df.iterrows():
+            source_city = str(row.get("source_city", "")).strip()
+            dest_city = str(row.get("destination_city", "")).strip()
+
+            origin = city_to_airport.get(source_city, source_city[:3].upper() if source_city else "XXX")
+            destination = city_to_airport.get(dest_city, dest_city[:3].upper() if dest_city else "XXX")
+
+            # Parse price (already in INR, convert to USD)
+            try:
+                price = float(row.get("price", 0))
+                # Convert INR to USD (rough conversion)
+                price_usd = price * 0.012
+            except (ValueError, TypeError):
+                continue
+
+            if price_usd <= 0 or price_usd > 10000:
+                continue
+
+            # Generate deal score fields
+            hash_val = hash(f"KAGGLE_FLIGHT_{idx}") % 100
+            discount_percent = 5 + (hash_val % 26)  # 5% to 30%
+            avg_30d_price = price_usd / (1 - discount_percent / 100) if discount_percent < 100 else price_usd * 1.2
+            available_seats = 3 + (hash_val % 50)
+            has_promo = hash_val % 3 == 0
+            promo_end_date = None
+            if has_promo:
+                days_until_end = 1 + (hash_val % 14)
+                promo_end_date = (datetime.now() + timedelta(days=days_until_end)).isoformat()
+
+            # Parse stops (could be "zero", "one", "two_or_more")
+            stops_str = str(row.get("stops", "zero")).lower()
+            if "zero" in stops_str:
+                stops = 0
+            elif "one" in stops_str:
+                stops = 1
+            else:
+                stops = 2
+
+            # Calculate deal score
+            discount_score = min(30, discount_percent)
+            scarcity_score = 20 if available_seats < 10 else (10 if available_seats < 20 else 0)
+            promo_score = 15 if has_promo else 0
+            direct_score = 10 if stops == 0 else 0
+            deal_score = min(95, max(30, 25 + discount_score + scarcity_score + promo_score + direct_score))
+
+            # Parse days_left
+            try:
+                days_left = int(row.get("days_left", 15))
+            except (ValueError, TypeError):
+                days_left = 15
+
+            flight = {
+                "flight_id": f"KAGGLE_FLIGHT_{idx:06d}",
+                "airline": str(row.get("airline", "Unknown")).strip(),
+                "flight_number": str(row.get("flight", "")).strip(),
+                "origin": origin,
+                "origin_city": source_city,
+                "destination": destination,
+                "destination_city": dest_city,
+                "departure_time": str(row.get("departure_time", "")).strip(),
+                "arrival_time": str(row.get("arrival_time", "")).strip(),
+                "duration": _parse_duration(str(row.get("duration", ""))),
+                "stops": stops,
+                "class": str(row.get("class", "Economy")).strip(),
+                "price": round(price_usd, 2),
+                "days_left": days_left,
+                "avg_30d_price": round(avg_30d_price, 2),
+                "discount_percent": discount_percent,
+                "available_seats": available_seats,
+                "has_promo": has_promo,
+                "promo_end_date": promo_end_date,
+                "deal_score": deal_score,
+                "rating": 4.0,
+                "source": "kaggle_india_flights",
+                "created_at": datetime.now(timezone.utc)
+            }
+
+            flights.append(flight)
+
+    except Exception as e:
+        print(f"   ⚠️  Error processing Clean_Dataset.csv: {e}")
     
-    # Process economy.csv
-    if economy_file.exists():
-        print(f"   Reading: {economy_file}")
-        try:
-            df = pd.read_csv(economy_file, nrows=5000, low_memory=False)  # Sample for performance
-            print(f"   Loaded {len(df)} economy flight records")
-            
-            for idx, row in df.iterrows():
-                source_city = str(row.get("from", "")).strip()
-                dest_city = str(row.get("to", "")).strip()
-                
-                origin = city_to_airport.get(source_city, source_city[:3].upper() if source_city else "XXX")
-                destination = city_to_airport.get(dest_city, dest_city[:3].upper() if dest_city else "XXX")
-                
-                # Parse price (remove commas)
-                price_str = str(row.get("price", "0")).replace(",", "").replace("₹", "")
-                try:
-                    price = float(price_str)
-                    # Convert INR to USD (rough conversion, adjust as needed)
-                    price_usd = price * 0.012
-                except (ValueError, TypeError):
-                    continue
-                
-                if price_usd <= 0 or price_usd > 10000:
-                    continue
-                
-                # Generate deal score fields
-                hash_val = hash(f"KAGGLE_ECON_{idx}") % 100
-                discount_percent = 5 + (hash_val % 26)  # 5% to 30%
-                avg_30d_price = price_usd / (1 - discount_percent / 100) if discount_percent < 100 else price_usd * 1.2
-                available_seats = 3 + (hash_val % 50)
-                has_promo = hash_val % 3 == 0
-                promo_end_date = None
-                if has_promo:
-                    days_until_end = 1 + (hash_val % 14)
-                    promo_end_date = (datetime.now() + timedelta(days=days_until_end)).isoformat()
-                
-                # Calculate deal score
-                discount_score = min(30, discount_percent)
-                scarcity_score = 20 if available_seats < 10 else (10 if available_seats < 20 else 0)
-                promo_score = 15 if has_promo else 0
-                stops = 0 if "non-stop" in str(row.get("stop", "")).lower() else 1
-                direct_score = 10 if stops == 0 else 0
-                deal_score = min(95, max(30, 25 + discount_score + scarcity_score + promo_score + direct_score))
-                
-                flight = {
-                    "flight_id": f"KAGGLE_ECON_{idx:06d}",
-                    "airline": str(row.get("airline", "Unknown")).strip(),
-                    "flight_number": str(row.get("ch_code", "")).strip() + str(row.get("num_code", "")).strip(),
-                    "origin": origin,
-                    "origin_city": source_city,
-                    "destination": destination,
-                    "destination_city": dest_city,
-                    "departure_time": str(row.get("dep_time", "")).strip(),
-                    "arrival_time": str(row.get("arr_time", "")).strip(),
-                    "duration": _parse_duration(str(row.get("time_taken", ""))),
-                    "stops": stops,
-                    "class": "Economy",
-                    "price": round(price_usd, 2),
-                    "days_left": random.randint(1, 30),
-                    "avg_30d_price": round(avg_30d_price, 2),
-                    "discount_percent": discount_percent,
-                    "available_seats": available_seats,
-                    "has_promo": has_promo,
-                    "promo_end_date": promo_end_date,
-                    "deal_score": deal_score,
-                    "rating": 4.0,
-                    "source": "kaggle_economy",
-                    "created_at": datetime.now(timezone.utc)
-                }
-                
-                flights.append(flight)
-        
-        except Exception as e:
-            print(f"   ⚠️  Error processing economy.csv: {e}")
-    
-    # Insert enhanced flights
+    # Insert enhanced flights (append, don't drop)
     if flights:
         collection = db["flights"]
+        # Create indexes if they don't exist
+        collection.create_index("flight_id", unique=True)
+        collection.create_index("origin")
+        collection.create_index("destination")
+        collection.create_index("deal_score")
+
         # Use ordered=False to continue on duplicate key errors
         from pymongo.errors import BulkWriteError
         try:
             result = collection.insert_many(flights, ordered=False)
-            print(f"   ✅ Added {len(result.inserted_ids)} enhanced flights from price data")
+            print(f"   ✅ Added {len(result.inserted_ids)} flights from Clean_Dataset.csv")
         except BulkWriteError as e:
             # Handle partial success (some duplicates, some inserted)
             inserted = e.details.get('nInserted', 0)
@@ -384,27 +400,27 @@ def sample_delays_for_reliability(db):
     print("\n" + "="*60)
     print("📊 Sampling Flight Delays for Reliability")
     print("="*60)
-    
+
     delays_file = DELAYS_DIR / "flights.csv"
-    
+
     if not delays_file.exists():
         print(f"⚠️  File not found: {delays_file}")
         print("   Skipping delays import...")
         return 0
-    
+
     print(f"   Reading sample from: {delays_file} (this may take a while...)")
-    
+
     # Sample 10,000 rows for performance
     try:
         df = pd.read_csv(delays_file, nrows=10000, low_memory=False)
         print(f"   Loaded {len(df)} delay records (sample)")
-        
+
         # Aggregate by route
         reliability_scores = {}
-        
+
         for _, row in df.iterrows():
-            origin = str(row.get("ORIGIN", "")).strip().upper()
-            dest = str(row.get("DEST", "")).strip().upper()
+            origin = str(row.get("ORIGIN_AIRPORT", "")).strip().upper()
+            dest = str(row.get("DESTINATION_AIRPORT", "")).strip().upper()
             airline = str(row.get("AIRLINE", "")).strip()
             
             if not origin or not dest or len(origin) != 3 or len(dest) != 3:
@@ -420,9 +436,9 @@ def sample_delays_for_reliability(db):
                 }
             
             reliability_scores[route_key]["total"] += 1
-            
+
             # On-time = delay <= 15 minutes
-            arr_delay = float(row.get("ARR_DELAY", 999)) if pd.notna(row.get("ARR_DELAY")) else 999
+            arr_delay = float(row.get("ARRIVAL_DELAY", 999)) if pd.notna(row.get("ARRIVAL_DELAY")) else 999
             if arr_delay <= 15:
                 reliability_scores[route_key]["on_time"] += 1
             

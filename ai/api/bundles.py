@@ -105,6 +105,15 @@ class BundleResponse(BaseModel):
     expires_at: Optional[str] = None
 
 
+class RefinementChange(BaseModel):
+    """Describes what changed during refinement"""
+    field: str
+    previous_value: Optional[str] = None
+    current_value: Optional[str] = None
+    is_improvement: bool = False
+    description: str
+
+
 class BundleListResponse(BaseModel):
     """List of bundles response"""
     bundles: List[BundleResponse]
@@ -112,6 +121,9 @@ class BundleListResponse(BaseModel):
     session_id: Optional[str] = None
     search_params: dict = {}
     timestamp: str
+    # Journey 2: "show what changed" on refinement
+    refinement_changes: List[RefinementChange] = []
+    is_refinement: bool = False
 
 
 class FitScoreRequest(BaseModel):
@@ -316,7 +328,19 @@ async def get_bundles(
     
     flights = deals.get("flights", [])
     hotels = deals.get("hotels", [])
-    
+
+    # If nothing matches the destination, return empty result
+    if not flights and not hotels:
+        return BundleListResponse(
+            bundles=[],
+            total_count=0,
+            session_id=session_id,
+            search_params=params,
+            timestamp=datetime.utcnow().isoformat(),
+            refinement_changes=[],
+            is_refinement=False
+        )
+
     # Build bundles
     bundles = []
     num_bundles = min(limit, max(len(flights), len(hotels), 1))
@@ -361,16 +385,26 @@ async def search_bundles(request: BundleSearchRequest):
     params = request.model_dump()
     
     if session_store and request.session_id:
+        # Ensure session exists (create if not)
+        session_store.get_or_create_session(
+            user_id=request.session_id.split("_")[1] if "_" in request.session_id else "anonymous",
+            session_id=request.session_id
+        )
+
         prev_params = session_store.get_search_params(request.session_id)
         # Merge: new params override previous
         for key, value in params.items():
             if value is None and key in prev_params:
                 params[key] = prev_params[key]
-        
-        # Update session
+
+        # Update session with search params
         session_store.update_session(request.session_id, {
-            "search_params": params,
-            "last_query_at": datetime.utcnow().isoformat()
+            "origin": params.get("origin"),
+            "destination": params.get("destination"),
+            "date_from": params.get("date_from"),
+            "date_to": params.get("date_to"),
+            "budget": params.get("budget"),
+            "constraints": params.get("constraints", [])
         })
     
     # Calculate price limits
@@ -404,37 +438,111 @@ async def search_bundles(request: BundleSearchRequest):
     
     bundles.sort(key=lambda b: b.deal_score, reverse=True)
     
-    # Check for changes from previous recommendations
-    changes = []
+    # Check for changes from previous recommendations (Journey 2: show what changed)
+    refinement_changes = []
+    is_refinement = False
+
     if session_store and request.session_id:
         prev_recs = session_store.get_previous_recommendations(request.session_id)
-        if prev_recs and bundles:
-            # Compare first bundle
-            prev = prev_recs[0] if prev_recs else {}
-            curr = bundles[0].model_dump()
-            
-            if prev.get("total_price") and curr.get("total_price"):
-                price_diff = curr["total_price"] - prev.get("total_price", 0)
-                if abs(price_diff) > 10:
-                    changes.append({
-                        "field": "price",
-                        "previous": prev.get("total_price"),
-                        "current": curr["total_price"],
-                        "is_improvement": price_diff < 0
-                    })
-        
+        prev_params = session_store.get_search_params(request.session_id)
+
+        if prev_recs or prev_params:
+            is_refinement = True
+
+            # Compare search params (constraints added/removed)
+            prev_constraints = set(prev_params.get("constraints", []) if prev_params else [])
+            curr_constraints = set(params.get("constraints", []))
+
+            added_constraints = curr_constraints - prev_constraints
+            removed_constraints = prev_constraints - curr_constraints
+
+            for constraint in added_constraints:
+                refinement_changes.append(RefinementChange(
+                    field="constraint",
+                    previous_value=None,
+                    current_value=constraint,
+                    is_improvement=True,
+                    description=f"Added filter: {constraint}"
+                ))
+
+            for constraint in removed_constraints:
+                refinement_changes.append(RefinementChange(
+                    field="constraint",
+                    previous_value=constraint,
+                    current_value=None,
+                    is_improvement=False,
+                    description=f"Removed filter: {constraint}"
+                ))
+
+            # Compare bundles if both exist
+            if prev_recs and bundles:
+                prev = prev_recs[0] if prev_recs else {}
+                curr = bundles[0].model_dump()
+
+                # Price change
+                prev_price = prev.get("total_price", 0)
+                curr_price = curr.get("total_price", 0)
+                if prev_price and curr_price and abs(curr_price - prev_price) > 10:
+                    price_diff = curr_price - prev_price
+                    refinement_changes.append(RefinementChange(
+                        field="price",
+                        previous_value=f"${prev_price:.0f}",
+                        current_value=f"${curr_price:.0f}",
+                        is_improvement=price_diff < 0,
+                        description=f"Price {'decreased' if price_diff < 0 else 'increased'} by ${abs(price_diff):.0f}"
+                    ))
+
+                # Hotel change
+                prev_hotel = prev.get("hotel", {}).get("name") if prev.get("hotel") else None
+                curr_hotel = curr.get("hotel", {}).get("name") if curr.get("hotel") else None
+                if prev_hotel and curr_hotel and prev_hotel != curr_hotel:
+                    refinement_changes.append(RefinementChange(
+                        field="hotel",
+                        previous_value=prev_hotel,
+                        current_value=curr_hotel,
+                        is_improvement=True,
+                        description=f"Hotel changed to better match your preferences"
+                    ))
+
+                # Tags/amenities change
+                prev_tags = set(prev.get("tags", []))
+                curr_tags = set(curr.get("tags", []))
+                new_tags = curr_tags - prev_tags
+                if new_tags:
+                    refinement_changes.append(RefinementChange(
+                        field="tags",
+                        previous_value=None,
+                        current_value=", ".join(new_tags),
+                        is_improvement=True,
+                        description=f"New features: {', '.join(new_tags)}"
+                    ))
+
+                # Deal score change
+                prev_score = prev.get("deal_score", 0)
+                curr_score = curr.get("deal_score", 0)
+                if abs(curr_score - prev_score) >= 5:
+                    refinement_changes.append(RefinementChange(
+                        field="deal_score",
+                        previous_value=str(prev_score),
+                        current_value=str(curr_score),
+                        is_improvement=curr_score > prev_score,
+                        description=f"Deal score {'improved' if curr_score > prev_score else 'changed'}: {prev_score} → {curr_score}"
+                    ))
+
         # Save new recommendations
         session_store.save_recommendations(
             request.session_id,
             [b.model_dump() for b in bundles]
         )
-    
+
     return BundleListResponse(
         bundles=bundles,
         total_count=len(bundles),
         session_id=request.session_id,
         search_params=params,
-        timestamp=datetime.utcnow().isoformat()
+        timestamp=datetime.utcnow().isoformat(),
+        refinement_changes=refinement_changes,
+        is_refinement=is_refinement
     )
 
 

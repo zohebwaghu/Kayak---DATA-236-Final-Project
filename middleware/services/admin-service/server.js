@@ -36,6 +36,12 @@ const {
   NotFoundError
 } = require('../../shared/errorHandler');
 
+const {
+  requireValidState,
+  requireValidZip,
+  normalizeState
+} = require('../../shared/validators');
+
 const app = express();
 const PORT = process.env.ADMIN_SERVICE_PORT || 3006;
 
@@ -267,12 +273,15 @@ app.post('/listings', async (req, res) => {
 
     const result = await collection.insertOne(data);
 
-    // Publish event
+    // Publish event - format matches search-service expectations
     if (kafkaProducer) {
       await publishEvent(kafkaProducer, TOPICS.LISTING_EVENTS, result.insertedId.toString(), {
         eventType: EVENT_TYPES.LISTING_CREATED,
-        listingType: type,
-        data: { id: result.insertedId, ...data }
+        data: {
+          listingType: type.replace(/s$/, ''),  // 'hotels' -> 'hotel'
+          listingId: result.insertedId.toString(),
+          data: { ...data }
+        }
       });
     }
 
@@ -355,12 +364,15 @@ app.put('/listings/:id', async (req, res) => {
       return res.status(404).json(createErrorResponse(404, 'Not Found', 'Listing not found', req.path));
     }
 
-    // Publish event
+    // Publish event - format matches search-service expectations
     if (kafkaProducer) {
       await publishEvent(kafkaProducer, TOPICS.LISTING_EVENTS, id, {
         eventType: EVENT_TYPES.LISTING_UPDATED,
-        listingType: type,
-        data: { id, ...data }
+        data: {
+          listingType: type.replace(/s$/, ''),  // 'hotels' -> 'hotel'
+          listingId: id,
+          data: { ...data }
+        }
       });
     }
 
@@ -409,12 +421,14 @@ app.delete('/listings/:id', async (req, res) => {
       return res.status(404).json(createErrorResponse(404, 'Not Found', 'Listing not found', req.path));
     }
 
-    // Publish event
+    // Publish event - format matches search-service expectations
     if (kafkaProducer) {
       await publishEvent(kafkaProducer, TOPICS.LISTING_EVENTS, id, {
         eventType: EVENT_TYPES.LISTING_DELETED,
-        listingType: type,
-        data: { id }
+        data: {
+          listingType: type.replace(/s$/, ''),  // 'hotels' -> 'hotel'
+          listingId: id
+        }
       });
     }
 
@@ -527,8 +541,19 @@ app.put('/users/:userId', async (req, res) => {
       if (address.line1 !== undefined) { updates.push('address_line1 = ?'); params.push(address.line1); }
       if (address.line2 !== undefined) { updates.push('address_line2 = ?'); params.push(address.line2); }
       if (address.city !== undefined) { updates.push('city = ?'); params.push(address.city); }
-      if (address.state !== undefined) { updates.push('state_code = ?'); params.push(address.state); }
-      if (address.zipCode !== undefined) { updates.push('zip_code = ?'); params.push(address.zipCode); }
+      if (address.state !== undefined) {
+        // SPEC REQUIREMENT: State validation with 'malformed_state' error code
+        requireValidState(address.state);
+        const normalizedState = normalizeState(address.state);
+        updates.push('state_code = ?');
+        params.push(normalizedState);
+      }
+      if (address.zipCode !== undefined) {
+        // SPEC REQUIREMENT: ZIP validation with 'malformed_zip' error code
+        requireValidZip(address.zipCode);
+        updates.push('zip_code = ?');
+        params.push(address.zipCode);
+      }
     }
 
     if (updates.length === 0) {
@@ -552,6 +577,18 @@ app.put('/users/:userId', async (req, res) => {
     });
   } catch (error) {
     console.error('Error updating user:', error);
+
+    // Handle spec-required error codes (malformed_state, malformed_zip)
+    if (error.code && ['malformed_state', 'malformed_zip'].includes(error.code)) {
+      return res.status(error.status || 400).json({
+        status: error.status || 400,
+        error: error.code,
+        message: error.message,
+        path: req.path,
+        timestamp: new Date().toISOString()
+      });
+    }
+
     res.status(500).json(createErrorResponse(500, 'Internal Server Error', 'Failed to update user', req.path));
   }
 });
@@ -989,6 +1026,123 @@ app.get('/analytics/trace/user', async (req, res) => {
   } catch (error) {
     console.error('Error fetching user trace:', error);
     res.status(500).json(createErrorResponse(500, 'Internal Server Error', 'Failed to fetch trace', req.path));
+  }
+});
+
+// ==================== MISSING ANALYTICS ENDPOINTS ====================
+// These are required by the frontend dashboard (AdminDashboardPage.jsx)
+
+/**
+ * GET /api/v1/admin/analytics/user-journey
+ * User journey analytics - tracks page flow
+ */
+app.get('/analytics/user-journey', async (req, res) => {
+  try {
+    if (!mongoDb) {
+      return res.status(503).json(createErrorResponse(503, 'Service Unavailable', 'MongoDB not connected', req.path));
+    }
+
+    const logsCollection = mongoDb.collection('logs');
+
+    // Aggregate user journeys from page views
+    const pipeline = [
+      { $match: { type: { $in: ['page_view', 'navigation', 'click'] } } },
+      { $sort: { timestamp: 1 } },
+      {
+        $group: {
+          _id: '$user_id',
+          journey: {
+            $push: {
+              page: '$page',
+              action: '$action',
+              timestamp: '$timestamp'
+            }
+          },
+          totalActions: { $sum: 1 }
+        }
+      },
+      { $limit: 100 }
+    ];
+
+    const journeys = await logsCollection.aggregate(pipeline).toArray();
+
+    // Calculate journey stats
+    const journeyStats = {
+      totalUsers: journeys.length,
+      avgActionsPerUser: journeys.length > 0
+        ? Math.round(journeys.reduce((sum, j) => sum + j.totalActions, 0) / journeys.length)
+        : 0,
+      journeys: journeys.map(j => ({
+        userId: j._id,
+        steps: j.journey.slice(0, 10),  // First 10 steps
+        totalActions: j.totalActions
+      }))
+    };
+
+    res.status(200).json(journeyStats);
+  } catch (error) {
+    console.error('Error fetching user journeys:', error);
+    res.status(500).json(createErrorResponse(500, 'Internal Server Error', 'Failed to fetch user journeys', req.path));
+  }
+});
+
+/**
+ * GET /api/v1/admin/analytics/cohorts
+ * Cohort analysis - users grouped by location
+ */
+app.get('/analytics/cohorts', async (req, res) => {
+  try {
+    // Get user cohorts by city/state from MySQL
+    const [cityCohorts] = await usersPool.execute(`
+      SELECT
+        city,
+        state_code as state,
+        COUNT(*) as userCount,
+        MIN(created_at_utc) as firstUser,
+        MAX(created_at_utc) as lastUser
+      FROM users
+      WHERE city IS NOT NULL AND city != ''
+      GROUP BY city, state_code
+      ORDER BY userCount DESC
+      LIMIT 20
+    `);
+
+    // Get activity from MongoDB for these cohorts
+    let cohortActivity = [];
+    if (mongoDb) {
+      const logsCollection = mongoDb.collection('logs');
+      cohortActivity = await logsCollection.aggregate([
+        { $match: { type: { $in: ['page_view', 'booking', 'search'] } } },
+        {
+          $group: {
+            _id: '$city',
+            totalActions: { $sum: 1 },
+            searches: { $sum: { $cond: [{ $eq: ['$type', 'search'] }, 1, 0] } },
+            bookings: { $sum: { $cond: [{ $eq: ['$type', 'booking'] }, 1, 0] } }
+          }
+        }
+      ]).toArray();
+    }
+
+    // Merge data
+    const cohorts = cityCohorts.map(cohort => {
+      const activity = cohortActivity.find(a => a._id === cohort.city) || {};
+      return {
+        city: cohort.city,
+        state: cohort.state,
+        userCount: cohort.userCount,
+        firstUser: cohort.firstUser,
+        lastUser: cohort.lastUser,
+        totalActions: activity.totalActions || 0,
+        searches: activity.searches || 0,
+        bookings: activity.bookings || 0
+      };
+    });
+
+    res.status(200).json({ cohorts });
+  } catch (error) {
+    console.error('Error fetching cohorts:', error);
+    res.status(500).json(createErrorResponse(500, 'Internal Server Error', 'Failed to fetch cohorts', req.path));
   }
 });
 

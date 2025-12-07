@@ -19,6 +19,7 @@ const mysql = require('mysql2/promise');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { randomUUID } = require('crypto');
+const redis = require('redis');
 
 const {
   createKafkaClient,
@@ -35,7 +36,10 @@ const {
   validateState,
   normalizeState,
   validateEmail,
-  validatePassword
+  validatePassword,
+  requireValidUserId,
+  requireValidState,
+  requireValidZip
 } = require('../../shared/validators');
 
 const {
@@ -79,6 +83,66 @@ pool.getConnection()
     process.exit(1);
   });
 
+// ==================== REDIS CACHE SETUP ====================
+
+const redisClient = redis.createClient({
+  url: process.env.REDIS_URL || 'redis://localhost:6379'
+});
+
+redisClient.on('error', (err) => console.error('❌ Redis error:', err));
+redisClient.on('connect', () => console.log('✅ Redis connected'));
+
+// Connect Redis
+(async () => {
+  try {
+    await redisClient.connect();
+  } catch (error) {
+    console.error('❌ Failed to connect to Redis:', error);
+    // Don't exit - service can work without cache
+  }
+})();
+
+// Cache TTL in seconds (5 minutes for user data)
+const CACHE_TTL = 300;
+
+/**
+ * Get user from cache or null
+ */
+async function getCachedUser(userId) {
+  if (!redisClient.isOpen) return null;
+  try {
+    const cached = await redisClient.get(`user:${userId}`);
+    return cached ? JSON.parse(cached) : null;
+  } catch (error) {
+    console.warn('Cache read error:', error);
+    return null;
+  }
+}
+
+/**
+ * Cache user data
+ */
+async function cacheUser(userId, userData) {
+  if (!redisClient.isOpen) return;
+  try {
+    await redisClient.setEx(`user:${userId}`, CACHE_TTL, JSON.stringify(userData));
+  } catch (error) {
+    console.warn('Cache write error:', error);
+  }
+}
+
+/**
+ * Invalidate user cache
+ */
+async function invalidateUserCache(userId) {
+  if (!redisClient.isOpen) return;
+  try {
+    await redisClient.del(`user:${userId}`);
+  } catch (error) {
+    console.warn('Cache invalidation error:', error);
+  }
+}
+
 // ==================== KAFKA SETUP ====================
 
 let kafkaProducer;
@@ -119,9 +183,8 @@ app.post('/api/v1/auth/register', async (req, res) => {
       throw new ValidationError('Missing required fields: userId, firstName, lastName, email, password');
     }
 
-    if (!validateUserId(userId)) {
-      throw new ValidationError('User ID must match SSN format: ###-##-####');
-    }
+    // SPEC REQUIREMENT: User ID must match SSN pattern, throw 'invalid_driver_id' if not
+    requireValidUserId(userId);
 
     if (!validateEmail(email)) {
       throw new ValidationError('Invalid email format');
@@ -132,26 +195,17 @@ app.post('/api/v1/auth/register', async (req, res) => {
       throw new ValidationError(passwordValidation.message);
     }
 
-    // Address validation - if provided, must be valid
-    // If no address provided, use defaults to satisfy database constraints
-    if (!address) {
-      address = {
-        line1: 'TBD',
-        city: 'TBD',
-        state: 'CA', // Default to California (valid state code)
-        zipCode: '00000' // Default ZIP that passes regex validation
-      };
+    // Address validation - require complete address instead of defaulting to invalid data
+    if (!address || !address.line1 || !address.city || !address.state || !address.zipCode) {
+      throw new ValidationError('Complete address required: line1, city, state, zipCode');
     } else {
-      // Validate provided address
-      if (!validateState(address.state)) {
-        throw new ValidationError('Invalid US state abbreviation or name');
-      }
+      // SPEC REQUIREMENT: State validation with 'malformed_state' error code
+      requireValidState(address.state);
       // Normalize state to 2-letter code
       address.state = normalizeState(address.state);
 
-      if (!validateZipCode(address.zipCode)) {
-        throw new ValidationError('ZIP code must be in format ##### or #####-####');
-      }
+      // SPEC REQUIREMENT: ZIP validation with 'malformed_zip' error code
+      requireValidZip(address.zipCode);
     }
 
     // ===== CHECK FOR DUPLICATES =====
@@ -235,6 +289,17 @@ app.post('/api/v1/auth/register', async (req, res) => {
       sqlState: error.sqlState,
       sqlMessage: error.sqlMessage
     });
+
+    // Handle spec-required error codes (invalid_driver_id, malformed_state, malformed_zip)
+    if (error.code && ['invalid_driver_id', 'malformed_state', 'malformed_zip'].includes(error.code)) {
+      return res.status(error.status || 400).json({
+        status: error.status || 400,
+        error: error.code,
+        message: error.message,
+        path: req.path,
+        timestamp: new Date().toISOString()
+      });
+    }
 
     if (error instanceof ValidationError || error instanceof ConflictError) {
       return res.status(error.status).json(
@@ -331,7 +396,7 @@ app.post('/api/v1/auth/login', async (req, res) => {
 
 /**
  * GET /:userId
- * Retrieve user profile information
+ * Retrieve user profile information (with Redis caching)
  *
  * NOTE: API Gateway rewrites /api/v1/users/:userId -> /:userId for this service.
  */
@@ -339,12 +404,18 @@ app.get('/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
 
+    // Check cache first
+    const cachedUser = await getCachedUser(userId);
+    if (cachedUser) {
+      return res.status(200).json({ ...cachedUser, cached: true });
+    }
+
     // Use Tier 3's snake_case column names
     const [users] = await pool.execute(
-      `SELECT user_id, first_name, last_name, 
+      `SELECT user_id, first_name, last_name,
               address_line1, address_line2, city, state_code, zip_code,
-              phone_number, email, role, 
-              created_at_utc, updated_at_utc 
+              phone_number, email, role,
+              created_at_utc, updated_at_utc
        FROM users WHERE user_id = ?`,
       [userId]
     );
@@ -373,7 +444,10 @@ app.get('/:userId', async (req, res) => {
       updatedAt: row.updated_at_utc
     };
 
-    res.status(200).json(user);
+    // Cache the user data
+    await cacheUser(userId, user);
+
+    res.status(200).json({ ...user, cached: false });
 
   } catch (error) {
     console.error('Error fetching user:', error);
@@ -405,14 +479,14 @@ app.put('/:userId', async (req, res) => {
 
     if (updates.address) {
       if (updates.address.state) {
-        if (!validateState(updates.address.state)) {
-          throw new ValidationError('Invalid US state abbreviation or name');
-        }
+        // SPEC REQUIREMENT: State validation with 'malformed_state' error code
+        requireValidState(updates.address.state);
         // Normalize state to 2-letter code
         updates.address.state = normalizeState(updates.address.state);
       }
-      if (updates.address.zipCode && !validateZipCode(updates.address.zipCode)) {
-        throw new ValidationError('Invalid ZIP code format');
+      if (updates.address.zipCode) {
+        // SPEC REQUIREMENT: ZIP validation with 'malformed_zip' error code
+        requireValidZip(updates.address.zipCode);
       }
     }
 
@@ -492,6 +566,9 @@ app.put('/:userId', async (req, res) => {
       });
     }
 
+    // ===== INVALIDATE CACHE =====
+    await invalidateUserCache(userId);
+
     // ===== FETCH AND RETURN UPDATED USER =====
     // Use Tier 3's snake_case, convert to camelCase for response
     const [users] = await pool.execute(
@@ -527,6 +604,17 @@ app.put('/:userId', async (req, res) => {
 
   } catch (error) {
     console.error('Error updating user:', error);
+
+    // Handle spec-required error codes (malformed_state, malformed_zip)
+    if (error.code && ['invalid_driver_id', 'malformed_state', 'malformed_zip'].includes(error.code)) {
+      return res.status(error.status || 400).json({
+        status: error.status || 400,
+        error: error.code,
+        message: error.message,
+        path: req.path,
+        timestamp: new Date().toISOString()
+      });
+    }
 
     if (error instanceof ValidationError || error instanceof NotFoundError) {
       return res.status(error.status).json(
@@ -568,6 +656,9 @@ app.delete('/:userId', async (req, res) => {
         data: { userId }
       });
     }
+
+    // ===== INVALIDATE CACHE =====
+    await invalidateUserCache(userId);
 
     res.status(204).send();
 
