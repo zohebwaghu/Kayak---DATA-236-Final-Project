@@ -68,7 +68,13 @@ const mongoClient = new MongoClient(process.env.MONGO_URI || 'mongodb://localhos
 
     // Create indexes for performance (if collections exist)
     try {
-      await db.collection('hotels').createIndex({ city: 1, star_rating: -1, price: 1 });
+      await db.collection('hotels').createIndex({
+        city: 1,
+        city_code: 1,
+        star_rating: -1,
+        price_per_night: 1,
+        deal_score: -1
+      });
       await db.collection('flights').createIndex({ origin: 1, destination: 1, departure_time: 1, price: 1 });
       await db.collection('cars').createIndex({ location: 1, car_type: 1, price_per_day: 1 });
       console.log('✅ MongoDB indexes created');
@@ -188,7 +194,12 @@ const handleHotelsSearch = async (req, res) => {
     if (!db) {
       console.error('❌ Database not connected yet');
       return res.status(503).json(
-        createErrorResponse(503, 'Service Unavailable', 'Database connection not ready. Please try again in a moment.', req.path)
+        createErrorResponse(
+          503,
+          'Service Unavailable',
+          'Database connection not ready. Please try again in a moment.',
+          req.path
+        )
       );
     }
 
@@ -223,25 +234,33 @@ const handleHotelsSearch = async (req, res) => {
 
     console.log('❌ Cache MISS for hotels search - querying database');
 
-    // ===== BUILD MONGODB QUERY =====
+    // ===== BUILD MONGODB QUERY (MATCHES CURRENT SCHEMA) =====
     const query = {};
 
+    // City / city_code (supports "Delhi" and "DEL")
     if (city) {
-      query['address.city'] = new RegExp(city.trim(), 'i');
+      const rawCity = city.trim();
+      query.$or = [
+        { city: new RegExp(`^${rawCity}$`, 'i') },        // city: "Delhi"
+        { city_code: rawCity.toUpperCase() }              // city_code: "DEL"
+      ];
     }
 
+    // star_rating (NOT starRating)
     if (minStarRating || maxStarRating) {
-      query.starRating = {};
-      if (minStarRating) query.starRating.$gte = parseFloat(minStarRating);
-      if (maxStarRating) query.starRating.$lte = parseFloat(maxStarRating);
+      query.star_rating = {};
+      if (minStarRating) query.star_rating.$gte = parseFloat(minStarRating);
+      if (maxStarRating) query.star_rating.$lte = parseFloat(maxStarRating);
     }
 
+    // price_per_night (NOT roomTypes.price)
     if (minPrice || maxPrice) {
-      query['roomTypes.price'] = {};
-      if (minPrice) query['roomTypes.price'].$gte = parseFloat(minPrice);
-      if (maxPrice) query['roomTypes.price'].$lte = parseFloat(maxPrice);
+      query.price_per_night = {};
+      if (minPrice) query.price_per_night.$gte = parseFloat(minPrice);
+      if (maxPrice) query.price_per_night.$lte = parseFloat(maxPrice);
     }
 
+    // amenities array
     if (amenities) {
       const amenityList = amenities.split(',').map(a => a.trim());
       query.amenities = { $all: amenityList };
@@ -255,38 +274,24 @@ const handleHotelsSearch = async (req, res) => {
     const [hotelsRaw, total] = await Promise.all([
       db.collection('hotels')
         .find(query)
+        .sort({ deal_score: -1, price_per_night: 1 })
         .skip(skip)
         .limit(limitNum)
         .toArray(),
       db.collection('hotels').countDocuments(query)
     ]);
 
-    // ===== DERIVE FLAT PRICE FIELD FOR FRONTEND =====
-    // We keep the original docs, but add:
-    //   - pricePerNight  (used by PaymentPage / cards)
-    //   - price          (fallback for generic components)
+    // ===== NORMALIZE PRICE FIELD FOR FRONTEND =====
     const hotels = hotelsRaw.map((hotel) => {
       const doc = { ...hotel };
-      let derivedPrice = doc.pricePerNight;
 
-      if (derivedPrice == null) {
-        if (Array.isArray(doc.roomTypes) && doc.roomTypes.length > 0) {
-          const prices = doc.roomTypes
-            .map((rt) =>
-              rt && typeof rt.price === 'number' ? rt.price : null
-            )
-            .filter((p) => typeof p === 'number');
-
-          if (prices.length > 0) {
-            derivedPrice = Math.min(...prices); // use the lowest room price as base
-          }
-        }
-      }
+      // Your docs already have price_per_night
+      const derivedPrice = doc.price_per_night ?? doc.price;
 
       if (typeof derivedPrice === 'number') {
-        doc.pricePerNight = derivedPrice;
+        doc.price_per_night = derivedPrice;
         if (doc.price == null) {
-          doc.price = derivedPrice;
+          doc.price = derivedPrice; // generic price field used by some components
         }
       }
 

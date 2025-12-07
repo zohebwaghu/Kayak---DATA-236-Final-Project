@@ -321,6 +321,7 @@ services:
       - API_PORT=8000
       - API_ENV=production
       - CORS_ORIGINS=http://localhost:3000,http://localhost:3001
+      - OLLAMA_EMBEDDING_MODEL=mxbai-embed-large
     volumes:
       - ../data:/data
       - ../ai:/app
