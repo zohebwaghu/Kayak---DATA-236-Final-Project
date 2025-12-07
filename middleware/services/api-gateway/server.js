@@ -234,25 +234,22 @@ app.use('/api/v1/listings', authenticateJWT, requireAdmin, (req, res) => {
 // ==================== BOOKING SERVICE ROUTES ====================
 
 app.use('/api/v1/bookings', authenticateJWT, (req, res) => {
-  // IMPORTANT:
   // booking-service defines its routes as /api/v1/bookings...
-  // So we include that prefix directly in the base URL.
+  // req.path already contains /api/v1/bookings, so we just use the base URL
   const serviceUrl =
     process.env.BOOKING_SERVICE_URL ||
-    `http://booking-service:${process.env.BOOKING_SERVICE_PORT || 3004}/api/v1/bookings`;
+    `http://booking-service:${process.env.BOOKING_SERVICE_PORT || 3004}`;
   proxyToService(req, res, 'Booking Service', serviceUrl);
 });
 
 // ==================== BILLING SERVICE ROUTES ====================
 
 app.use('/api/v1/billing', authenticateJWT, (req, res) => {
-  // Base host (from env or Docker service name)
-  const baseUrl =
+  // billing-service defines its routes as /api/v1/billing...
+  // req.path already contains /api/v1/billing, so we just use the base URL
+  const serviceUrl =
     process.env.BILLING_SERVICE_URL ||
     `http://billing-service:${process.env.BILLING_SERVICE_PORT || 3005}`;
-
-  // Always append the correct API prefix
-  const serviceUrl = `${baseUrl}/api/v1/billing`;
 
   proxyToService(req, res, 'Billing Service', serviceUrl);
 });
