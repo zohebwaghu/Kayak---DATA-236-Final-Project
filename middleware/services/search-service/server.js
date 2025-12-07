@@ -382,22 +382,31 @@ const handleFlightsSearch = async (req, res) => {
     if (destination) query.destination = destination.trim().toUpperCase();
 
     if (departureDate) {
-      // Calculate days_left based on today
+      // Parse the date string (YYYY-MM-DD format)
+      const dateString = departureDate.split('T')[0]; // YYYY-MM-DD format
+      
+      // Create date range for the entire day (UTC)
+      // Use UTC to avoid timezone issues
+      const [year, month, day] = dateString.split('-').map(Number);
+      const targetDateStart = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
+      const targetDateEnd = new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999));
+      
+      // Calculate days_left for backward compatibility
       const today = new Date();
-      const targetDate = new Date(departureDate);
-
-      // Reset times to midnight for accurate day diff
       today.setHours(0, 0, 0, 0);
+      const targetDate = new Date(year, month - 1, day);
       targetDate.setHours(0, 0, 0, 0);
-
       const diffTime = targetDate - today;
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-      // The dataset uses 'days_left' starting from 1
-      // If diffDays is 0 (today) or 1 (tomorrow), we map to 1
       const searchDays = Math.max(1, diffDays);
-
-      query.days_left = searchDays;
+      
+      // Query by actual date (departureDate or departure_date field) OR days_left
+      // This supports both the new synthetic date columns and backward compatibility
+      query.$or = [
+        { departureDate: { $gte: targetDateStart, $lte: targetDateEnd } },
+        { departure_date: dateString },
+        { days_left: searchDays }
+      ];
     }
 
     if (minPrice || maxPrice) {
