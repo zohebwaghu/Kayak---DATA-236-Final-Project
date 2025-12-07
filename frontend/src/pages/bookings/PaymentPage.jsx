@@ -83,9 +83,7 @@ const PaymentPage = () => {
         const prefill = {
           nameOnCard: stored.cardholderName || '',
           // We only know last4, so mask the number – this is enough for the UI
-          cardNumber: stored.last4
-            ? `**** **** **** ${stored.last4}`
-            : '',
+          cardNumber: stored.last4 ? `**** **** **** ${stored.last4}` : '',
           expiry,
           cvv: '',
           billingAddress,
@@ -103,8 +101,7 @@ const PaymentPage = () => {
         const methods = Array.isArray(res.data) ? res.data : [];
         if (!methods.length) return;
 
-        const primary =
-          methods.find((m) => m.isDefault) || methods[0];
+        const primary = methods.find((m) => m.isDefault) || methods[0];
 
         // expiryMonth / expiryYear from backend
         let expiry = '';
@@ -195,6 +192,8 @@ const PaymentPage = () => {
       ? 'Hotel'
       : bookingType === 'car'
       ? 'Car'
+      : bookingType === 'bundle'
+      ? 'AI Package'
       : 'Trip';
 
   let title = '';
@@ -278,6 +277,18 @@ const PaymentPage = () => {
       typeof price === 'number'
         ? `$${price.toFixed(0)} USD / day`
         : 'Price pending';
+  } else if (bookingType === 'bundle') {
+    // AI package – use data prepared in BookingSummaryPage
+    title = listing.name || 'AI Travel Package';
+    subtitle = 'Flight + Hotel bundle';
+    metaLines = [];
+    const price = listing.totalPrice ?? null;
+    priceNumeric = typeof price === 'number' ? price : null;
+    priceLabel = 'Package total';
+    priceValue =
+      typeof price === 'number'
+        ? `$${price.toFixed(0)} USD`
+        : 'Price pending';
   }
 
   const handleChange = (e) => {
@@ -315,6 +326,25 @@ const PaymentPage = () => {
           'Your session has expired. Please log in again to complete payment.'
         );
         navigate('/login');
+        return;
+      }
+
+      // 🔸 NEW: Short-circuit AI bundles – UI-only, no backend inventory
+      const isAiBundle =
+        bookingType === 'bundle' || listing?.source === 'ai-assistant';
+
+      if (isAiBundle) {
+        console.log(
+          'AI bundle booking: skipping backend booking-service and treating as demo success.',
+          { listing }
+        );
+        setSubmitting(false);
+        navigate('/my-bookings', {
+          state: {
+            fromPayment: true,
+            aiBundle: true,
+          },
+        });
         return;
       }
 
@@ -385,7 +415,7 @@ const PaymentPage = () => {
 
       const payload = {
         userId: user.userId,
-        listingType: bookingType.toLowerCase(), // ✅ matches booking-service expectations
+        listingType: bookingType.toLowerCase(), // hotel | flight | car
         listingId,
         startDate: startDateStr,
         endDate: endDateStr,
