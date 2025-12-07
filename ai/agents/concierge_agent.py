@@ -11,6 +11,7 @@ Assignment Requirements Satisfied:
 6. Watch with price/inventory thresholds
 7. Quote generation with fare class, baggage, fees, cancellation policy
 8. WebSocket async updates
+9. Semantic Cache with embeddings for similar query detection
 
 5 User Journeys:
 1. "Tell me what I should book" → search_bundles
@@ -25,12 +26,21 @@ import re
 import json
 import uuid
 import random
+import hashlib
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List, Tuple, Union
 from loguru import logger
 
 # Pydantic v2 - Assignment requirement
 from pydantic import BaseModel, Field
+
+# Numpy for cosine similarity
+try:
+    import numpy as np
+    NUMPY_AVAILABLE = True
+except ImportError:
+    NUMPY_AVAILABLE = False
+    logger.warning("NumPy not available - semantic cache disabled")
 
 # SQLModel persistence - Assignment requirement
 try:
@@ -55,12 +65,29 @@ try:
 except ImportError:
     OLLAMA_AVAILABLE = False
 
+# Redis for Semantic Cache
+try:
+    import redis
+    REDIS_AVAILABLE = True
+except ImportError:
+    REDIS_AVAILABLE = False
+    logger.warning("Redis not available - semantic cache will use memory")
+
 # Internal imports
 try:
     from interfaces.deals_cache import deals_cache, Deal
 except ImportError:
     deals_cache = None
     Deal = None
+
+# Watch store for Redis persistence
+try:
+    from api.watches import watch_store, WatchCreate as WatchCreateRequest
+    WATCH_STORE_AVAILABLE = True
+except ImportError:
+    watch_store = None
+    WatchCreateRequest = None
+    WATCH_STORE_AVAILABLE = False
 
 
 # ============================================
@@ -673,13 +700,31 @@ class MRKLTools:
             created_at=datetime.utcnow().isoformat()
         )
         
-        # Persist to SQLite
+        # Save to Redis watch_store (for WebSocket notifications)
+        if WATCH_STORE_AVAILABLE and watch_store:
+            try:
+                watch_data = WatchCreateRequest(
+                    user_id=self.user_id,
+                    listing_type="bundle",
+                    listing_id=bundle_id,
+                    listing_name=watch.listing_name,
+                    watch_type="price",
+                    threshold=price_threshold,
+                    current_value=bundle.total_price
+                )
+                redis_watch = watch_store.create_watch(watch_data)
+                watch.watch_id = redis_watch.watch_id  # Use Redis watch ID
+                logger.info(f"Watch saved to Redis: {redis_watch.watch_id}")
+            except Exception as e:
+                logger.error(f"Error saving watch to Redis: {e}")
+        
+        # Also persist to SQLite for backup
         if SQLMODEL_AVAILABLE:
             try:
                 engine = get_engine()
                 with Session(engine) as session:
                     record = WatchRecord(
-                        watch_id=watch_id, user_id=self.user_id, listing_type="bundle",
+                        watch_id=watch.watch_id, user_id=self.user_id, listing_type="bundle",
                         listing_id=bundle_id, listing_name=watch.listing_name,
                         watch_type="both", price_threshold=price_threshold,
                         inventory_threshold=inventory_threshold,
@@ -690,7 +735,7 @@ class MRKLTools:
                     session.add(record)
                     session.commit()
             except Exception as e:
-                logger.error(f"Error persisting watch: {e}")
+                logger.error(f"Error persisting watch to SQLite: {e}")
         
         return watch
 
@@ -857,7 +902,12 @@ class MRKLTools:
 # ============================================
 
 class ConciergeAgent:
-    """Main Concierge Agent with LLM integration."""
+    """Main Concierge Agent with LLM integration and Semantic Cache."""
+    
+    # Semantic cache configuration
+    SEMANTIC_CACHE_TTL = 300  # 5 minutes
+    SIMILARITY_THRESHOLD = 0.85  # Cosine similarity threshold for cache hit
+    SEMANTIC_CACHE_PREFIX = "semantic_cache:"  # Redis key prefix
 
     def __init__(self, user_id: str = "anonymous", session_id: str = None):
         self.user_id = user_id
@@ -868,21 +918,50 @@ class ConciergeAgent:
         self._previous_bundles: List[Bundle] = []  # For tracking changes
         self._previous_preferences: List[str] = []  # For tracking refinements
         
+        # Redis for Semantic Cache
+        self.redis_client = None
+        self._init_redis()
+        
         # LLM client
         self.llm_client = None
         self.llm_model = None
+        self.embedding_model = None
         self._init_llm()
+    
+    def _init_redis(self):
+        """Initialize Redis connection for Semantic Cache"""
+        if not REDIS_AVAILABLE:
+            logger.warning("Redis not available for semantic cache")
+            return
+        
+        try:
+            redis_host = os.getenv("REDIS_HOST", "localhost")
+            redis_port = int(os.getenv("REDIS_PORT", 6379))
+            redis_db = int(os.getenv("REDIS_DB", 0))
+            
+            self.redis_client = redis.Redis(
+                host=redis_host,
+                port=redis_port,
+                db=redis_db,
+                decode_responses=False  # We'll handle encoding ourselves for embeddings
+            )
+            self.redis_client.ping()
+            logger.info(f"Semantic Cache connected to Redis at {redis_host}:{redis_port}")
+        except Exception as e:
+            logger.warning(f"Redis connection failed: {e}")
+            self.redis_client = None
 
     def _init_llm(self):
-        """Initialize LLM client"""
+        """Initialize LLM client and embedding model"""
         self.llm_type = None
         openai_key = os.getenv("OPENAI_API_KEY", "")
         if OPENAI_AVAILABLE and openai_key:
             try:
                 self.llm_client = OpenAI(api_key=openai_key)
                 self.llm_model = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
+                self.embedding_model = "text-embedding-3-small"  # OpenAI embedding model
                 self.llm_type = "openai"
-                logger.info(f"Using OpenAI: {self.llm_model}")
+                logger.info(f"Using OpenAI: {self.llm_model}, Embeddings: {self.embedding_model}")
                 return
             except Exception as e:
                 logger.warning(f"OpenAI init failed: {e}")
@@ -892,13 +971,129 @@ class ConciergeAgent:
                 ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
                 self.llm_client = OllamaClient(host=ollama_url)
                 self.llm_model = os.getenv("OLLAMA_MODEL", "llama3.2")
+                self.embedding_model = os.getenv("OLLAMA_EMBEDDING_MODEL", "mxbai-embed-large")
                 self.llm_type = "ollama"
-                logger.info(f"Using Ollama: {self.llm_model}")
+                logger.info(f"Using Ollama: {self.llm_model}, Embeddings: {self.embedding_model}")
                 return
             except Exception as e:
                 logger.warning(f"Ollama init failed: {e}")
         
         logger.warning("No LLM available, using rule-based fallback")
+
+    def _get_embedding(self, text: str) -> Optional[List[float]]:
+        """Get embedding vector for text using OpenAI or Ollama"""
+        if not self.llm_client or not NUMPY_AVAILABLE:
+            return None
+        
+        try:
+            if self.llm_type == "openai":
+                response = self.llm_client.embeddings.create(
+                    model=self.embedding_model,
+                    input=text
+                )
+                return response.data[0].embedding
+            
+            elif self.llm_type == "ollama":
+                response = self.llm_client.embeddings(
+                    model=self.embedding_model,
+                    prompt=text
+                )
+                return response['embedding']
+        
+        except Exception as e:
+            logger.warning(f"Embedding generation failed: {e}")
+            return None
+    
+    def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
+        """Calculate cosine similarity between two vectors"""
+        if not NUMPY_AVAILABLE:
+            return 0.0
+        
+        try:
+            a = np.array(vec1)
+            b = np.array(vec2)
+            return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
+        except Exception as e:
+            logger.warning(f"Cosine similarity calculation failed: {e}")
+            return 0.0
+    
+    def _check_semantic_cache(self, query: str) -> Optional[Dict[str, Any]]:
+        """Check if similar query exists in Redis semantic cache"""
+        if not NUMPY_AVAILABLE or not self.llm_client or not self.redis_client:
+            return None
+        
+        query_embedding = self._get_embedding(query)
+        if not query_embedding:
+            return None
+        
+        best_match = None
+        best_similarity = 0.0
+        
+        try:
+            # Get all semantic cache keys from Redis
+            pattern = f"{self.SEMANTIC_CACHE_PREFIX}*"
+            keys = self.redis_client.keys(pattern)
+            
+            for key in keys:
+                try:
+                    cached_data = self.redis_client.get(key)
+                    if not cached_data:
+                        continue
+                    
+                    cached = json.loads(cached_data.decode('utf-8'))
+                    cached_embedding = cached.get("embedding", [])
+                    
+                    similarity = self._cosine_similarity(query_embedding, cached_embedding)
+                    if similarity > best_similarity and similarity >= self.SIMILARITY_THRESHOLD:
+                        best_similarity = similarity
+                        best_match = cached["intent"]
+                        
+                except Exception as e:
+                    logger.warning(f"Error reading cache key {key}: {e}")
+                    continue
+            
+            if best_match:
+                logger.info(f"Semantic cache HIT from Redis (similarity: {best_similarity:.3f})")
+                return best_match
+            
+        except Exception as e:
+            logger.warning(f"Redis semantic cache check failed: {e}")
+        
+        return None
+    
+    def _update_semantic_cache(self, query: str, intent: Dict[str, Any]):
+        """Update Redis semantic cache with new query and intent"""
+        if not NUMPY_AVAILABLE or not self.llm_client or not self.redis_client:
+            return
+        
+        embedding = self._get_embedding(query)
+        if not embedding:
+            return
+        
+        try:
+            # Use hash of query as key
+            query_hash = hashlib.md5(query.lower().strip().encode()).hexdigest()
+            redis_key = f"{self.SEMANTIC_CACHE_PREFIX}{query_hash}"
+            
+            cache_data = {
+                "embedding": embedding,
+                "intent": intent,
+                "query": query
+            }
+            
+            # Store in Redis with TTL
+            self.redis_client.setex(
+                redis_key,
+                self.SEMANTIC_CACHE_TTL,
+                json.dumps(cache_data)
+            )
+            
+            # Get current cache size
+            cache_size = len(self.redis_client.keys(f"{self.SEMANTIC_CACHE_PREFIX}*"))
+            logger.info(f"Semantic cache updated in Redis, total entries: {cache_size}")
+            
+        except Exception as e:
+            logger.warning(f"Redis semantic cache update failed: {e}")
 
     def _call_llm(self, prompt: str, system_prompt: str = None) -> Optional[str]:
         """Call LLM for intent parsing or response generation"""
@@ -1003,13 +1198,19 @@ Examples:
         return self._execute_intent(merged_intent, message)
 
     def _parse_intent(self, message: str) -> Dict[str, Any]:
-        """Parse user intent from message - LLM first, rule-based fallback"""
+        """Parse user intent from message - Semantic Cache → LLM → Rule-based fallback"""
         
-        # Try LLM parsing first
+        # 1. Check Semantic Cache first
+        cached_intent = self._check_semantic_cache(message)
+        if cached_intent:
+            logger.info(f"Using cached intent from semantic cache")
+            return cached_intent
+        
+        # 2. Try LLM parsing
         llm_intent = self._llm_parse_intent(message)
         if llm_intent:
             # Normalize LLM output
-            return {
+            intent = {
                 "action": llm_intent.get("action"),
                 "destination": llm_intent.get("destination"),
                 "origin": llm_intent.get("origin"),
@@ -1019,8 +1220,11 @@ Examples:
                 "quote_id": None,
                 "option_number": llm_intent.get("option_number")
             }
+            # Update semantic cache with new intent
+            self._update_semantic_cache(message, intent)
+            return intent
         
-        # Fallback to rule-based parsing
+        # 3. Fallback to rule-based parsing
         logger.info("Using rule-based intent parsing (LLM unavailable)")
         intent = {"action": None, "destination": None, "origin": None, "budget": None, "preferences": [], "bundle_id": None, "quote_id": None, "option_number": None}
         msg_lower = message.lower()
