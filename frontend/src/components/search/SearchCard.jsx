@@ -3,15 +3,15 @@ import React from 'react';
 import PropTypes from 'prop-types';
 
 /**
- * Generic horizontal search result card.
+ * Enhanced horizontal search result card.
  *
  * Used for:
- *  - Flights  (no thumbnail)
+ *  - Flights  (no thumbnail, timeline layout)
  *  - Hotels   (thumbnail = hotel image / placeholder)
  *  - Cars     (thumbnail = car image / placeholder)
  *
  * Layout:
- *  [thumb?]  [title + meta/subtitle]        [price + actions]
+ *  [thumb?]  [title + meta/subtitle + badges]  [price + actions]
  */
 const SearchCard = ({
   thumbnailUrl,
@@ -21,13 +21,23 @@ const SearchCard = ({
   subtitle,
   meta,
   priceText,
+  priceSubtext,
   rightBadge,
-  actions,        // 🔹 NEW: optional actions area (e.g., Book button)
+  topBadge,
+  features,
+  actions,
 }) => {
   const showThumbnail = Boolean(thumbnailUrl || thumbnailFallback);
 
   return (
     <div className="flight-card fade-in-up">
+      {/* Top badge (e.g., "Best deal", "Recommended") */}
+      {topBadge && (
+        <div className="search-card-top-badge">
+          {topBadge}
+        </div>
+      )}
+
       <div className="flight-card-main">
         {/* Thumbnail (optional) */}
         {showThumbnail && (
@@ -56,6 +66,19 @@ const SearchCard = ({
               {meta && <span>{meta}</span>}
             </div>
           )}
+
+          {/* Features row (e.g., "Wi-Fi", "Free cancellation") */}
+          {features && features.length > 0 && (
+            <div className="search-card-features">
+              {features.map((feature, index) => (
+                <span key={index} className="search-card-feature">
+                  {feature.icon && <i className={`bi ${feature.icon}`} />}
+                  {feature.text || feature}
+                </span>
+              ))}
+            </div>
+          )}
+
           {rightBadge && (
             <div className="search-card-badge">
               {rightBadge}
@@ -66,9 +89,16 @@ const SearchCard = ({
 
       {/* Price / right side */}
       <div className="flight-card-price">
-        {priceText ?? '—'}
+        <div className="search-card-price-main">
+          {priceText ?? '—'}
+        </div>
+        {priceSubtext && (
+          <div className="search-card-price-sub">
+            {priceSubtext}
+          </div>
+        )}
 
-        {/* 🔹 Optional actions area (e.g., "Book" button) */}
+        {/* Optional actions area (e.g., "Book" button) */}
         {actions && (
           <div className="search-card-actions">
             {actions}
@@ -87,8 +117,19 @@ SearchCard.propTypes = {
   subtitle: PropTypes.oneOfType([PropTypes.string, PropTypes.node]),
   meta: PropTypes.oneOfType([PropTypes.string, PropTypes.node]),
   priceText: PropTypes.oneOfType([PropTypes.string, PropTypes.node]),
+  priceSubtext: PropTypes.oneOfType([PropTypes.string, PropTypes.node]),
   rightBadge: PropTypes.oneOfType([PropTypes.string, PropTypes.node]),
-  actions: PropTypes.oneOfType([PropTypes.string, PropTypes.node]), // 🔹 NEW
+  topBadge: PropTypes.oneOfType([PropTypes.string, PropTypes.node]),
+  features: PropTypes.arrayOf(
+    PropTypes.oneOfType([
+      PropTypes.string,
+      PropTypes.shape({
+        icon: PropTypes.string,
+        text: PropTypes.string,
+      }),
+    ])
+  ),
+  actions: PropTypes.oneOfType([PropTypes.string, PropTypes.node]),
 };
 
 export default SearchCard;
