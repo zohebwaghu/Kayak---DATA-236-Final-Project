@@ -463,7 +463,7 @@ const handleFlightsSearch = async (req, res) => {
     const [flights, total] = await Promise.all([
       db.collection('flights')
         .find(query)
-        .sort({ price: 1, departureTime: 1 })
+        .sort({ price: 1, departure_time: 1 })
         .skip(skip)
         .limit(limitNum)
         .toArray(),

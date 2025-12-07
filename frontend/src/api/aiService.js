@@ -163,7 +163,10 @@ export const getAiStatus = async () => {
 // ============================================
 
 export const createEventsWebSocket = (userId, onMessage, onError) => {
-  const wsUrl = `ws://localhost:8000/api/ai/events?user_id=${userId}`;
+  // Use environment variable or derive from current location
+  const wsHost = process.env.REACT_APP_WS_URL ||
+    `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.hostname}:8000`;
+  const wsUrl = `${wsHost}/api/ai/events?user_id=${userId}`;
   const ws = new WebSocket(wsUrl);
 
   ws.onopen = () => {

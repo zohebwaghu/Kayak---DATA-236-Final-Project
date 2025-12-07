@@ -174,7 +174,7 @@ VALUES (
     '94105',
     '415-555-0100',
     'admin@kayak.com',
-    '$2b$10$rZ3vZqZqQwZqZqZqZqZqZeZqZqZqZqZqZqZqZqZqZqZqZqZqZqZqZ', -- bcrypt hash of 'Admin123!'
+    '$2b$10$N9qo8uLOickgx2ZMRZoMy.MQDq6z9FLYb6C0c6ePRZPJYQyJqJIru', -- bcrypt hash of 'Admin123!'
     'admin'
 ) ON DUPLICATE KEY UPDATE email = email;
 
@@ -204,7 +204,7 @@ VALUES (
     '10001',
     '212-555-0200',
     'john.doe@example.com',
-    '$2b$10$rZ3vZqZqQwZqZqZqZqZqZeZqZqZqZqZqZqZqZqZqZqZqZqZqZqZqZ', -- bcrypt hash of 'User123!'
+    '$2b$10$EixZaYVK1fsbw1ZfbX3OXe.PaueY0lzGRxnNqLh1eMDJXSGOBhbKC', -- bcrypt hash of 'User123!'
     'user'
 ) ON DUPLICATE KEY UPDATE email = email;
 

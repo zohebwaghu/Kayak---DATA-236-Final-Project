@@ -189,6 +189,46 @@ const proxyToService = async (req, res, serviceName, serviceUrl) => {
   }
 };
 
+/**
+ * Proxy to service with custom path (for path rewriting)
+ */
+const proxyToServiceWithPath = async (req, res, serviceName, serviceUrl, customPath) => {
+  try {
+    const response = await axios({
+      method: req.method,
+      url: `${serviceUrl}${customPath}`,
+      data: req.body,
+      params: req.query,
+      headers: {
+        'X-User-ID': req.user?.userId,
+        'X-User-Role': req.user?.role,
+        'X-Request-ID': req.headers['x-request-id'] || `req-${Date.now()}`,
+        'Content-Type': 'application/json'
+      },
+      timeout: 30000
+    });
+
+    res.status(response.status).json(response.data);
+  } catch (error) {
+    if (error.response) {
+      res.status(error.response.status).json(error.response.data);
+    } else if (error.code === 'ECONNREFUSED') {
+      res.status(503).json(
+        createErrorResponse(503, 'Service Unavailable', `${serviceName} is currently unavailable.`, req.path)
+      );
+    } else if (error.code === 'ETIMEDOUT') {
+      res.status(504).json(
+        createErrorResponse(504, 'Gateway Timeout', `${serviceName} did not respond in time.`, req.path)
+      );
+    } else {
+      console.error(`Error proxying to ${serviceName}:`, error);
+      res.status(500).json(
+        createErrorResponse(500, 'Internal Server Error', 'An unexpected error occurred.', req.path)
+      );
+    }
+  }
+};
+
 // ==================== AUTHENTICATION ROUTES (PUBLIC) ====================
 
 app.post('/api/v1/auth/register', (req, res) => {
@@ -211,7 +251,9 @@ app.use('/api/v1/users', authenticateJWT, (req, res) => {
   const serviceUrl =
     process.env.USER_SERVICE_URL ||
     `http://user-service:${process.env.USER_SERVICE_PORT || 3001}`;
-  proxyToService(req, res, 'User Service', serviceUrl);
+  // Strip /api/v1/users prefix - user-service expects /:userId directly
+  const rewrittenPath = req.path.replace(/^\/api\/v1\/users/, '') || '/';
+  proxyToServiceWithPath(req, res, 'User Service', serviceUrl, rewrittenPath);
 });
 
 // ==================== SEARCH SERVICE ROUTES (PUBLIC) ====================
@@ -230,8 +272,10 @@ app.use('/api/v1/listings', authenticateJWT, requireAdmin, (req, res) => {
   // Route to admin-service which handles listing CRUD via MongoDB
   const serviceUrl =
     process.env.ADMIN_SERVICE_URL ||
-    `http://admin-service:${process.env.ADMIN_SERVICE_PORT || 3006}/api/v1/admin/listings`;
-  proxyToService(req, res, 'Admin Service (Listings)', serviceUrl);
+    `http://admin-service:${process.env.ADMIN_SERVICE_PORT || 3006}`;
+  // Rewrite /api/v1/listings/* to /listings/* for admin-service
+  const rewrittenPath = req.path.replace(/^\/api\/v1\/listings/, '/listings') || '/listings';
+  proxyToServiceWithPath(req, res, 'Admin Service (Listings)', serviceUrl, rewrittenPath);
 });
 
 // ==================== BOOKING SERVICE ROUTES ====================
@@ -272,7 +316,9 @@ app.use('/api/v1/admin', authenticateJWT, requireAdmin, (req, res) => {
   const serviceUrl =
     process.env.ADMIN_SERVICE_URL ||
     `http://admin-service:${process.env.ADMIN_SERVICE_PORT || 3006}`;
-  proxyToService(req, res, 'Admin Service', serviceUrl);
+  // Strip /api/v1/admin prefix - admin-service expects /analytics, /users, /billing directly
+  const rewrittenPath = req.path.replace(/^\/api\/v1\/admin/, '') || '/';
+  proxyToServiceWithPath(req, res, 'Admin Service', serviceUrl, rewrittenPath);
 });
 
 // ==================== ERROR HANDLING ====================

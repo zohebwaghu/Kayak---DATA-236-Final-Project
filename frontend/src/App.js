@@ -29,9 +29,13 @@ function App() {
         {/* Auth */}
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
-        {/* Profile – currently not protected for debugging */}
-        <Route path="/profile" element={<ProfilePage />} />
-        <Route path="/user/profile" element={<ProfilePage />} />
+        {/* Profile - protected routes */}
+        <Route path="/profile" element={<ProtectedRoute />}>
+          <Route index element={<ProfilePage />} />
+        </Route>
+        <Route path="/user/profile" element={<ProtectedRoute />}>
+          <Route index element={<ProfilePage />} />
+        </Route>
         {/* Protected user routes */}
         <Route path="/my-bookings" element={<ProtectedRoute />}>
           <Route index element={<MyBookingsPage />} />

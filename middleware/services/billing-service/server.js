@@ -230,11 +230,11 @@ async function handleBookingCreated(bookingData) {
         // Create a simple line item from the total price
         const lineItems = JSON.stringify([{ description: 'Booking Charge', amount: totalPrice }]);
 
-        // Create Invoice record
+        // Create Invoice record with 'pending' status (will flip to 'paid' after /billing/charge)
         await pool.execute(
             `INSERT INTO invoices (
         invoiceId, bookingId, userId, amount, status, issuedAt, paidAt, lineItems, createdAt, updatedAt
-      ) VALUES (?, ?, ?, ?, 'paid', NOW(), NOW(), ?, NOW(), NOW())`,
+      ) VALUES (?, ?, ?, ?, 'pending', NOW(), NULL, ?, NOW(), NOW())`,
             [invoiceId, bookingId, userId, totalPrice, lineItems]
         );
         console.log(`💰 Invoice created for booking ${bookingId}: ${invoiceId}`);

@@ -352,13 +352,19 @@ app.post('/api/v1/auth/login', async (req, res) => {
 
     // ===== GENERATE JWT TOKEN =====
 
+    // Require JWT_SECRET from environment in production
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret && process.env.NODE_ENV === 'production') {
+      throw new Error('JWT_SECRET environment variable is required in production');
+    }
+
     const token = jwt.sign(
       {
         userId: user.user_id,  // Use snake_case from DB
         email: user.email,
         role: user.role || 'user'
       },
-      process.env.JWT_SECRET || 'your-secret-key',
+      jwtSecret || 'dev-only-secret-key',
       { expiresIn: process.env.JWT_EXPIRY || '24h' }
     );
 
