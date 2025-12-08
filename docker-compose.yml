@@ -164,7 +164,6 @@ services:
       KAFKA_CLIENT_ID: user-service
       JWT_SECRET: super-secret-key-change-in-production
       JWT_EXPIRY: 24h
-      REDIS_URL: redis://redis:6379
       NODE_ENV: production
     depends_on:
       mysql:
