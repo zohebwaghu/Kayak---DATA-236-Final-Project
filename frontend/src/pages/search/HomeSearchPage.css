@@ -140,32 +140,6 @@
   color: var(--primary-orange);
 }
 
-.home-hero-stats {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 10px;
-  margin-bottom: 16px;
-}
-
-.hero-stat-card {
-  background: rgba(0, 0, 0, 0.03);
-  border-radius: 14px;
-  padding: 12px 14px;
-  border: 1px solid rgba(0, 0, 0, 0.04);
-}
-
-.hero-stat-value {
-  display: block;
-  font-family: var(--font-heading);
-  font-size: 1.15rem;
-  font-weight: 800;
-  color: var(--dark-navy);
-}
-
-.hero-stat-label {
-  font-size: 0.85rem;
-  color: var(--slate-gray);
-}
 
 .home-hero-meta {
   margin-top: 12px;

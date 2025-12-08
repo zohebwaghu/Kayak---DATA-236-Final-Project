@@ -73,16 +73,39 @@ export const fetchPopularDestinations = async (limit = 6) => {
       }
     });
 
+    // Popular destination photos pool - diverse travel images
+    const destinationPhotos = [
+      'https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=600&h=400&q=85', // Airplane/travel
+      'https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?auto=format&fit=crop&w=600&h=400&q=85', // Tropical beach
+      'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=600&h=400&q=85', // Beach paradise
+      'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?auto=format&fit=crop&w=600&h=400&q=85', // Mountain landscape
+      'https://images.unsplash.com/photo-1519904981063-b0cf448d479e?auto=format&fit=crop&w=600&h=400&q=85', // City skyline
+      'https://images.unsplash.com/photo-1518837695005-2083093ee35b?auto=format&fit=crop&w=600&h=400&q=85', // Ocean view
+      'https://images.unsplash.com/photo-1502602898657-3e91760cbb34?auto=format&fit=crop&w=600&h=400&q=85', // European city
+      'https://images.unsplash.com/photo-1511497584788-876760111969?auto=format&fit=crop&w=600&h=400&q=85', // Urban scene
+      'https://images.unsplash.com/photo-1501785888041-af3ef285b470?auto=format&fit=crop&w=600&h=400&q=85', // Sunset travel
+      'https://images.unsplash.com/photo-1516026672322-bc52d61a55d5?auto=format&fit=crop&w=600&h=400&q=85', // Adventure
+      'https://images.unsplash.com/photo-1519681393784-d120267933ba?auto=format&fit=crop&w=600&h=400&q=85', // Mountain peak
+      'https://images.unsplash.com/photo-1504280390367-361c6d9f38f4?auto=format&fit=crop&w=600&h=400&q=85', // Desert landscape
+      'https://images.unsplash.com/photo-1506197603052-3cc9c3a201bd?auto=format&fit=crop&w=600&h=400&q=85', // Coastal view
+      'https://images.unsplash.com/photo-1505142468610-359e7d316be0?auto=format&fit=crop&w=600&h=400&q=85', // Modern city
+      'https://images.unsplash.com/photo-1514933651103-005eec06c04b?auto=format&fit=crop&w=600&h=400&q=85', // Historic architecture
+      'https://images.unsplash.com/photo-1502780402662-acc019171b0a?auto=format&fit=crop&w=600&h=400&q=85', // Scenic route
+    ];
+
     // Sort by count (popularity) and take top N
     const destinations = Object.values(cityMap)
       .filter(d => d.city !== 'Unknown' && d.minPrice > 0)
       .sort((a, b) => b.count - a.count)
       .slice(0, limit)
-      .map(d => ({
+      .map((d, index) => ({
         city: d.city,
         country: d.country,
         price: Math.round(d.minPrice),
-        image: getCityImage(d.city),
+        // Use city-specific image if available, otherwise random from pool
+        image: getCityImage(d.city) !== cityImages['default'] 
+          ? getCityImage(d.city) 
+          : destinationPhotos[index % destinationPhotos.length],
         code: d.city.substring(0, 3).toUpperCase(),
       }));
 

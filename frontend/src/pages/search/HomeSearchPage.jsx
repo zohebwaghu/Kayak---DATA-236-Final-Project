@@ -501,21 +501,6 @@ const HomeSearchPage = () => {
               One search compares prices across 100s of sites. AI highlights deals, tags promos, and keeps you on-budget.
             </p>
 
-            <div className="home-hero-stats">
-              <div className="hero-stat-card">
-                <span className="hero-stat-value">41M+</span>
-                <span className="hero-stat-label">searches this week</span>
-              </div>
-              <div className="hero-stat-card">
-                <span className="hero-stat-value">4.8★</span>
-                <span className="hero-stat-label">traveler rating</span>
-              </div>
-              <div className="hero-stat-card">
-                <span className="hero-stat-value">Top routes</span>
-                <span className="hero-stat-label">SJC ↔ LAS • SFO ↔ NYC</span>
-              </div>
-            </div>
-
             {/* Tabs row */}
             <div className="home-tabs-row">
               <button
