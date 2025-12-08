@@ -295,8 +295,8 @@ services:
 
   ai-service:
     build:
-      context: .
-      dockerfile: ./ai/Dockerfile
+      context: ./ai
+      dockerfile: ./Dockerfile
     container_name: kayak-ai-service
     ports:
       - "8000:8000"
