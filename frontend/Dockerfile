@@ -5,12 +5,13 @@
 # 2) Runtime stage: serve static assets via nginx.
 #
 
-FROM node:18-bullseye AS build
+FROM node:20-bullseye AS build
 WORKDIR /app
 
 # Install dependencies first (better layer caching)
 COPY package.json package-lock.json ./
-RUN npm ci
+# Use npm install with legacy peer deps to avoid strict peer conflicts
+RUN npm install --legacy-peer-deps
 
 # Copy source and build
 COPY . .
