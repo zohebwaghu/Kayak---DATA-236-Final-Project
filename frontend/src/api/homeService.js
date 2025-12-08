@@ -3,19 +3,32 @@
 
 import api from './axios';
 
-// City image mapping (using Unsplash for reliable images)
+// Optimized city image mapping with high-quality Unsplash images
 const cityImages = {
-  'new york': 'https://images.unsplash.com/photo-1496442226666-8d4d0e62e6e9?w=400&h=300&fit=crop',
-  'los angeles': 'https://images.unsplash.com/photo-1534190760961-74e8c1c5c3da?w=400&h=300&fit=crop',
-  'chicago': 'https://images.unsplash.com/photo-1494522855154-9297ac14b55f?w=400&h=300&fit=crop',
-  'miami': 'https://images.unsplash.com/photo-1506966953602-c20cc11f75e3?w=400&h=300&fit=crop',
-  'san francisco': 'https://images.unsplash.com/photo-1501594907352-04cda38ebc29?w=400&h=300&fit=crop',
-  'las vegas': 'https://images.unsplash.com/photo-1605833556294-ea5c7a74f57d?w=400&h=300&fit=crop',
-  'seattle': 'https://images.unsplash.com/photo-1502175353174-a7a70e73b362?w=400&h=300&fit=crop',
-  'boston': 'https://images.unsplash.com/photo-1501979376754-1d09ed7dc4d4?w=400&h=300&fit=crop',
-  'denver': 'https://images.unsplash.com/photo-1546156929-a4c0ac411f47?w=400&h=300&fit=crop',
-  'austin': 'https://images.unsplash.com/photo-1531218150217-54595bc2b934?w=400&h=300&fit=crop',
-  'default': 'https://images.unsplash.com/photo-1488646953014-85cb44e25828?w=400&h=300&fit=crop',
+  'new york': 'https://images.unsplash.com/photo-1496442226666-8d4d0e62e6e9?auto=format&fit=crop&w=600&h=400&q=85',
+  'los angeles': 'https://images.unsplash.com/photo-1534190760961-74e8c1c5c3da?auto=format&fit=crop&w=600&h=400&q=85',
+  'chicago': 'https://images.unsplash.com/photo-1494522855154-9297ac14b55f?auto=format&fit=crop&w=600&h=400&q=85',
+  'miami': 'https://images.unsplash.com/photo-1506966953602-c20cc11f75e3?auto=format&fit=crop&w=600&h=400&q=85',
+  'san francisco': 'https://images.unsplash.com/photo-1501594907352-04cda38ebc29?auto=format&fit=crop&w=600&h=400&q=85',
+  'las vegas': 'https://images.unsplash.com/photo-1605833556294-ea5c7a74f57d?auto=format&fit=crop&w=600&h=400&q=85',
+  'seattle': 'https://images.unsplash.com/photo-1502175353174-a7a70e73b362?auto=format&fit=crop&w=600&h=400&q=85',
+  'boston': 'https://images.unsplash.com/photo-1501979376754-1d09ed7dc4d4?auto=format&fit=crop&w=600&h=400&q=85',
+  'denver': 'https://images.unsplash.com/photo-1546156929-a4c0ac411f47?auto=format&fit=crop&w=600&h=400&q=85',
+  'austin': 'https://images.unsplash.com/photo-1531218150217-54595bc2b934?auto=format&fit=crop&w=600&h=400&q=85',
+  'orlando': 'https://images.unsplash.com/photo-1513622478252-07c5137e4917?auto=format&fit=crop&w=600&h=400&q=85',
+  'phoenix': 'https://images.unsplash.com/photo-1547036967-23d11aacaee0?auto=format&fit=crop&w=600&h=400&q=85',
+  'san diego': 'https://images.unsplash.com/photo-1559827260-dc66d52bef19?auto=format&fit=crop&w=600&h=400&q=85',
+  'portland': 'https://images.unsplash.com/photo-1514565131-fce0801e5785?auto=format&fit=crop&w=600&h=400&q=85',
+  'atlanta': 'https://images.unsplash.com/photo-1514565131-fce0801e5785?auto=format&fit=crop&w=600&h=400&q=85',
+  'dallas': 'https://images.unsplash.com/photo-1514924013411-cbf25faa35bb?auto=format&fit=crop&w=600&h=400&q=85',
+  'houston': 'https://images.unsplash.com/photo-1505142468610-359e7d316be0?auto=format&fit=crop&w=600&h=400&q=85',
+  'mumbai': 'https://images.unsplash.com/photo-1529253355930-ddbe423a2ac7?auto=format&fit=crop&w=600&h=400&q=85',
+  'delhi': 'https://images.unsplash.com/photo-1582979512210-99b6a53386f9?auto=format&fit=crop&w=600&h=400&q=85',
+  'bangalore': 'https://images.unsplash.com/photo-1605629921711-3f3a5b3b3b3b?auto=format&fit=crop&w=600&h=400&q=85',
+  'chennai': 'https://images.unsplash.com/photo-1582979512210-99b6a53386f9?auto=format&fit=crop&w=600&h=400&q=85',
+  'kolkata': 'https://images.unsplash.com/photo-1582979512210-99b6a53386f9?auto=format&fit=crop&w=600&h=400&q=85',
+  'hyderabad': 'https://images.unsplash.com/photo-1582979512210-99b6a53386f9?auto=format&fit=crop&w=600&h=400&q=85',
+  'default': 'https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=600&h=400&q=85',
 };
 
 /**
@@ -96,12 +109,13 @@ export const fetchDeals = async () => {
 
     const deals = [];
 
-    // Add flight deals
+    // Add flight deals with images
     flights.slice(0, 3).forEach((flight, index) => {
       const price = flight.price || 0;
       // Simulate original price (20-50% higher)
       const discount = 20 + Math.floor(Math.random() * 30);
       const originalPrice = Math.round(price * (100 / (100 - discount)));
+      const destCity = (flight.destination_city || flight.destination || 'LAX').toLowerCase();
 
       deals.push({
         id: `flight-${index}`,
@@ -113,10 +127,11 @@ export const fetchDeals = async () => {
         discount,
         airline: flight.airline || 'Multiple airlines',
         dates: flight.departure_time ? `Departs ${flight.departure_time}` : 'Flexible dates',
+        image: getCityImage(destCity),
       });
     });
 
-    // Add hotel deals
+    // Add hotel deals with images
     hotels.slice(0, 2).forEach((hotel, index) => {
       const price = hotel.pricePerNight || hotel.price || 0;
       const discount = 25 + Math.floor(Math.random() * 25);
@@ -134,6 +149,7 @@ export const fetchDeals = async () => {
         discount,
         nights: '3 nights',
         dates: 'Limited time offer',
+        image: getCityImage(city),
       });
     });
 

@@ -1,5 +1,5 @@
 // src/pages/admin/AdminDashboardPage.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import api from '../../api/axios';
 import {
   BarChart, Bar, PieChart, Pie, Cell,
@@ -44,22 +44,7 @@ const AdminDashboardPage = () => {
   const [showListingForm, setShowListingForm] = useState(false);
   const [listingFormData, setListingFormData] = useState({});
 
-  useEffect(() => {
-    const run = async () => {
-      if (activeTab === 'analytics') {
-        await loadAnalytics();
-      } else if (activeTab === 'listings') {
-        await loadListings();
-      } else if (activeTab === 'users') {
-        await loadUsers();
-      } else if (activeTab === 'billing') {
-        await loadBills();
-      }
-    };
-    run();
-  }, [activeTab, listingSearch, listingType, userSearch, billDate, billMonth, billYear]);
-
-  const loadAnalytics = async () => {
+  const loadAnalytics = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -88,9 +73,9 @@ const AdminDashboardPage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const loadListings = async () => {
+  const loadListings = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -105,9 +90,9 @@ const AdminDashboardPage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [listingSearch, listingType]);
 
-  const loadUsers = async () => {
+  const loadUsers = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -122,9 +107,9 @@ const AdminDashboardPage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [userSearch]);
 
-  const loadBills = async () => {
+  const loadBills = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -141,7 +126,22 @@ const AdminDashboardPage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [billDate, billMonth, billYear]);
+
+  useEffect(() => {
+    const run = async () => {
+      if (activeTab === 'analytics') {
+        await loadAnalytics();
+      } else if (activeTab === 'listings') {
+        await loadListings();
+      } else if (activeTab === 'users') {
+        await loadUsers();
+      } else if (activeTab === 'billing') {
+        await loadBills();
+      }
+    };
+    run();
+  }, [activeTab, loadAnalytics, loadListings, loadUsers, loadBills]);
 
   const handleAddListing = async (e) => {
     e.preventDefault();

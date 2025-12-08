@@ -30,37 +30,7 @@ const AiChatWidget = () => {
   const isAuthenticated = useSelector(selectIsAuthenticated);
   const userId = user?.userId || 'guest_user';
 
-  // Initialize WebSocket connection
-  useEffect(() => {
-    if (isAuthenticated && userId) {
-      connectWebSocket();
-    }
-    
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-    };
-  }, [isAuthenticated, userId, connectWebSocket]);
-
-  // Scroll to bottom on new messages
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  const connectWebSocket = useCallback(() => {
-    try {
-      wsRef.current = createEventsWebSocket(
-        userId,
-        handleWebSocketMessage,
-        handleWebSocketError
-      );
-    } catch (err) {
-      console.error('WebSocket connection failed:', err);
-    }
-  }, [userId, isAuthenticated]);
-
-  const handleWebSocketMessage = (data) => {
+  const handleWebSocketMessage = useCallback((data) => {
     switch (data.event_type || data.type) {
       case 'price_alert':
       case 'inventory_alert':
@@ -78,9 +48,9 @@ const AiChatWidget = () => {
       default:
         console.log('Unknown event:', data);
     }
-  };
+  }, []);
 
-  const handleWebSocketError = (error) => {
+  const handleWebSocketError = useCallback((error) => {
     console.error('WebSocket error:', error);
     // Try to reconnect after 5 seconds
     setTimeout(() => {
@@ -88,7 +58,37 @@ const AiChatWidget = () => {
         connectWebSocket();
       }
     }, 5000);
-  };
+  }, [isAuthenticated]);
+
+  const connectWebSocket = useCallback(() => {
+    try {
+      wsRef.current = createEventsWebSocket(
+        userId,
+        handleWebSocketMessage,
+        handleWebSocketError
+      );
+    } catch (err) {
+      console.error('WebSocket connection failed:', err);
+    }
+  }, [userId, handleWebSocketMessage, handleWebSocketError]);
+
+  // Initialize WebSocket connection
+  useEffect(() => {
+    if (isAuthenticated && userId) {
+      connectWebSocket();
+    }
+    
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+    };
+  }, [isAuthenticated, userId, connectWebSocket]);
+
+  // Scroll to bottom on new messages
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
   // Handle booking redirect
   const handleBookingRedirect = (quoteData) => {

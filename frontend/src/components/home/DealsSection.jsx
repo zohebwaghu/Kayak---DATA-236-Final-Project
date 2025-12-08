@@ -68,6 +68,17 @@ const DealsSection = ({ onDealClick }) => {
                 className="deal-card"
                 onClick={() => onDealClick && onDealClick(deal)}
               >
+                {deal.image && (
+                  <div className="deal-image-wrapper">
+                    <img
+                      src={deal.image}
+                      alt={deal.title}
+                      className="deal-image"
+                      loading="lazy"
+                    />
+                    <div className="deal-image-overlay" />
+                  </div>
+                )}
                 <div className="deal-header">
                   <span className={`deal-type deal-type--${deal.type}`}>
                     <i className={`bi ${getTypeIcon(deal.type)}`} />

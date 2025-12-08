@@ -57,9 +57,13 @@ const PopularDestinations = ({ onDestinationClick }) => {
               <div className="destination-image-wrapper">
                 <img
                   src={dest.image}
-                  alt={dest.city}
+                  alt={`${dest.city}, ${dest.country}`}
                   className="destination-image"
                   loading="lazy"
+                  onError={(e) => {
+                    // Fallback to a default travel image if load fails
+                    e.target.src = 'https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=600&h=400&q=85';
+                  }}
                 />
                 <div className="destination-overlay" />
               </div>

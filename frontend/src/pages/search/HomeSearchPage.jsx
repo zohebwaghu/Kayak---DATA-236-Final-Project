@@ -29,11 +29,12 @@ import { selectIsAuthenticated, selectUser } from '../../store/slices/authSlice'
 import AiPriceAnalysis from '../../components/ai/AiPriceAnalysis';
 import AiQuoteModal from '../../components/ai/AiQuoteModal';
 
+// Optimized hero photos matching Kayak's style - travel destinations
 const HERO_PHOTOS = [
-  'https://images.unsplash.com/photo-1502920917128-1aa500764b1c?auto=format&fit=crop&w=800&q=80',
-  'https://images.unsplash.com/photo-1469474968028-56623f02e42e?auto=format&fit=crop&w=800&q=80',
-  'https://images.unsplash.com/photo-1523906834658-6e24ef2386f9?auto=format&fit=crop&w=800&q=80',
-  'https://images.unsplash.com/photo-1505761671935-60b3a7427bad?auto=format&fit=crop&w=800&q=80',
+  'https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=600&h=400&q=85', // Airplane wing
+  'https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?auto=format&fit=crop&w=600&h=400&q=85', // Travel destination
+  'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=600&h=400&q=85', // Beach/tropical
+  'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?auto=format&fit=crop&w=600&h=400&q=85', // Mountain landscape
 ];
 
 const HomeSearchPage = () => {
