@@ -33,6 +33,13 @@ except ImportError:
     SESSION_AVAILABLE = False
     session_store = None
 
+# Import Deals Cache for dynamic suggestions
+try:
+    from interfaces.deals_cache import deals_cache, CACHE_AVAILABLE
+except ImportError:
+    CACHE_AVAILABLE = False
+    deals_cache = None
+
 
 router = APIRouter(prefix="/api/ai", tags=["chat"])
 
@@ -113,9 +120,21 @@ class SuggestionRequest(BaseModel):
 # Helper Functions
 # ============================================
 
+def get_available_destinations(count: int = 3) -> List[str]:
+    """Get available destinations from deals cache dynamically"""
+    if CACHE_AVAILABLE and deals_cache:
+        try:
+            stats = deals_cache.get_stats()
+            dests = list(stats.get("by_destination", {}).keys())[:count]
+            return dests if dests else ["a destination"]
+        except Exception:
+            pass
+    return ["a destination"]
+
+
 def generate_suggestions(response_type: str, context: Dict = None) -> List[str]:
-    """Generate contextual follow-up suggestions"""
-    
+    """Generate contextual follow-up suggestions with dynamic destinations"""
+
     if response_type == "recommendations":
         return [
             "Tell me more about option 1",
@@ -124,16 +143,12 @@ def generate_suggestions(response_type: str, context: Dict = None) -> List[str]:
             "Get me a full quote",
             "Show me pet-friendly options"
         ]
-    
+
     if response_type == "clarification":
-        return [
-            "Miami",
-            "New York",
-            "Los Angeles",
-            "Anywhere warm",
-            "Somewhere cheap"
-        ]
-    
+        # Dynamic destinations from database
+        dests = get_available_destinations(3)
+        return dests + ["Anywhere warm", "Somewhere cheap"]
+
     if response_type == "price_analysis":
         return [
             "Book it",
@@ -141,7 +156,7 @@ def generate_suggestions(response_type: str, context: Dict = None) -> List[str]:
             "Watch for a better price",
             "What's the cancellation policy?"
         ]
-    
+
     if response_type == "quote":
         return [
             "Book now",
@@ -149,19 +164,20 @@ def generate_suggestions(response_type: str, context: Dict = None) -> List[str]:
             "Are there cheaper options?",
             "Add travel insurance"
         ]
-    
+
     if response_type == "watch_created":
         return [
             "Show me my watches",
             "Search for something else",
             "What deals do you have today?"
         ]
-    
-    # Default suggestions
+
+    # Default suggestions - dynamic from database
+    dests = get_available_destinations(2)
     return [
-        "Find me a trip to Miami",
+        f"Find me a trip to {dests[0]}",
         "What's the best deal right now?",
-        "I need a pet-friendly hotel",
+        f"Show me deals to {dests[1] if len(dests) > 1 else dests[0]}",
         "Show me weekend getaways"
     ]
 

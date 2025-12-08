@@ -150,28 +150,79 @@ class DealsCache:
             # Initialize database first (create tables if not exist)
             from models.database import init_db
             init_db()
-            
+
             engine = get_engine()
-            
+
+            # Collect all deals first (memory only, no Redis)
+            all_deals = []
+
             with Session(engine) as session:
                 # Load flights
                 flights = session.exec(select(FlightDeal)).all()
                 logger.info(f"Loading {len(flights)} flights from SQLite")
-                
+
                 for flight in flights:
                     deal = self._sqlite_flight_to_deal(flight)
                     if deal:
-                        self.add_deal(deal)
-                
+                        all_deals.append(deal)
+
                 # Load hotels
                 hotels = session.exec(select(HotelDeal)).all()
                 logger.info(f"Loading {len(hotels)} hotels from SQLite")
-                
+
                 for hotel in hotels:
                     deal = self._sqlite_hotel_to_deal(hotel)
                     if deal:
-                        self.add_deal(deal)
-            
+                        all_deals.append(deal)
+
+            logger.info(f"Converted {len(all_deals)} deals, adding to cache...")
+
+            # Add to memory indexes
+            for deal in all_deals:
+                self._deals[deal.deal_id] = deal
+
+                # Index by destination
+                if deal.destination:
+                    if deal.destination not in self._by_destination:
+                        self._by_destination[deal.destination] = []
+                    self._by_destination[deal.destination].append(deal.deal_id)
+
+                # Index by type
+                if deal.listing_type not in self._by_type:
+                    self._by_type[deal.listing_type] = []
+                self._by_type[deal.listing_type].append(deal.deal_id)
+
+                # Index by tags
+                for tag in deal.tags:
+                    if tag not in self._by_tag:
+                        self._by_tag[tag] = []
+                    self._by_tag[tag].append(deal.deal_id)
+
+            logger.info(f"Memory cache ready with {len(self._deals)} deals")
+
+            # Batch write to Redis using pipelines (much faster)
+            if self.redis_client:
+                logger.info("Writing deals to Redis (batched)...")
+                batch_size = 1000
+                for i in range(0, len(all_deals), batch_size):
+                    batch = all_deals[i:i + batch_size]
+                    pipe = self.redis_client.pipeline()
+                    for deal in batch:
+                        pipe.setex(
+                            self._get_key(deal.deal_id),
+                            self.ttl_seconds,
+                            json.dumps(deal.to_dict())
+                        )
+                        if deal.destination:
+                            pipe.sadd(f"deals:dest:{deal.destination}", deal.deal_id)
+                        pipe.sadd(f"deals:type:{deal.listing_type}", deal.deal_id)
+                        for tag in deal.tags:
+                            pipe.sadd(f"deals:tag:{tag}", deal.deal_id)
+                    pipe.execute()
+                    if (i + batch_size) % 50000 == 0:
+                        logger.info(f"  Redis: {i + batch_size} deals written...")
+                logger.info(f"Redis cache ready with {len(all_deals)} deals")
+
             logger.info(f"Loaded {len(self._deals)} deals from SQLite")
             
         except Exception as e:
@@ -186,7 +237,17 @@ class DealsCache:
     def _sqlite_flight_to_deal(self, flight) -> Optional[Deal]:
         """Convert SQLModel FlightDeal to Deal"""
         try:
-            tags = json.loads(flight.tags) if flight.tags else []
+            # Handle tags - could be JSON string, list, or invalid
+            tags = []
+            if flight.tags:
+                if isinstance(flight.tags, list):
+                    tags = flight.tags
+                elif isinstance(flight.tags, str):
+                    try:
+                        tags = json.loads(flight.tags)
+                    except json.JSONDecodeError:
+                        # Not valid JSON, try to parse as comma-separated
+                        tags = [t.strip() for t in flight.tags.split(',') if t.strip()]
             
             return Deal(
                 deal_id=f"flight_{flight.flight_id}",
@@ -222,8 +283,27 @@ class DealsCache:
     def _sqlite_hotel_to_deal(self, hotel) -> Optional[Deal]:
         """Convert SQLModel HotelDeal to Deal"""
         try:
-            tags = json.loads(hotel.tags) if hotel.tags else []
-            amenities = json.loads(hotel.amenities) if hotel.amenities else []
+            # Handle tags - could be JSON string, list, or invalid
+            tags = []
+            if hotel.tags:
+                if isinstance(hotel.tags, list):
+                    tags = hotel.tags
+                elif isinstance(hotel.tags, str):
+                    try:
+                        tags = json.loads(hotel.tags)
+                    except json.JSONDecodeError:
+                        tags = [t.strip() for t in hotel.tags.split(',') if t.strip()]
+
+            # Handle amenities similarly
+            amenities = []
+            if hotel.amenities:
+                if isinstance(hotel.amenities, list):
+                    amenities = hotel.amenities
+                elif isinstance(hotel.amenities, str):
+                    try:
+                        amenities = json.loads(hotel.amenities)
+                    except json.JSONDecodeError:
+                        amenities = [a.strip() for a in hotel.amenities.split(',') if a.strip()]
             
             return Deal(
                 deal_id=f"hotel_{hotel.hotel_id}",

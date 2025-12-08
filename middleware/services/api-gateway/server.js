@@ -125,6 +125,12 @@ app.get('/health', (req, res) => {
 
 // ==================== SERVICE ROUTING ====================
 
+// Simple passthrough for analytics events to admin-service
+app.post('/api/v1/analytics/events', (req, res) => {
+  const adminUrl = `http://admin-service:${process.env.ADMIN_SERVICE_PORT || 3006}/api/v1/admin/analytics/events`;
+  proxyToServiceWithPath(req, res, 'Admin Service', adminUrl, '');
+});
+
 /**
  * Generic service proxy function
  * Routes requests to downstream microservices

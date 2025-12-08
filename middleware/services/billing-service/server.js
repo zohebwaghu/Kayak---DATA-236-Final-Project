@@ -21,6 +21,26 @@ const PORT = process.env.BILLING_SERVICE_PORT || 3005;
 
 app.use(express.json());
 
+// ===== AUTHZ HELPERS (trust headers from API Gateway) =====
+const getCaller = (req) => {
+    const callerId = req.headers['x-user-id'];
+    const callerRole = req.headers['x-user-role'];
+    return { callerId, callerRole };
+};
+
+const requireOwnerOrAdmin = (req, res, targetUserId) => {
+    const { callerId, callerRole } = getCaller(req);
+    if (!callerId) {
+        res.status(401).json({ error: 'Unauthorized: missing caller identity' });
+        return false;
+    }
+    if (callerRole !== 'admin' && callerId !== targetUserId) {
+        res.status(403).json({ error: 'Forbidden: not your invoice/payment' });
+        return false;
+    }
+    return true;
+};
+
 // ==================== DATABASE CONNECTION ====================
 
 const MYSQL_HOST = process.env.MYSQL_HOST || 'localhost';
@@ -305,6 +325,10 @@ app.get('/api/v1/billing/invoices/:bookingId', async (req, res) => {
             return res.status(404).json({ error: 'Invoice not found' });
         }
 
+        // AuthZ: caller must own the invoice or be admin
+        const invoiceOwner = rows[0].userId;
+        if (!requireOwnerOrAdmin(req, res, invoiceOwner)) return;
+
         // Cache the invoice
         await cacheInvoice(bookingId, rows[0]);
 
@@ -319,6 +343,9 @@ app.get('/api/v1/billing/invoices/:bookingId', async (req, res) => {
 app.get('/api/v1/billing/user/:userId', async (req, res) => {
     try {
         const { userId } = req.params;
+
+        // AuthZ: caller must own the invoices or be admin
+        if (!requireOwnerOrAdmin(req, res, userId)) return;
 
         // Check cache first
         const cachedInvoices = await getCachedUserInvoices(userId);
@@ -348,6 +375,9 @@ app.post('/api/v1/billing/charge', async (req, res) => {
     if (!bookingId || !userId) {
         return res.status(400).json({ error: 'Missing required fields: bookingId, userId' });
     }
+
+    // AuthZ: caller must own the booking/invoice or be admin
+    if (!requireOwnerOrAdmin(req, res, userId)) return;
 
     let connection;
     try {
@@ -382,6 +412,9 @@ app.post('/api/v1/billing/charge', async (req, res) => {
             `UPDATE invoices SET status = 'paid', paidAt = NOW(), updatedAt = NOW() WHERE bookingId = ?`,
             [bookingId]
         );
+
+        // Invalidate cache so clients see the paid status
+        await invalidateInvoiceCache(bookingId, userId);
 
         console.log(`💳 Payment processed: ${paymentId} for booking ${bookingId}`);
 

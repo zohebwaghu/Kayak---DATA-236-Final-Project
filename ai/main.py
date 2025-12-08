@@ -57,6 +57,21 @@ CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost
 ENABLE_DEALS_AGENT = os.getenv("ENABLE_DEALS_AGENT", "true").lower() == "true"
 ENABLE_WEBSOCKET = os.getenv("ENABLE_WEBSOCKET", "true").lower() == "true"
 
+# Hard requirements when running in production
+REQUIRED_MODULES = []
+try:
+    import sqlmodel  # noqa: F401
+except ImportError:
+    REQUIRED_MODULES.append("sqlmodel")
+try:
+    import aiokafka  # noqa: F401
+except ImportError:
+    REQUIRED_MODULES.append("aiokafka")
+try:
+    import pydantic  # noqa: F401
+except ImportError:
+    REQUIRED_MODULES.append("pydantic")
+
 
 # ============================================
 # Import Routers and Services
@@ -169,6 +184,10 @@ async def lifespan(app: FastAPI):
     Application lifespan handler
     Initializes and cleans up resources
     """
+    if API_ENV.lower() == "production" and REQUIRED_MODULES:
+        missing = ", ".join(REQUIRED_MODULES)
+        logger.error(f"Missing required modules in production: {missing}")
+        raise SystemExit(1)
     # ========== STARTUP ==========
     logger.info("=" * 50)
     logger.info("Starting AI Recommendation Service...")

@@ -72,9 +72,11 @@ OLLAMA_AVAILABLE = False  # Disabled - using Gemini
 # Internal imports
 try:
     from interfaces.deals_cache import deals_cache, Deal
+    CACHE_AVAILABLE = True
 except ImportError:
     deals_cache = None
     Deal = None
+    CACHE_AVAILABLE = False
 
 # Location cache for fuzzy search
 try:
@@ -1434,16 +1436,21 @@ Examples:
             if CACHE_AVAILABLE and deals_cache:
                 try:
                     stats = deals_cache.get_stats()
-                    # Get top destinations with actual deals
-                    available_dests = list(stats.get("destinations", {}).keys())[:10]
+                    # Get top destinations with actual deals (key is "by_destination" not "destinations")
+                    available_dests = list(stats.get("by_destination", {}).keys())[:10]
                 except Exception:
-                    available_dests = ["Mumbai", "Delhi", "Bangalore", "Chennai", "Kolkata"]
+                    available_dests = []  # No hardcoded fallback - pull from database
 
             msg = f"I couldn't find flights or hotels to **{dest}** ({dest_code or 'unknown code'}).\n\n"
             if available_dests:
                 msg += "**Available destinations with deals:**\n"
                 msg += ", ".join(available_dests[:8]) + "\n\n"
-            msg += "Try: \"fly me to Mumbai\" or \"show me deals to Delhi\""
+                # Dynamic suggestions from actual data
+                sample1 = available_dests[0] if len(available_dests) > 0 else "a city"
+                sample2 = available_dests[1] if len(available_dests) > 1 else "another city"
+                msg += f"Try: \"fly me to {sample1}\" or \"show me deals to {sample2}\""
+            else:
+                msg += "No destinations currently available. Please try again later."
 
             return ChatResponse(message=msg, intent=intent)
         

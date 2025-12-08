@@ -15,6 +15,7 @@ import os
 import sys
 import random
 import json
+import re
 from datetime import datetime, timedelta
 import math
 from typing import Dict, Optional
@@ -181,7 +182,7 @@ def import_airports(db, filepath):
         iata = row.get("IATA", "")
         
         # Only add if has valid IATA code
-        if not iata or str(iata).lower() in ["", "nan", "none"]:
+        if not iata or str(iata).lower() in ["", "nan", "none", "\\n", "n"]:
             continue
             
         airport = {
@@ -297,9 +298,61 @@ def import_flights(db, filepath, data_dir: Optional[str] = None, chunk_size: int
 
         # Detect schema
         kaggle_mode = "ORIGIN_AIRPORT" in chunk.columns and "DESTINATION_AIRPORT" in chunk.columns
+        expedia_mode = "startingAirport" in chunk.columns and "destinationAirport" in chunk.columns
 
         for row in chunk.itertuples(index=False):
-            if kaggle_mode:
+            if expedia_mode:
+                # Expedia/IQR flights_500k.csv format
+                origin_code = str(getattr(row, "startingAirport", "")).upper()
+                dest_code = str(getattr(row, "destinationAirport", "")).upper()
+                origin_city = airport_lookup.get(origin_code, {}).get("city", origin_code)
+                dest_city = airport_lookup.get(dest_code, {}).get("city", dest_code)
+
+                # Parse airline from segmentsAirlineName (may have || for connections)
+                airline_raw = str(getattr(row, "segmentsAirlineName", "Unknown"))
+                airline = airline_raw.split("||")[0] if airline_raw else "Unknown"
+
+                flight_number = None  # Not available in this format
+
+                # Use totalFare for price
+                price = _safe_float(getattr(row, "totalFare", 0), 150.0)
+                if price <= 0:
+                    price = _safe_float(getattr(row, "baseFare", 0), 150.0)
+
+                distance = _safe_float(getattr(row, "totalTravelDistance", 0), 0.0)
+
+                # Parse duration from ISO 8601 format (e.g., "PT2H29M")
+                duration_str = str(getattr(row, "travelDuration", "PT2H"))
+                duration = 2.0  # default 2 hours
+                if duration_str.startswith("PT"):
+                    hours_match = re.search(r'(\d+)H', duration_str)
+                    mins_match = re.search(r'(\d+)M', duration_str)
+                    hours = int(hours_match.group(1)) if hours_match else 0
+                    mins = int(mins_match.group(1)) if mins_match else 0
+                    duration = hours + mins / 60.0
+
+                # Stops - isNonStop field
+                is_nonstop = getattr(row, "isNonStop", False)
+                if isinstance(is_nonstop, str):
+                    is_nonstop = is_nonstop.lower() == "true"
+                stops = 0 if is_nonstop else 1
+
+                # Seats remaining
+                available_seats = int(_safe_float(getattr(row, "seatsRemaining", 5), 5))
+                if available_seats <= 0:
+                    available_seats = random.randint(1, 10)
+
+                # Refundable
+                is_refundable = getattr(row, "isRefundable", False)
+                if isinstance(is_refundable, str):
+                    is_refundable = is_refundable.lower() == "true"
+
+                departure_time = getattr(row, "segmentsDepartureTimeRaw", None)
+                arrival_time = getattr(row, "segmentsArrivalTimeRaw", None)
+                cabin = str(getattr(row, "segmentsCabinCode", "coach")).capitalize()
+                days_left = random.randint(1, 30)
+
+            elif kaggle_mode:
                 origin_code = str(getattr(row, "ORIGIN_AIRPORT", "")).upper()
                 dest_code = str(getattr(row, "DESTINATION_AIRPORT", "")).upper()
                 origin_city = airport_lookup.get(origin_code, {}).get("city", "")
@@ -720,7 +773,8 @@ def main():
     
     # File paths
     airports_file = os.path.join(DATA_DIR, "airports.csv")
-    flights_file = os.path.join(DATA_DIR, "kaggle", "flight_delays", "flights.csv")
+    # Use flights_500k.csv (US flights with 100+ airports) instead of Indian dataset
+    flights_file = os.path.join(DATA_DIR, "flights_500k.csv")
     hotels_file = os.path.join(DATA_DIR, "hotel_booking.csv")
     
     # Import data

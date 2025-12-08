@@ -77,6 +77,27 @@ pool.getConnection()
   .then(connection => {
     console.log('✅ MySQL database connected');
     connection.release();
+
+    // Ensure seed users have valid bcrypt hashes (avoids stale placeholder hashes from SQL seed)
+    (async () => {
+      try {
+        const seedUsers = [
+          { userId: '123-45-6789', password: process.env.ADMIN_SEED_PASSWORD || 'Admin123!' },
+          { userId: '987-65-4321', password: process.env.USER_SEED_PASSWORD || 'User123!' }
+        ];
+
+        for (const seed of seedUsers) {
+          const hash = await bcrypt.hash(seed.password, 10);
+          await pool.execute(
+            'UPDATE users SET password_hash = ? WHERE user_id = ?',
+            [hash, seed.userId]
+          );
+        }
+        console.log('✅ Seed user hashes refreshed');
+      } catch (seedErr) {
+        console.warn('⚠️  Could not refresh seed user hashes:', seedErr.message);
+      }
+    })();
   })
   .catch(err => {
     console.error('❌ MySQL connection failed:', err);

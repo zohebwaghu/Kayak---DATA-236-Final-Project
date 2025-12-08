@@ -96,6 +96,12 @@ const billingPool = mysql.createPool({
 let mongoDb;
 const mongoClient = new MongoClient(process.env.MONGO_URI || 'mongodb://localhost:27017');
 
+// Helper: primary analytics collection (new ingestion writes to analytics_events)
+const getAnalyticsCollection = () => {
+  if (!mongoDb) return null;
+  return mongoDb.collection('analytics_events');
+};
+
 (async () => {
   try {
     await mongoClient.connect();
@@ -702,6 +708,39 @@ app.get('/billing/:billingId', async (req, res) => {
 // ==================== ANALYTICS ENDPOINTS ====================
 
 /**
+ * POST /api/v1/admin/analytics/events
+ * Lightweight ingestion for UI/gateway click and view events.
+ * Expects JSON: { type: 'page_view'|'listing_click'|'least_seen'|'review', userId?, listingId?, page?, section?, meta? }
+ */
+app.post('/analytics/events', async (req, res) => {
+  try {
+    if (!mongoDb) {
+      return res.status(503).json(createErrorResponse(503, 'Service Unavailable', 'Database not connected', req.path));
+    }
+
+    const event = {
+      ...req.body,
+      userId: req.body.userId || req.headers['x-user-id'] || null,
+      user_id: req.body.userId || req.headers['x-user-id'] || null, // legacy field name
+      page: req.body.page || req.body.path || req.body.section || null,
+      section: req.body.section || null,
+      listingId: req.body.listingId || req.body.listing_id || null,
+      listingType: req.body.listingType || req.body.listing_type || null,
+      city: req.body.city || null,
+      state: req.body.state || null,
+      timestamp: new Date(),
+      createdAt: new Date()
+    };
+
+    await mongoDb.collection('analytics_events').insertOne(event);
+    res.status(201).json({ message: 'Event recorded', id: event._id });
+  } catch (error) {
+    console.error('Error recording analytics event:', error);
+    res.status(500).json(createErrorResponse(500, 'Internal Server Error', 'Failed to record event', req.path));
+  }
+});
+
+/**
  * GET /api/v1/admin/analytics/revenue/top-properties
  * Top 10 properties with revenue per year
  */
@@ -818,7 +857,7 @@ app.get('/analytics/clicks/page', async (req, res) => {
       return res.status(503).json(createErrorResponse(503, 'Service Unavailable', 'MongoDB not connected', req.path));
     }
 
-    const logsCollection = mongoDb.collection('logs');
+    const logsCollection = getAnalyticsCollection() || mongoDb.collection('logs');
 
     // Aggregate clicks by page
     const pipeline = [
@@ -861,7 +900,7 @@ app.get('/analytics/clicks/listings', async (req, res) => {
       return res.status(503).json(createErrorResponse(503, 'Service Unavailable', 'MongoDB not connected', req.path));
     }
 
-    const logsCollection = mongoDb.collection('logs');
+    const logsCollection = getAnalyticsCollection() || mongoDb.collection('logs');
 
     const pipeline = [
       { $match: { type: 'listing_click', listingId: { $exists: true } } },
@@ -904,7 +943,7 @@ app.get('/analytics/least-seen', async (req, res) => {
       return res.status(503).json(createErrorResponse(503, 'Service Unavailable', 'MongoDB not connected', req.path));
     }
 
-    const logsCollection = mongoDb.collection('logs');
+    const logsCollection = getAnalyticsCollection() || mongoDb.collection('logs');
 
     const pipeline = [
       { $match: { type: 'page_view' } },
@@ -991,7 +1030,7 @@ app.get('/analytics/trace/user', async (req, res) => {
       return res.status(503).json(createErrorResponse(503, 'Service Unavailable', 'MongoDB not connected', req.path));
     }
 
-    const logsCollection = mongoDb.collection('logs');
+    const logsCollection = getAnalyticsCollection() || mongoDb.collection('logs');
     let query = {};
 
     if (userId) {
@@ -1042,7 +1081,7 @@ app.get('/analytics/user-journey', async (req, res) => {
       return res.status(503).json(createErrorResponse(503, 'Service Unavailable', 'MongoDB not connected', req.path));
     }
 
-    const logsCollection = mongoDb.collection('logs');
+    const logsCollection = getAnalyticsCollection() || mongoDb.collection('logs');
 
     // Aggregate user journeys from page views
     const pipeline = [
@@ -1110,7 +1149,7 @@ app.get('/analytics/cohorts', async (req, res) => {
     // Get activity from MongoDB for these cohorts
     let cohortActivity = [];
     if (mongoDb) {
-      const logsCollection = mongoDb.collection('logs');
+      const logsCollection = getAnalyticsCollection() || mongoDb.collection('logs');
       cohortActivity = await logsCollection.aggregate([
         { $match: { type: { $in: ['page_view', 'booking', 'search'] } } },
         {
@@ -1182,4 +1221,3 @@ process.on('SIGINT', async () => {
   await billingPool.end();
   process.exit(0);
 });
-

@@ -157,7 +157,10 @@ const generateCacheKey = (listingType, query) => {
  */
 const invalidateCache = async (listingType) => {
   try {
-    const pattern = `search:${listingType}*`;
+    // listingType events come in singular form (hotel/flight/car)
+    // but our cache keys use plural collection names (hotels/flights/cars)
+    const plural = listingType.endsWith('s') ? listingType : `${listingType}s`;
+    const pattern = `search:${plural}*`;
     let cursor = '0';
     let deletedCount = 0;
 
@@ -362,11 +365,13 @@ const handleFlightsSearch = async (req, res) => {
       );
     }
 
+    // NOTE: Frontend currently sends departureTimeOfDay/arrivalTimeOfDay.
+    // To keep backward compatibility, we alias those to *_Min/Max here.
     const {
       origin,
       destination,
       departureDate,
-      returnDate,
+      returnDate, // was previously missing → return-date filter never applied
       minPrice,
       maxPrice,
       airline,
@@ -376,9 +381,17 @@ const handleFlightsSearch = async (req, res) => {
       departureTimeMax,
       arrivalTimeMin,
       arrivalTimeMax,
+      departureTimeOfDay,
+      arrivalTimeOfDay,
       page = 1,
       limit = 20
     } = req.query;
+
+    // Alias single time-of-day values to min/max if provided
+    const depMin = departureTimeMin || departureTimeOfDay || req.query.departureTime || null;
+    const depMax = departureTimeMax || null;
+    const arrMin = arrivalTimeMin || arrivalTimeOfDay || req.query.arrivalTime || null;
+    const arrMax = arrivalTimeMax || null;
 
     const cacheKey = generateCacheKey('flights', req.query);
 
@@ -433,6 +446,22 @@ const handleFlightsSearch = async (req, res) => {
       ];
     }
 
+    // Optional return-date filter (use arrivalDate/arrival_date)
+    if (returnDate) {
+      const returnDateString = returnDate.split('T')[0];
+      const [ry, rm, rd] = returnDateString.split('-').map(Number);
+      const returnStart = new Date(Date.UTC(ry, rm - 1, rd, 0, 0, 0, 0));
+      const returnEnd = new Date(Date.UTC(ry, rm - 1, rd, 23, 59, 59, 999));
+
+      query.$and = query.$and || [];
+      query.$and.push({
+        $or: [
+          { arrivalDate: { $gte: returnStart, $lte: returnEnd } },
+          { arrival_date: returnDateString }
+        ]
+      });
+    }
+
     if (minPrice || maxPrice) {
       query.price = {};
       if (minPrice) query.price.$gte = parseFloat(minPrice);
@@ -444,15 +473,15 @@ const handleFlightsSearch = async (req, res) => {
 
     // SPEC REQUIREMENT: Time-based filters for flights
     // Time format expected: "HH:MM" (e.g., "06:00", "22:00")
-    if (departureTimeMin || departureTimeMax) {
+    if (depMin || depMax) {
       query.departure_time = {};
-      if (departureTimeMin) query.departure_time.$gte = departureTimeMin;
-      if (departureTimeMax) query.departure_time.$lte = departureTimeMax;
+      if (depMin) query.departure_time.$gte = depMin;
+      if (depMax) query.departure_time.$lte = depMax;
     }
-    if (arrivalTimeMin || arrivalTimeMax) {
+    if (arrMin || arrMax) {
       query.arrival_time = {};
-      if (arrivalTimeMin) query.arrival_time.$gte = arrivalTimeMin;
-      if (arrivalTimeMax) query.arrival_time.$lte = arrivalTimeMax;
+      if (arrMin) query.arrival_time.$gte = arrMin;
+      if (arrMax) query.arrival_time.$lte = arrMax;
     }
 
     // ===== EXECUTE QUERY =====
@@ -463,7 +492,8 @@ const handleFlightsSearch = async (req, res) => {
     const [flights, total] = await Promise.all([
       db.collection('flights')
         .find(query)
-        .sort({ price: 1, departure_time: 1 })
+        // Use canonical fields that ingesters populate
+        .sort({ price: 1, departureDate: 1, departure_time: 1 })
         .skip(skip)
         .limit(limitNum)
         .toArray(),
@@ -548,6 +578,23 @@ const handleCarsSearch = async (req, res) => {
 
     if (location) query.location = new RegExp(location.trim(), 'i');
     if (carType) query.carType = new RegExp(carType.trim(), 'i');
+
+    // Optional availability filter: include docs with matching window OR no availability fields
+    if (pickupDate || returnDate) {
+      const start = pickupDate ? new Date(pickupDate) : null;
+      const end = returnDate ? new Date(returnDate) : null;
+      const availabilityClause = {};
+      if (start) availabilityClause.$and = (availabilityClause.$and || []).concat([
+        { availableFrom: { $lte: start } }
+      ]);
+      if (end) availabilityClause.$and = (availabilityClause.$and || []).concat([
+        { availableTo: { $gte: end } }
+      ]);
+
+      query.$or = [ availabilityClause ];
+      // allow records without explicit availability metadata
+      query.$or.push({ availableFrom: { $exists: false } });
+    }
 
     if (minPrice || maxPrice) {
       query.pricePerDay = {};
