@@ -150,7 +150,7 @@ services:
       dockerfile: Dockerfile
     container_name: kayak-frontend
     ports:
-      - "3007:80"
+      - "3002:80"
     environment:
       # If the frontend expects a base URL env, set it here (adjust if needed)
       # REACT_APP_API_BASE_URL: http://localhost:3000
