@@ -132,10 +132,10 @@ const AdminDashboardPage = () => {
 
       // Use real data from API, only use fallback if explicitly empty AND no error
       // Check if responses are successful (status 200) but empty
-      const hasRealData = topPropsRes.data?.data?.length > 0 || 
-                         cityRes.data?.data?.length > 0 || 
-                         sellersRes.data?.data?.length > 0;
-      
+      const hasRealData = topPropsRes.data?.data?.length > 0 ||
+        cityRes.data?.data?.length > 0 ||
+        sellersRes.data?.data?.length > 0;
+
       // Only use fallback for analytics that require bookings/invoices (which may not exist yet)
       // For data that should come from datasets (listings), show empty state instead
       setTopProperties(topPropsRes.data?.data?.length > 0 ? topPropsRes.data.data : []);
@@ -145,7 +145,7 @@ const AdminDashboardPage = () => {
       setListingClicks(listingRes.data?.data?.length > 0 ? listingRes.data.data : []);
       setLeastSeen(leastRes.data?.data?.length > 0 ? leastRes.data.data : []);
       setReviews(reviewsRes.data?.data?.length > 0 ? reviewsRes.data.data : []);
-      
+
       // Show info message if no real data found
       if (!hasRealData) {
         setStatusMessage('No analytics data found. Analytics require bookings and invoices. Listings data is available in the Listings Management tab.');
@@ -175,7 +175,7 @@ const AdminDashboardPage = () => {
 
       const res = await api.get('/admin/listings', { params });
       const listingsData = res.data.data || [];
-      
+
       if (listingsData.length === 0) {
         // If no listings found, try fetching from search service directly
         try {
@@ -221,7 +221,7 @@ const AdminDashboardPage = () => {
 
       const res = await api.get('/admin/users', { params }).catch(() => ({ data: { data: [] } }));
       const usersData = res.data.data || [];
-      
+
       // Use fallback data if API returns empty array
       if (usersData.length === 0 && !userSearch) {
         setUsers(getFallbackUsers());
@@ -264,7 +264,7 @@ const AdminDashboardPage = () => {
 
       const res = await api.get('/admin/billing', { params }).catch(() => ({ data: { data: [] } }));
       const billsData = res.data.data || [];
-      
+
       // Use fallback data if API returns empty array and no filters applied
       if (billsData.length === 0 && !billDate && !billMonth && !billYear) {
         setBills(getFallbackBills());
@@ -475,23 +475,14 @@ const AdminDashboardPage = () => {
               <h3>City-wise Revenue (Year {new Date().getFullYear()})</h3>
               {cityRevenue.length > 0 ? (
                 <ResponsiveContainer width="100%" height={300}>
-                  <PieChart>
-                    <Pie
-                      data={cityRevenue}
-                      dataKey="total_revenue"
-                      nameKey="city"
-                      cx="50%"
-                      cy="50%"
-                      outerRadius={100}
-                      label
-                    >
-                      {cityRevenue.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip />
+                  <BarChart data={cityRevenue} layout="vertical" margin={{ top: 5, right: 30, left: 40, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis type="number" scale="log" domain={['auto', 'auto']} allowDataOverflow />
+                    <YAxis dataKey="city" type="category" width={100} />
+                    <Tooltip formatter={(value) => `$${value}`} />
                     <Legend />
-                  </PieChart>
+                    <Bar dataKey="total_revenue" fill="#82ca9d" name="Revenue ($)" />
+                  </BarChart>
                 </ResponsiveContainer>
               ) : (
                 <div className="text-center p-4 border rounded">
@@ -707,6 +698,49 @@ const AdminDashboardPage = () => {
                           required
                         />
                       </div>
+                      <div className="mb-3">
+                        <label className="form-label">Price</label>
+                        <input
+                          type="number"
+                          className="form-control"
+                          value={listingFormData.price || ''}
+                          onChange={(e) => setListingFormData({ ...listingFormData, price: e.target.value })}
+                          required
+                        />
+                      </div>
+                      <div className="row">
+                        <div className="col-md-6 mb-3">
+                          <label className="form-label">Departure Time</label>
+                          <input
+                            type="datetime-local"
+                            className="form-control"
+                            value={listingFormData.departureTime || ''}
+                            onChange={(e) => setListingFormData({ ...listingFormData, departureTime: e.target.value })}
+                            required
+                          />
+                        </div>
+                        <div className="col-md-6 mb-3">
+                          <label className="form-label">Arrival Time</label>
+                          <input
+                            type="datetime-local"
+                            className="form-control"
+                            value={listingFormData.arrivalTime || ''}
+                            onChange={(e) => setListingFormData({ ...listingFormData, arrivalTime: e.target.value })}
+                            required
+                          />
+                        </div>
+                      </div>
+                      <div className="mb-3">
+                        <label className="form-label">Duration (hours)</label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          className="form-control"
+                          value={listingFormData.duration || ''}
+                          onChange={(e) => setListingFormData({ ...listingFormData, duration: e.target.value })}
+                          required
+                        />
+                      </div>
                     </>
                   )}
                   {listingType === 'cars' && (
@@ -757,7 +791,7 @@ const AdminDashboardPage = () => {
             <div className="alert alert-info">
               <h5>No listings found</h5>
               <p>
-                {listingSearch 
+                {listingSearch
                   ? `No ${listingType} match your search "${listingSearch}". Try a different search term.`
                   : `No ${listingType} found in the database. Please ensure data has been imported using the import script.`
                 }
@@ -980,7 +1014,7 @@ const AdminDashboardPage = () => {
             <div className="alert alert-info">
               <h5>No users found</h5>
               <p>
-                {userSearch 
+                {userSearch
                   ? `No users match your search "${userSearch}". Try a different search term.`
                   : 'No users found in the database. Please ensure data has been imported using the import script.'
                 }
@@ -1173,12 +1207,11 @@ const AdminDashboardPage = () => {
                       <td>{bill.first_name} {bill.last_name}</td>
                       <td>${bill.amount?.toFixed(2) || bill.amount || '0.00'}</td>
                       <td>
-                        <span className={`badge ${
-                          bill.status === 'paid' ? 'bg-success' : 
-                          bill.status === 'pending' ? 'bg-warning' : 
-                          bill.status === 'cancelled' ? 'bg-danger' : 
-                          'bg-secondary'
-                        }`}>
+                        <span className={`badge ${bill.status === 'paid' ? 'bg-success' :
+                          bill.status === 'pending' ? 'bg-warning' :
+                            bill.status === 'cancelled' ? 'bg-danger' :
+                              'bg-secondary'
+                          }`}>
                           {bill.status || 'pending'}
                         </span>
                       </td>

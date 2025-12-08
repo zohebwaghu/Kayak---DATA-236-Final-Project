@@ -213,6 +213,16 @@ CITY_TO_AIRPORT = {
     "kolkata": "CCU",
     "hyderabad": "HYD",
     "new delhi": "DEL",
+    "london": "LHR",
+    "san francisco": "SFO",
+    "new york": "JFK",
+    "nyc": "JFK",
+    "los angeles": "LAX",
+    "la": "LAX",
+    "paris": "CDG",
+    "tokyo": "HND",
+    "dubai": "DXB",
+    "singapore": "SIN",
 }
 
 AIRPORT_TO_CITY = {v: k.title() for k, v in CITY_TO_AIRPORT.items()}
@@ -245,8 +255,10 @@ class MRKLTools:
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "destination": {"type": "string", "description": "Destination city or airport code"},
-                            "origin": {"type": "string", "description": "Origin city or airport code"},
+                            "destination": {"type": "string", "description": "Destination city name"},
+                            "destination_code": {"type": "string", "description": "3-letter IATA airport code (e.g. LHR, MUC)"},
+                            "origin": {"type": "string", "description": "Origin city name"},
+                            "origin_code": {"type": "string", "description": "3-letter IATA airport code"},
                             "budget": {"type": "number", "description": "Maximum total budget"},
                             "preferences": {"type": "array", "items": {"type": "string"}, "description": "Preferences like pet-friendly, breakfast"}
                         },
@@ -335,13 +347,23 @@ class MRKLTools:
         destination: str,
         origin: Optional[str] = None,
         budget: Optional[float] = None,
-        preferences: Optional[List[str]] = None
+        preferences: Optional[List[str]] = None,
+        destination_code: Optional[str] = None,
+        origin_code: Optional[str] = None
     ) -> List[Bundle]:
         """Search for flight + hotel bundles. Journey 1: Tell me what I should book"""
-        logger.info(f"search_bundles: dest={destination}, origin={origin}, budget={budget}")
+        logger.info(f"search_bundles: dest={destination} ({destination_code}), origin={origin} ({origin_code})")
         
-        dest_code = self._normalize_city(destination)
-        origin_code = self._normalize_city(origin) if origin else None
+        # Use provided code OR normalize city
+        dest_code = destination_code or self._normalize_city(destination)
+        
+        # Resolve origin code
+        if origin_code:
+            final_origin_code = origin_code
+        elif origin:
+            final_origin_code = self._normalize_city(origin)
+        else:
+            final_origin_code = None
         
         if not dest_code:
             return []
@@ -350,12 +372,17 @@ class MRKLTools:
         flights, hotels = [], []
         if deals_cache:
             try:
+                # Attempt to resolve full city name for fallback (e.g. LHR -> London)
+                # If map fails, use the original destination name provided by LLM (e.g. "Munich")
+                dest_city = AIRPORT_TO_CITY.get(dest_code, destination)
+                
                 deals_result = deals_cache.get_deals_for_bundle(
                     destination=dest_code,
-                    origin=origin_code,
+                    origin=final_origin_code,
                     max_flight_price=budget * 0.6 if budget else None,
                     max_hotel_price=budget * 0.4 / 3 if budget else None,
-                    tags=preferences
+                    tags=preferences,
+                    alt_destination=dest_city
                 )
                 # Handle both dict and other return types
                 if isinstance(deals_result, dict):
@@ -368,7 +395,7 @@ class MRKLTools:
         
         bundles = self._build_bundles(flights, hotels, budget, preferences or [], 3)
         self._user_bundles_cache[self.user_id] = bundles
-        self._persist_bundles(bundles, origin_code, dest_code, budget)
+        self._persist_bundles(bundles, final_origin_code, dest_code, budget)
         
         return bundles
 
@@ -957,9 +984,13 @@ class ConciergeAgent:
         openai_key = os.getenv("OPENAI_API_KEY", "")
         if OPENAI_AVAILABLE and openai_key:
             try:
-                self.llm_client = OpenAI(api_key=openai_key)
-                self.llm_model = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
-                self.embedding_model = "text-embedding-3-small"  # OpenAI embedding model
+                self.llm_client = OpenAI(
+                    api_key=openai_key,
+                    base_url=os.getenv("OPENAI_BASE_URL")  # Support Base URL for Gemini/LocalAI
+                )
+                # Initialize LLM (Gemini)
+                self.llm_model = os.getenv("OPENAI_MODEL", "gemini-1.5-flash")
+                self.embedding_model = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
                 self.llm_type = "openai"
                 logger.info(f"Using OpenAI: {self.llm_model}, Embeddings: {self.embedding_model}")
                 return
@@ -1138,11 +1169,17 @@ Return ONLY valid JSON with these fields:
 {
   "action": "search" | "watch" | "quote" | "analyze" | "policy" | "confirm" | null,
   "destination": "city name" | null,
+  "destination_code": "IATA code (e.g. LHR, MUC)" | null,
   "origin": "city name" | null,
+  "origin_code": "IATA code" | null,
   "budget": number | null,
   "preferences": ["pet-friendly", "breakfast", "direct", "near-transit"],
   "option_number": 1 | 2 | 3 | null
 }
+
+Rules:
+1. Always normalize city names to standard English spelling (e.g. "Banglore" -> "Bangalore", "Mombai" -> "Mumbai").
+2. Correct typos in destination/origin names.
 
 Action meanings:
 - search: find flights/hotels/bundles
@@ -1153,7 +1190,7 @@ Action meanings:
 - confirm: proceed with booking
 
 Examples:
-"Find trips from Delhi to Mumbai with breakfast" -> {"action": "search", "destination": "Mumbai", "origin": "Delhi", "budget": null, "preferences": ["breakfast"], "option_number": null}
+"Find trips from Delhi to Mumbai with breakfast" -> {"action": "search", "destination": "Mumbai", "destination_code": "BOM", "origin": "Delhi", "origin_code": "DEL", "budget": null, "preferences": ["breakfast"], "option_number": null}
 "Is this a good deal?" -> {"action": "analyze", "destination": null, "origin": null, "budget": null, "preferences": [], "option_number": null}
 "Watch option 1 if price drops below $2000" -> {"action": "watch", "destination": null, "origin": null, "budget": 2000, "preferences": [], "option_number": 1}
 "Can I bring pets?" -> {"action": "policy", "destination": null, "origin": null, "budget": null, "preferences": ["pet-friendly"], "option_number": null}
@@ -1213,7 +1250,9 @@ Examples:
             intent = {
                 "action": llm_intent.get("action"),
                 "destination": llm_intent.get("destination"),
+                "destination_code": llm_intent.get("destination_code"),
                 "origin": llm_intent.get("origin"),
+                "origin_code": llm_intent.get("origin_code"),
                 "budget": llm_intent.get("budget"),
                 "preferences": llm_intent.get("preferences", []),
                 "bundle_id": None,
@@ -1230,11 +1269,12 @@ Examples:
         msg_lower = message.lower()
         
         # Detect action - order matters! More specific first
+        # Detect action - order matters! More specific first
         if any(w in msg_lower for w in ["watch", "alert", "notify", "track", "monitor"]):
             intent["action"] = "watch"
         elif any(w in msg_lower for w in ["confirm", "book it", "yes proceed", "complete booking"]):
             intent["action"] = "confirm"
-        elif any(w in msg_lower for w in ["full quote", "total cost", "how much total", "get quote"]):
+        elif any(w in msg_lower for w in ["quote", "cost", "price breakdown", "how much is option"]):
             intent["action"] = "quote"
         elif any(w in msg_lower for w in ["analyze", "good deal", "worth it", "should i book"]):
             intent["action"] = "analyze"
@@ -1382,6 +1422,8 @@ Examples:
             bundles = self.tools.search_bundles(
                 destination=intent.get("destination", "Mumbai"),
                 origin=intent.get("origin"),
+                destination_code=intent.get("destination_code"),
+                origin_code=intent.get("origin_code"),
                 budget=intent.get("budget"),
                 preferences=intent.get("preferences")
             )

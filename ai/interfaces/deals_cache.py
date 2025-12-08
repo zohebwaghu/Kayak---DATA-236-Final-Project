@@ -85,7 +85,7 @@ class Deal:
 
 class DealsCache:
     """
-    Cache for storing and querying deals.
+    Cache for storing and retrieving deals.
     Primary: SQLite via SQLModel (Assignment requirement)
     Fallback: MongoDB
     """
@@ -131,13 +131,14 @@ class DealsCache:
                 self.mongo_client = None
                 self.mongo_db = None
 
-        # Load deals - prefer SQLite (Assignment requirement)
-        if self.use_sqlite:
-            logger.info("Loading deals from SQLite (SQLModel) - Assignment requirement")
-            self._load_deals_from_sqlite()
-        else:
-            logger.info("Loading deals from MongoDB (SQLite not available)")
+        # Load deals
+        if self.mongo_db is not None:
+            logger.info("Loading deals from MongoDB (Primary Persistence)")
             self._load_deals_from_mongo()
+            
+        if self.use_sqlite and not self._deals:
+             logger.info("Loading deals from SQLite (SQLModel) - Fallback/Assignment requirement")
+             self._load_deals_from_sqlite()
 
     def _load_deals_from_sqlite(self):
         """Load flights and hotels from SQLite and convert to deals"""
@@ -156,7 +157,7 @@ class DealsCache:
                 for flight in flights:
                     deal = self._sqlite_flight_to_deal(flight)
                     if deal:
-                        self.add_deal(deal)
+                        self.add_deal(deal, persist=False)
                 
                 # Load hotels
                 hotels = session.exec(select(HotelDeal)).all()
@@ -165,7 +166,7 @@ class DealsCache:
                 for hotel in hotels:
                     deal = self._sqlite_hotel_to_deal(hotel)
                     if deal:
-                        self.add_deal(deal)
+                        self.add_deal(deal, persist=False)
             
             logger.info(f"Loaded {len(self._deals)} deals from SQLite")
             
@@ -182,7 +183,6 @@ class DealsCache:
         """Convert SQLModel FlightDeal to Deal"""
         try:
             tags = json.loads(flight.tags) if flight.tags else []
-            
             return Deal(
                 deal_id=f"flight_{flight.flight_id}",
                 listing_type="flight",
@@ -219,14 +219,13 @@ class DealsCache:
         try:
             tags = json.loads(hotel.tags) if hotel.tags else []
             amenities = json.loads(hotel.amenities) if hotel.amenities else []
-            
             return Deal(
                 deal_id=f"hotel_{hotel.hotel_id}",
                 listing_type="hotel",
                 listing_id=hotel.hotel_id,
                 name=hotel.name,
                 origin=None,
-                destination=hotel.city_code,  # Use city_code for matching
+                destination=hotel.city_code,
                 current_price=hotel.price_per_night,
                 original_price=hotel.avg_30d_price,
                 avg_30d_price=hotel.avg_30d_price,
@@ -242,13 +241,13 @@ class DealsCache:
                     "star_rating": hotel.star_rating,
                     "city": hotel.city,
                     "city_code": hotel.city_code,
-                    "neighbourhood": hotel.neighbourhood,  # Assignment requirement!
+                    "neighbourhood": hotel.neighbourhood,
                     "amenities": amenities,
                     "rating": hotel.rating,
                     "is_refundable": hotel.is_refundable,
                     "pet_friendly": hotel.pet_friendly,
                     "breakfast_included": hotel.breakfast_included,
-                    "near_transit": hotel.near_transit,  # Assignment requirement!
+                    "near_transit": hotel.near_transit,
                     "parking_available": hotel.parking_available
                 }
             )
@@ -269,20 +268,35 @@ class DealsCache:
             flights_count = flights_collection.count_documents({})
             logger.info(f"Loading {flights_count} flights from MongoDB")
 
-            for flight in flights_collection.find():
+            for flight in flights_collection.find().limit(2000):
                 deal = self._flight_to_deal(flight)
                 if deal:
-                    self.add_deal(deal)
+                    self.add_deal(deal, persist=False)
 
-            # Load hotels
+            # Load hotels - PRIORITIZE DEMO CITIES to avoid 0 results
             hotels_collection = self.mongo_db["hotels"]
-            hotels_count = hotels_collection.count_documents({})
-            logger.info(f"Loading {hotels_count} hotels from MongoDB")
-
-            for hotel in hotels_collection.find():
+            
+            demo_cities = ["LHR", "London", "NYC", "New York", "BOM", "Mumbai", "SFO", "San Francisco", "PAR", "Paris", "CDG", "DXB", "Dubai", "TYO", "Tokyo", "SIN", "Singapore"]
+            
+            # Query 1: Mandatory Load for Demo Cities
+            logger.info("Loading Priority Hotels (Demo Cities)...")
+            priority_hotels = hotels_collection.find({"$or": [{"city_code": {"$in": demo_cities}}, {"city": {"$in": demo_cities}}]})
+            count = 0
+            for hotel in priority_hotels:
                 deal = self._hotel_to_deal(hotel)
                 if deal:
-                    self.add_deal(deal)
+                    self.add_deal(deal, persist=False)
+                    count += 1
+            logger.info(f"Loaded {count} Priority Hotels")
+
+            # Query 2: Fill remaining with random hotels up to 2000 total (to save RAM)
+            logger.info("Loading standard hotels (Limited)...")
+            remaining_limit = max(0, 2000 - count)
+            if remaining_limit > 0:
+                 for hotel in hotels_collection.find().limit(remaining_limit):
+                    deal = self._hotel_to_deal(hotel)
+                    if deal and deal.deal_id not in self._deals:
+                        self.add_deal(deal, persist=False)
 
             logger.info(f"Loaded {len(self._deals)} deals from MongoDB")
 
@@ -291,7 +305,6 @@ class DealsCache:
             self._init_sample_deals()
 
     def _flight_to_deal(self, flight: Dict) -> Optional[Deal]:
-        """Convert MongoDB flight document to Deal"""
         try:
             price = float(flight.get("price", 0))
             avg_30d_price = float(flight.get("avg_30d_price", price * 1.15))
@@ -311,10 +324,14 @@ class DealsCache:
                 if has_promo:
                     tags.append("promo")
 
+            fid = flight.get('flight_id')
+            if not fid:
+                fid = str(flight.get('_id', ''))
+            
             return Deal(
-                deal_id=f"flight_{flight.get('flight_id', '')}",
+                deal_id=f"flight_{fid}",
                 listing_type="flight",
-                listing_id=flight.get("flight_id", ""),
+                listing_id=fid,
                 name=f"{flight.get('origin', 'XXX')} → {flight.get('destination', 'XXX')} ({flight.get('airline', 'Airline')})",
                 origin=flight.get("origin", ""),
                 destination=flight.get("destination", ""),
@@ -343,7 +360,6 @@ class DealsCache:
             return None
 
     def _hotel_to_deal(self, hotel: Dict) -> Optional[Deal]:
-        """Convert MongoDB hotel document to Deal"""
         try:
             price = float(hotel.get("price_per_night", 0))
             avg_30d_price = float(hotel.get("avg_30d_price", price * 1.15))
@@ -361,10 +377,14 @@ class DealsCache:
             if isinstance(amenities, str):
                 amenities = json.loads(amenities)
 
+            hid = hotel.get('hotel_id')
+            if not hid:
+                hid = str(hotel.get('_id', ''))
+
             return Deal(
-                deal_id=f"hotel_{hotel.get('hotel_id', '')}",
+                deal_id=f"hotel_{hid}",
                 listing_type="hotel",
-                listing_id=hotel.get("hotel_id", ""),
+                listing_id=hid,
                 name=hotel.get("name", "Hotel"),
                 origin=None,
                 destination=hotel.get("city_code", hotel.get("city", "")),
@@ -398,7 +418,6 @@ class DealsCache:
             return None
 
     def _init_sample_deals(self):
-        """Initialize with sample deals if no database available"""
         logger.warning("Initializing with sample deals (no database)")
         
         sample_flights = [
@@ -442,38 +461,31 @@ class DealsCache:
         ]
         
         for deal in sample_flights + sample_hotels:
-            self.add_deal(deal)
+            self.add_deal(deal, persist=False)
 
     def _get_key(self, deal_id: str) -> str:
-        """Get Redis key for deal"""
         return f"deal:{deal_id}"
 
-    def add_deal(self, deal: Deal):
-        """Add a deal to cache"""
-        # Add to memory
+    def add_deal(self, deal: Deal, persist: bool = True):
         self._deals[deal.deal_id] = deal
 
-        # Index by destination
         if deal.destination:
             if deal.destination not in self._by_destination:
                 self._by_destination[deal.destination] = []
             if deal.deal_id not in self._by_destination[deal.destination]:
                 self._by_destination[deal.destination].append(deal.deal_id)
 
-        # Index by type
         if deal.listing_type not in self._by_type:
             self._by_type[deal.listing_type] = []
         if deal.deal_id not in self._by_type[deal.listing_type]:
             self._by_type[deal.listing_type].append(deal.deal_id)
 
-        # Index by tags
         for tag in deal.tags:
             if tag not in self._by_tag:
                 self._by_tag[tag] = []
             if deal.deal_id not in self._by_tag[tag]:
                 self._by_tag[tag].append(deal.deal_id)
 
-        # Add to Redis
         if self.redis_client:
             try:
                 self.redis_client.setex(
@@ -489,8 +501,25 @@ class DealsCache:
             except Exception as e:
                 logger.error(f"Redis add deal error: {e}")
 
+        if self.mongo_db is not None and persist:
+            try:
+                collection_name = "flights" if deal.listing_type == "flight" else "hotels"
+                deal_dict = deal.to_dict()
+                
+                if deal.listing_type == "flight" and not deal_dict.get("flight_id"):
+                    deal_dict["flight_id"] = deal.deal_id
+                elif deal.listing_type == "hotel" and not deal_dict.get("hotel_id"):
+                    deal_dict["hotel_id"] = deal.deal_id
+
+                self.mongo_db[collection_name].update_one(
+                    {"deal_id": deal.deal_id},
+                    {"$set": deal_dict},
+                    upsert=True
+                )
+            except Exception as e:
+                logger.error(f"MongoDB add deal error: {e}")
+
     def get_deal(self, deal_id: str) -> Optional[Deal]:
-        """Get a deal by ID"""
         if deal_id in self._deals:
             return self._deals[deal_id]
 
@@ -505,12 +534,10 @@ class DealsCache:
         return None
 
     def get_deals_by_type(self, listing_type: str) -> List[Deal]:
-        """Get all deals of a type"""
         deal_ids = self._by_type.get(listing_type, [])
         return [self._deals[did] for did in deal_ids if did in self._deals]
 
     def get_best_deals(self, limit: int = 10) -> List[Deal]:
-        """Get top deals by score"""
         all_deals = list(self._deals.values())
         all_deals.sort(key=lambda d: d.deal_score, reverse=True)
         return all_deals[:limit]
@@ -525,49 +552,46 @@ class DealsCache:
         tags: Optional[List[str]] = None,
         limit: int = 10
     ) -> List[Deal]:
-        """Search deals with filters"""
         candidates = set(self._deals.keys())
+        logger.info(f"Search Deals Start: {len(candidates)} total deals. Query: dest={destination}, orig={origin}")
 
-        # Filter by destination
         if destination:
             dest_deals = set(self._by_destination.get(destination, []))
             candidates = candidates.intersection(dest_deals) if dest_deals else set()
+            logger.info(f"After Dest ({destination}): {len(candidates)} candidates")
 
-        # Filter by type
         if listing_type:
             type_deals = set(self._by_type.get(listing_type, []))
             candidates = candidates.intersection(type_deals)
+            logger.info(f"After Type ({listing_type}): {len(candidates)} candidates")
 
-        # Filter by tags
         if tags:
             for tag in tags:
                 tag_deals = set(self._by_tag.get(tag, []))
                 if tag_deals:
                     candidates = candidates.intersection(tag_deals)
+            logger.info(f"After Tags ({tags}): {len(candidates)} candidates")
 
-        # Get deal objects and apply remaining filters
         results = []
         for deal_id in candidates:
             deal = self._deals.get(deal_id)
             if not deal:
                 continue
 
-            # Filter by origin (for flights)
             if origin and deal.listing_type == "flight":
                 if deal.origin != origin:
                     continue
 
-            # Filter by price
             if max_price and deal.current_price > max_price:
                 continue
 
-            # Filter by score
             if deal.deal_score < min_score:
                 continue
 
             results.append(deal)
-
-        # Sort by deal score
+        
+        logger.info(f"Search Deals End: {len(results)} results")
+        
         results.sort(key=lambda d: d.deal_score, reverse=True)
         return results[:limit]
 
@@ -577,13 +601,9 @@ class DealsCache:
         origin: Optional[str] = None,
         max_flight_price: Optional[float] = None,
         max_hotel_price: Optional[float] = None,
-        tags: Optional[List[str]] = None
+        tags: Optional[List[str]] = None,
+        alt_destination: Optional[str] = None
     ) -> Dict[str, List[Deal]]:
-        """
-        Get matching flights and hotels for bundle creation.
-        Returns diverse options: Best Value, Best Deal, Best Quality
-        """
-        # Get all matching flights
         all_flights = self.search_deals(
             destination=destination,
             origin=origin,
@@ -593,7 +613,6 @@ class DealsCache:
             limit=50
         )
         
-        # Get all matching hotels
         all_hotels = self.search_deals(
             destination=destination,
             listing_type="hotel",
@@ -602,31 +621,25 @@ class DealsCache:
             limit=50
         )
         
-        # If no hotels for destination, get any hotels with tags
-        if not all_hotels:
-            hotel_tags = [t for t in (tags or []) if t not in ["direct-flight", "no-redeye"]]
+        if not all_hotels and alt_destination:
+            logger.info(f"No hotels found for {destination}. Trying fallback: {alt_destination}")
             all_hotels = self.search_deals(
+                destination=alt_destination,
                 listing_type="hotel",
                 max_price=max_hotel_price,
-                tags=hotel_tags if hotel_tags else None,
+                tags=[t for t in (tags or []) if t not in ["direct-flight", "no-redeye"]],
                 limit=50
             )
+
+        if not all_hotels and destination:
+            logger.info(f"No hotels found for {destination} (or {alt_destination}). Returning empty list instead of global fallback.")
         
-        # Select diverse flights
         flights = self._select_diverse(all_flights, "flight")
-        
-        # Select diverse hotels
         hotels = self._select_diverse(all_hotels, "hotel")
         
         return {"flights": flights, "hotels": hotels}
     
     def _select_diverse(self, deals: List[Deal], deal_type: str) -> List[Deal]:
-        """
-        Select 3 diverse options:
-        1. Best Value (lowest price)
-        2. Best Deal (highest deal_score)
-        3. Best Quality (highest rating/stars)
-        """
         if not deals:
             return []
         
@@ -636,7 +649,6 @@ class DealsCache:
         selected = []
         selected_ids = set()
         
-        # 1. Best Value - lowest price
         by_price = sorted(deals, key=lambda d: d.current_price)
         for deal in by_price:
             if deal.deal_id not in selected_ids:
@@ -644,7 +656,6 @@ class DealsCache:
                 selected_ids.add(deal.deal_id)
                 break
         
-        # 2. Best Deal - highest deal_score
         by_score = sorted(deals, key=lambda d: d.deal_score, reverse=True)
         for deal in by_score:
             if deal.deal_id not in selected_ids:
@@ -652,7 +663,6 @@ class DealsCache:
                 selected_ids.add(deal.deal_id)
                 break
         
-        # 3. Best Quality
         if deal_type == "hotel":
             by_quality = sorted(deals, key=lambda d: (
                 d.metadata.get("star_rating", 0),
@@ -670,7 +680,6 @@ class DealsCache:
                 selected_ids.add(deal.deal_id)
                 break
         
-        # Fill remaining
         if len(selected) < 3:
             for deal in by_price:
                 if deal.deal_id not in selected_ids:
@@ -682,7 +691,6 @@ class DealsCache:
         return selected[:3]
 
     def remove_deal(self, deal_id: str):
-        """Remove a deal from cache"""
         deal = self._deals.get(deal_id)
         if not deal:
             return
@@ -713,7 +721,6 @@ class DealsCache:
                 self._by_tag[tag].remove(deal_id)
 
     def update_deal_price(self, deal_id: str, new_price: float) -> Optional[Deal]:
-        """Update a deal's price"""
         deal = self.get_deal(deal_id)
         if not deal:
             return None
@@ -724,12 +731,11 @@ class DealsCache:
         if deal.original_price > 0:
             deal.discount_percent = ((deal.original_price - new_price) / deal.original_price) * 100
 
-        self.add_deal(deal)
+        self.add_deal(deal, persist=True)
         logger.info(f"Updated deal {deal_id} price: ${old_price} -> ${new_price}")
         return deal
 
     def get_stats(self) -> Dict[str, Any]:
-        """Get cache statistics"""
         return {
             "total_deals": len(self._deals),
             "by_type": {k: len(v) for k, v in self._by_type.items()},
@@ -752,46 +758,5 @@ try:
         mongo_db=getattr(settings, 'MONGO_DB', 'kayak_doc')
     )
 except Exception as e:
-    logger.warning(f"Could not load settings, using defaults: {e}")
+    logger.error(f"Failed to init DealsCache: {e}")
     deals_cache = DealsCache()
-
-
-# ============================================
-# Convenience Functions
-# ============================================
-
-def search_deals(
-    destination: Optional[str] = None,
-    origin: Optional[str] = None,
-    listing_type: Optional[str] = None,
-    max_price: Optional[float] = None,
-    min_score: int = 0,
-    tags: Optional[List[str]] = None,
-    limit: int = 10
-) -> List[Dict[str, Any]]:
-    """Search deals and return as dicts"""
-    deals = deals_cache.search_deals(
-        destination=destination,
-        origin=origin,
-        listing_type=listing_type,
-        max_price=max_price,
-        min_score=min_score,
-        tags=tags,
-        limit=limit
-    )
-    return [d.to_dict() for d in deals]
-
-
-def get_deals_for_bundle(destination: str, **kwargs) -> Dict[str, List[Dict]]:
-    """Get deals for bundle creation"""
-    result = deals_cache.get_deals_for_bundle(destination, **kwargs)
-    return {
-        "flights": [d.to_dict() for d in result["flights"]],
-        "hotels": [d.to_dict() for d in result["hotels"]]
-    }
-
-
-def get_best_deals(limit: int = 10) -> List[Dict[str, Any]]:
-    """Get best deals as dicts"""
-    deals = deals_cache.get_best_deals(limit)
-    return [d.to_dict() for d in deals]
