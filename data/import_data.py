@@ -43,6 +43,7 @@ MYSQL_DB = os.getenv("DB_NAME_USERS", "kayak_users")
 
 # Data directory
 DATA_DIR = os.getenv("DATA_DIR", "./data")
+KAGGLE_DIR = os.path.join(DATA_DIR, "kaggle")
 
 # ============================================
 # City/Country Mapping for Hotels
@@ -608,6 +609,14 @@ def import_users(mysql_conn, filepath, limit=10000):
     return count
 
 
+def _first_existing(paths):
+    """Return the first path that exists from a list."""
+    for path in paths:
+        if os.path.exists(path):
+            return path
+    return None
+
+
 def main():
     """Main import function"""
     print("=" * 60)
@@ -627,29 +636,42 @@ def main():
     mongo_db = connect_mongo()
     mysql_conn = connect_mysql()
     
-    # File paths
-    airports_file = os.path.join(DATA_DIR, "airports.csv")
-    flights_file = os.path.join(DATA_DIR, "Clean_Dataset.csv")
-    hotels_file = os.path.join(DATA_DIR, "hotel_booking.csv")
+    # File paths (prefer Kaggle datasets when present)
+    airports_file = _first_existing([
+        os.path.join(KAGGLE_DIR, "airports", "airports.csv"),
+        os.path.join(DATA_DIR, "airports.csv"),
+    ])
+    flights_file = _first_existing([
+        os.path.join(KAGGLE_DIR, "flights", "Clean_Dataset.csv"),
+        os.path.join(KAGGLE_DIR, "Flight Price Prediction", "Clean_Dataset.csv"),
+        os.path.join(DATA_DIR, "Clean_Dataset.csv"),
+    ])
+    hotels_file = _first_existing([
+        os.path.join(KAGGLE_DIR, "hotels", "hotel_booking.csv"),
+        os.path.join(DATA_DIR, "hotel_booking.csv"),
+    ])
     
     # Import data
     total = 0
     
-    if os.path.exists(airports_file):
+    if airports_file:
+        print(f"Using airports dataset: {airports_file}")
         total += import_airports(mongo_db, airports_file)
     else:
-        print(f"Warning: {airports_file} not found")
+        print("Warning: airports dataset not found")
     
-    if os.path.exists(flights_file):
+    if flights_file:
+        print(f"Using flights dataset: {flights_file}")
         total += import_flights(mongo_db, flights_file, limit=10000)
     else:
-        print(f"Warning: {flights_file} not found")
+        print("Warning: flights dataset not found")
     
-    if os.path.exists(hotels_file):
+    if hotels_file:
+        print(f"Using hotels dataset: {hotels_file}")
         total += import_hotels(mongo_db, hotels_file, limit=10000)
         total += import_users(mysql_conn, hotels_file, limit=10000)
     else:
-        print(f"Warning: {hotels_file} not found")
+        print("Warning: hotels dataset not found")
     
     if mysql_conn:
         mysql_conn.close()
