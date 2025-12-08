@@ -130,14 +130,26 @@ const AdminDashboardPage = () => {
         api.get('/admin/analytics/reviews').catch(() => ({ data: { data: [] } }))
       ]);
 
-      // Use fallback data if API returns empty arrays
-      setTopProperties(topPropsRes.data.data?.length > 0 ? topPropsRes.data.data : getFallbackData('topProperties'));
-      setCityRevenue(cityRes.data.data?.length > 0 ? cityRes.data.data : getFallbackData('cityRevenue'));
-      setTopSellers(sellersRes.data.data?.length > 0 ? sellersRes.data.data : getFallbackData('topSellers'));
-      setPageClicks(pageRes.data.data?.length > 0 ? pageRes.data.data : getFallbackData('pageClicks'));
-      setListingClicks(listingRes.data.data?.length > 0 ? listingRes.data.data : getFallbackData('listingClicks'));
-      setLeastSeen(leastRes.data.data?.length > 0 ? leastRes.data.data : getFallbackData('leastSeen'));
-      setReviews(reviewsRes.data.data?.length > 0 ? reviewsRes.data.data : getFallbackData('reviews'));
+      // Use real data from API, only use fallback if explicitly empty AND no error
+      // Check if responses are successful (status 200) but empty
+      const hasRealData = topPropsRes.data?.data?.length > 0 || 
+                         cityRes.data?.data?.length > 0 || 
+                         sellersRes.data?.data?.length > 0;
+      
+      // Only use fallback for analytics that require bookings/invoices (which may not exist yet)
+      // For data that should come from datasets (listings), show empty state instead
+      setTopProperties(topPropsRes.data?.data?.length > 0 ? topPropsRes.data.data : []);
+      setCityRevenue(cityRes.data?.data?.length > 0 ? cityRes.data.data : []);
+      setTopSellers(sellersRes.data?.data?.length > 0 ? sellersRes.data.data : []);
+      setPageClicks(pageRes.data?.data?.length > 0 ? pageRes.data.data : []);
+      setListingClicks(listingRes.data?.data?.length > 0 ? listingRes.data.data : []);
+      setLeastSeen(leastRes.data?.data?.length > 0 ? leastRes.data.data : []);
+      setReviews(reviewsRes.data?.data?.length > 0 ? reviewsRes.data.data : []);
+      
+      // Show info message if no real data found
+      if (!hasRealData) {
+        setStatusMessage('No analytics data found. Analytics require bookings and invoices. Listings data is available in the Listings Management tab.');
+      }
     } catch (err) {
       console.error('Error loading analytics:', err);
       // Use fallback data on error
