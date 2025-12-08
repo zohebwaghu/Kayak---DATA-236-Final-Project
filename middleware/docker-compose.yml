@@ -144,6 +144,22 @@ services:
       - kayak-network
     restart: unless-stopped
 
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: kayak-frontend
+    ports:
+      - "3007:80"
+    environment:
+      # If the frontend expects a base URL env, set it here (adjust if needed)
+      # REACT_APP_API_BASE_URL: http://localhost:3000
+    depends_on:
+      - api-gateway
+    networks:
+      - kayak-network
+    restart: unless-stopped
+
   user-service:
     build:
       context: .
