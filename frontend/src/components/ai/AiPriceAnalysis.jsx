@@ -5,7 +5,7 @@
  * Implements "Decide with confidence" feature
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { getPriceAnalysis, getBundleAnalysis } from '../../api/aiService';
 import './ai.css';
 
@@ -20,11 +20,7 @@ const AiPriceAnalysis = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  useEffect(() => {
-    fetchAnalysis();
-  }, [listingType, listingId, bundleId]);
-
-  const fetchAnalysis = async () => {
+  const fetchAnalysis = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -42,7 +38,11 @@ const AiPriceAnalysis = ({
     } finally {
       setLoading(false);
     }
-  };
+  }, [bundleId, listingId, listingType]);
+
+  useEffect(() => {
+    fetchAnalysis();
+  }, [fetchAnalysis]);
 
   const getVerdictConfig = (verdict) => {
     switch (verdict?.toUpperCase()) {

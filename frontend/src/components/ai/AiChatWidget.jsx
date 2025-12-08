@@ -5,7 +5,7 @@
  * Receives real-time events via WebSocket
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { sendChatMessage, createEventsWebSocket } from '../../api/aiService';
@@ -21,8 +21,6 @@ const AiChatWidget = () => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [notifications, setNotifications] = useState([]);
   const [showNotifications, setShowNotifications] = useState(false);
-  const [pendingQuote, setPendingQuote] = useState(null);
-  
   const messagesEndRef = useRef(null);
   const wsRef = useRef(null);
   const lastQuoteRef = useRef(null);
@@ -43,14 +41,14 @@ const AiChatWidget = () => {
         wsRef.current.close();
       }
     };
-  }, [isAuthenticated, userId]);
+  }, [isAuthenticated, userId, connectWebSocket]);
 
   // Scroll to bottom on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const connectWebSocket = () => {
+  const connectWebSocket = useCallback(() => {
     try {
       wsRef.current = createEventsWebSocket(
         userId,
@@ -60,7 +58,7 @@ const AiChatWidget = () => {
     } catch (err) {
       console.error('WebSocket connection failed:', err);
     }
-  };
+  }, [userId, isAuthenticated]);
 
   const handleWebSocketMessage = (data) => {
     switch (data.event_type || data.type) {
@@ -168,7 +166,6 @@ const AiChatWidget = () => {
           timestamp: new Date().toISOString()
         };
         lastQuoteRef.current = quoteData;
-        setPendingQuote(quoteData);
         console.log('Quote saved:', quoteData);
       }
 

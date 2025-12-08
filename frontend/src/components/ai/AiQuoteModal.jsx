@@ -5,7 +5,7 @@
  * Implements "Book or hand off cleanly" feature
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { generateQuote, refreshQuote, initiateBooking } from '../../api/aiService';
 import AiPolicyInfo from './AiPolicyInfo';
 import './ai.css';
@@ -23,13 +23,7 @@ const AiQuoteModal = ({
   const [showPolicies, setShowPolicies] = useState(false);
   const [booking, setBooking] = useState(false);
 
-  useEffect(() => {
-    if (bundle) {
-      fetchQuote();
-    }
-  }, [bundle]);
-
-  const fetchQuote = async () => {
+  const fetchQuote = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -51,7 +45,13 @@ const AiQuoteModal = ({
     } finally {
       setLoading(false);
     }
-  };
+  }, [bundle, travelers, userId]);
+
+  useEffect(() => {
+    if (bundle) {
+      fetchQuote();
+    }
+  }, [bundle, fetchQuote]);
 
   const handleRefresh = async () => {
     if (!quote?.quote_id) return;

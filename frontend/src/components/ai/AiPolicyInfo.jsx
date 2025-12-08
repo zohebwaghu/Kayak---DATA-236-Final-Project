@@ -5,7 +5,7 @@
  * Supports asking policy questions via AI
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { getListingPolicies, sendChatMessage } from '../../api/aiService';
 import './ai.css';
 
@@ -23,11 +23,7 @@ const AiPolicyInfo = ({
   const [answer, setAnswer] = useState(null);
   const [asking, setAsking] = useState(false);
 
-  useEffect(() => {
-    fetchPolicies();
-  }, [flightId, hotelId]);
-
-  const fetchPolicies = async () => {
+  const fetchPolicies = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -57,7 +53,11 @@ const AiPolicyInfo = ({
     } finally {
       setLoading(false);
     }
-  };
+  }, [flightId, hotelId]);
+
+  useEffect(() => {
+    fetchPolicies();
+  }, [fetchPolicies]);
 
   const handleAskQuestion = async (e) => {
     e.preventDefault();
@@ -97,6 +97,26 @@ const AiPolicyInfo = ({
           <div className="ai-modal-loading">
             <div className="ai-spinner"></div>
             <p>Loading policies...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="ai-modal-overlay" onClick={onClose}>
+        <div className="ai-modal ai-policy-modal" onClick={e => e.stopPropagation()}>
+          <div className="ai-modal-header">
+            <h2><i className="bi bi-file-text"></i> Policies & Info</h2>
+            <button className="ai-modal-close" onClick={onClose}>
+              <i className="bi bi-x"></i>
+            </button>
+          </div>
+          <div className="ai-modal-error">
+            <i className="bi bi-exclamation-circle"></i>
+            <p>{error}</p>
+            <button onClick={fetchPolicies}>Retry</button>
           </div>
         </div>
       </div>

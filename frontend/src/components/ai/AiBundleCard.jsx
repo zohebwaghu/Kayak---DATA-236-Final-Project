@@ -23,7 +23,6 @@ const AiBundleCard = ({
   if (!bundle) return null;
 
   const {
-    bundle_id,
     name,
     destination,
     origin,

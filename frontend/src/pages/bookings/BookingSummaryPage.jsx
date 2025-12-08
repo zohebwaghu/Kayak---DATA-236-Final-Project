@@ -146,7 +146,7 @@ const BookingSummaryPage = () => {
         title = titleMatch[1];
       } else {
         // Fallback: "**Quote Q-XXXX** Flight: ..."
-        const quoteIdMatch = quoteText.match(/\*\*Quote\s+([^\*]+)\*\*/i);
+        const quoteIdMatch = quoteText.match(/\*\*Quote\s+([^*]+)\*\*/i);
         if (quoteIdMatch && quoteIdMatch[1]) {
           title = `AI Package ${quoteIdMatch[1].trim()}`;
         }

@@ -5,7 +5,7 @@
  * Implements "Keep an eye on it" feature
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { getWatches, deleteWatch, toggleWatch, createWatch } from '../../api/aiService';
 import './ai.css';
 
@@ -16,13 +16,7 @@ const AiWatchesPanel = ({ userId, onClose, onWatchTriggered }) => {
   const [showCreateForm, setShowCreateForm] = useState(false);
 
   // Fetch watches on mount
-  useEffect(() => {
-    if (userId) {
-      fetchWatches();
-    }
-  }, [userId]);
-
-  const fetchWatches = async () => {
+  const fetchWatches = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -34,7 +28,13 @@ const AiWatchesPanel = ({ userId, onClose, onWatchTriggered }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [userId]);
+
+  useEffect(() => {
+    if (userId) {
+      fetchWatches();
+    }
+  }, [userId, fetchWatches]);
 
   const handleDelete = async (watchId) => {
     if (!window.confirm('Remove this watch?')) return;

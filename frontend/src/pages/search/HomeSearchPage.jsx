@@ -3,7 +3,7 @@
  * Adds AI state management and connects to AI service
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useSelector } from 'react-redux';
 import { useNavigate, useLocation } from 'react-router-dom';
 import './HomeSearchPage.css';
@@ -20,7 +20,7 @@ import PopularDestinations from '../../components/home/PopularDestinations';
 import DealsSection from '../../components/home/DealsSection';
 
 import api from '../../api/axios';
-import { sendChatMessage, createWatch, generateQuote } from '../../api/aiService';
+import { sendChatMessage, createWatch } from '../../api/aiService';
 import SearchResultsList from '../../components/search/SearchResultsList';
 import SearchCard from '../../components/search/SearchCard';
 import { selectIsAuthenticated, selectUser } from '../../store/slices/authSlice';
@@ -128,8 +128,6 @@ const HomeSearchPage = () => {
   const [aiChanges, setAiChanges] = useState(null);
   const [aiSuggestions, setAiSuggestions] = useState([]);
   const [aiSessionId, setAiSessionId] = useState(null);
-  const [aiPrompt, setAiPrompt] = useState('');
-
   // AI Modal states
   const [showPriceAnalysis, setShowPriceAnalysis] = useState(false);
   const [showQuoteModal, setShowQuoteModal] = useState(false);
@@ -263,7 +261,6 @@ const HomeSearchPage = () => {
 
   // ===== AI SEARCH HANDLER =====
   const handleAiPromptSubmit = async (prompt) => {
-    setAiPrompt(prompt);
     setAiLoading(true);
     setAiError(null);
 

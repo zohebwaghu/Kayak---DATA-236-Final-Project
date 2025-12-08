@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../api/axios';
 import {
-  BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
+  BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
 import './AdminDashboardPage.css';
@@ -45,15 +45,18 @@ const AdminDashboardPage = () => {
   const [listingFormData, setListingFormData] = useState({});
 
   useEffect(() => {
-    if (activeTab === 'analytics') {
-      loadAnalytics();
-    } else if (activeTab === 'listings') {
-      loadListings();
-    } else if (activeTab === 'users') {
-      loadUsers();
-    } else if (activeTab === 'billing') {
-      loadBills();
-    }
+    const run = async () => {
+      if (activeTab === 'analytics') {
+        await loadAnalytics();
+      } else if (activeTab === 'listings') {
+        await loadListings();
+      } else if (activeTab === 'users') {
+        await loadUsers();
+      } else if (activeTab === 'billing') {
+        await loadBills();
+      }
+    };
+    run();
   }, [activeTab, listingSearch, listingType, userSearch, billDate, billMonth, billYear]);
 
   const loadAnalytics = async () => {
