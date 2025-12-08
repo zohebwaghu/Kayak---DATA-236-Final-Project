@@ -102,8 +102,8 @@ def import_airports(db, filepath):
     for _, row in df.iterrows():
         iata = row.get("IATA", "")
         
-        # Only add if has valid IATA code
-        if not iata or str(iata).lower() in ["", "nan", "none"]:
+        # Only add if has valid IATA code (skip \N which means NULL in some CSVs)
+        if not iata or str(iata).strip().lower() in ["", "nan", "none", "\\n", "n/a", "-"]:
             continue
             
         airport = {
