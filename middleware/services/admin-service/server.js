@@ -251,6 +251,11 @@ app.post('/listings', async (req, res) => {
       const diffTime = departure - today;
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
       data.days_left = Math.max(1, diffDays);
+
+      // Generate unique flight_id if missing to prevent E11000 error
+      if (!data.flight_id) {
+        data.flight_id = `FL_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+      }
     } else if (type === 'cars') {
       collection = mongoDb.collection('cars');
       if (!data.name || !data.location) {
@@ -693,14 +698,14 @@ app.get('/analytics/revenue/top-properties', async (req, res) => {
     // If no bookings data, generate analytics from listings datasets
     if (rows.length === 0 && mongoDb) {
       const results = [];
-      
+
       // Get top hotels by price
       const hotels = await mongoDb.collection('hotels')
         .find({ pricePerNight: { $exists: true, $gt: 0 } })
         .sort({ pricePerNight: -1 })
         .limit(5)
         .toArray();
-      
+
       hotels.forEach((hotel, idx) => {
         results.push({
           listing_id: hotel._id.toString().substring(0, 20),
@@ -716,7 +721,7 @@ app.get('/analytics/revenue/top-properties', async (req, res) => {
         .sort({ price: -1 })
         .limit(3)
         .toArray();
-      
+
       flights.forEach((flight) => {
         results.push({
           listing_id: flight._id.toString().substring(0, 20),
@@ -732,7 +737,7 @@ app.get('/analytics/revenue/top-properties', async (req, res) => {
         .sort({ price: -1 })
         .limit(2)
         .toArray();
-      
+
       cars.forEach((car) => {
         results.push({
           listing_id: car._id.toString().substring(0, 20),
@@ -744,7 +749,7 @@ app.get('/analytics/revenue/top-properties', async (req, res) => {
 
       // Sort by revenue and limit to 10
       results.sort((a, b) => b.total_revenue - a.total_revenue);
-      
+
       return res.status(200).json({
         year: parseInt(year),
         data: results.slice(0, 10),
@@ -795,7 +800,7 @@ app.get('/analytics/revenue/city-wise', async (req, res) => {
       const hotels = await mongoDb.collection('hotels')
         .find({ 'address.city': { $exists: true }, pricePerNight: { $exists: true, $gt: 0 } })
         .toArray();
-      
+
       hotels.forEach((hotel) => {
         const city = hotel.address?.city || 'Unknown';
         if (!cityMap[city]) {
@@ -810,7 +815,7 @@ app.get('/analytics/revenue/city-wise', async (req, res) => {
         .find({ destination_city: { $exists: true }, price: { $exists: true, $gt: 0 } })
         .limit(1000)
         .toArray();
-      
+
       flights.forEach((flight) => {
         const city = flight.destination_city || 'Unknown';
         if (!cityMap[city]) {
