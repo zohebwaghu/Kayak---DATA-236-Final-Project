@@ -1,0 +1,215 @@
+/* src/pages/bookings/BookingSummaryPage.css */
+
+.booking-summary-page {
+  padding: 24px 32px 40px;
+  background-color: #f5f7fa;
+  min-height: calc(100vh - 64px); /* leave room for navbar */
+  box-sizing: border-box;
+  display: flex;
+  justify-content: center;
+}
+
+.booking-summary-inner {
+  width: 100%;
+  max-width: 900px;
+}
+
+/* Main card */
+
+.booking-summary-card {
+  background-color: #ffffff;
+  border-radius: 24px;
+  padding: 24px 24px 20px 24px;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.12);
+  box-sizing: border-box;
+}
+
+.booking-summary-card--empty {
+  text-align: left;
+}
+
+.booking-summary-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.booking-summary-chip {
+  display: inline-flex;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #eef2ff;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #3730a3;
+  margin-bottom: 6px;
+}
+
+.booking-summary-title {
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: #111827;
+  margin: 0 0 4px 0;
+}
+
+.booking-summary-subtitle,
+.booking-summary-text {
+  margin: 0;
+  font-size: 0.95rem;
+  color: #6b7280;
+}
+
+/* Body layout */
+
+.booking-summary-body {
+  display: flex;
+  gap: 24px;
+  margin-top: 8px;
+}
+
+/* Left side */
+
+.booking-summary-details {
+  flex: 2;
+  min-width: 0;
+}
+
+.booking-summary-item-title {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #111827;
+  margin: 0 0 4px 0;
+}
+
+.booking-summary-item-subtitle {
+  font-size: 0.95rem;
+  color: #4b5563;
+  margin: 0 0 8px 0;
+}
+
+.booking-summary-meta-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px 0;
+}
+
+.booking-summary-meta-item {
+  font-size: 0.9rem;
+  color: #6b7280;
+}
+
+/* Right side */
+
+.booking-summary-side {
+  flex: 1.2;
+  min-width: 240px;
+}
+
+.booking-summary-price-card {
+  border-radius: 18px;
+  background-color: #f9fafb;
+  padding: 14px 16px 14px 16px;
+  border: 1px solid #e5e7eb;
+}
+
+.booking-summary-price-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.booking-summary-price-label {
+  font-size: 0.9rem;
+  color: #6b7280;
+}
+
+.booking-summary-price-value {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #111827;
+}
+
+/* Primary CTA button (Kayak-style orange) */
+
+.booking-summary-primary-btn {
+  width: 100%;
+  border-radius: 999px;
+  border: none;
+  padding: 10px 20px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  background: linear-gradient(135deg, #ff6b00, #ff8a34);
+  color: #ffffff;
+  cursor: pointer;
+  box-shadow: 0 10px 20px rgba(255, 107, 0, 0.35);
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+  margin-top: 4px;
+}
+
+.booking-summary-primary-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 24px rgba(255, 107, 0, 0.45);
+}
+
+.booking-summary-primary-btn:disabled {
+  opacity: 0.7;
+  cursor: default;
+  box-shadow: none;
+  transform: none;
+}
+
+.booking-summary-price-note {
+  font-size: 0.78rem;
+  color: #6b7280;
+  margin-top: 6px;
+}
+
+/* Secondary action */
+
+.booking-summary-actions-secondary {
+  margin-top: 4px;
+}
+
+.booking-summary-link-btn {
+  padding: 0;
+  background: none;
+  border: none;
+  font-size: 0.9rem;
+  color: #2563eb;
+  cursor: pointer;
+}
+
+/* Responsive */
+
+@media (max-width: 900px) {
+  .booking-summary-page {
+    padding: 20px 16px 32px;
+  }
+
+  .booking-summary-card {
+    border-radius: 20px;
+    padding: 20px 18px 18px 18px;
+  }
+
+  .booking-summary-body {
+    flex-direction: column;
+  }
+
+  .booking-summary-side {
+    min-width: 100%;
+  }
+}
+
+@media (max-width: 600px) {
+  .booking-summary-title {
+    font-size: 1.4rem;
+  }
+
+  .booking-summary-item-title {
+    font-size: 1.05rem;
+  }
+}

@@ -340,7 +340,7 @@ class DealsAgentRunner:
                 flights = session.exec(select(FlightDeal).limit(500)).all()
                 for flight in flights:
                     # Check if already in cache
-                    if deals_cache and deals_cache.get_deal(flight.flight_id):
+                    if deals_cache and deals_cache.get_deal(f"flight_{flight.flight_id}"):
                         continue  # Already processed
 
                     message = {
@@ -369,7 +369,7 @@ class DealsAgentRunner:
                 hotels = session.exec(select(HotelDeal).limit(500)).all()
                 for hotel in hotels:
                     # Check if already in cache
-                    if deals_cache and deals_cache.get_deal(hotel.hotel_id):
+                    if deals_cache and deals_cache.get_deal(f"hotel_{hotel.hotel_id}"):
                         continue  # Already processed
 
                     message = {

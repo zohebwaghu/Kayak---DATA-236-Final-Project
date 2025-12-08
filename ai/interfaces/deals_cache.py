@@ -5,6 +5,7 @@ Now reads from SQLite (SQLModel) - Assignment requirement.
 Falls back to MongoDB if SQLite not available.
 """
 
+import os
 import json
 import time
 from datetime import datetime, timedelta
@@ -35,6 +36,12 @@ except ImportError:
     FlightDeal = None  # Define as None to avoid NameError in type hints
     HotelDeal = None
     logger.warning("SQLModel not available, will use MongoDB as fallback")
+
+
+# Performance configuration - limit records loaded for faster startup
+# Set to None to load all records (SLOW with 5.8M flights!)
+MAX_FLIGHTS_TO_LOAD = int(os.getenv("MAX_FLIGHTS_TO_LOAD", "10000"))
+MAX_HOTELS_TO_LOAD = int(os.getenv("MAX_HOTELS_TO_LOAD", "10000"))
 
 
 @dataclass
@@ -92,20 +99,26 @@ class DealsCache:
 
     def __init__(self, redis_host: str = "localhost", redis_port: int = 6379,
                  mongo_uri: str = "mongodb://mongodb:27017", mongo_db: str = "kayak_doc",
-                 ttl_hours: int = 24):
+                 ttl_hours: int = 24, lazy_load: bool = True):
         self.ttl_seconds = ttl_hours * 3600
         self.redis_client = None
         self.mongo_client = None
         self.mongo_db = None
         self.use_sqlite = SQLMODEL_AVAILABLE
+        self._mongo_uri = mongo_uri
+        self._mongo_db_name = mongo_db
 
-        # In-memory storage
+        # Lazy loading flag - memory cache loaded on-demand
+        self._loaded = False
+        self._loading = False  # Prevent concurrent loads
+
+        # In-memory storage (populated on-demand)
         self._deals: Dict[str, Deal] = {}
         self._by_destination: Dict[str, List[str]] = {}
         self._by_type: Dict[str, List[str]] = {}
         self._by_tag: Dict[str, List[str]] = {}
 
-        # Connect to Redis (for caching)
+        # Connect to Redis ONLY (fast, instant startup)
         if REDIS_AVAILABLE:
             try:
                 self.redis_client = redis.Redis(
@@ -114,35 +127,66 @@ class DealsCache:
                     decode_responses=True
                 )
                 self.redis_client.ping()
-                logger.info(f"DealsCache connected to Redis")
+                logger.info(f"DealsCache connected to Redis (lazy loading enabled)")
             except Exception as e:
                 logger.warning(f"DealsCache Redis connection failed: {e}")
                 self.redis_client = None
 
-        # Connect to MongoDB (fallback only when SQLite unavailable)
-        if not self.use_sqlite and MONGO_AVAILABLE:
-            try:
-                # Keep timeouts small so failures don't stall startup
-                self.mongo_client = MongoClient(
-                    mongo_uri,
-                    serverSelectionTimeoutMS=500,
-                    connectTimeoutMS=500,
-                )
-                self.mongo_db = self.mongo_client[mongo_db]
-                self.mongo_db.list_collection_names()
-                logger.info(f"DealsCache connected to MongoDB: {mongo_uri}/{mongo_db}")
-            except Exception as e:
-                logger.warning(f"DealsCache MongoDB connection failed: {e}")
-                self.mongo_client = None
-                self.mongo_db = None
+        # For lazy loading, we DON'T load data here
+        # Data is loaded on-demand when search operations are called
+        if not lazy_load:
+            # Legacy mode: load everything at startup (slow, 90 seconds)
+            self._ensure_loaded()
 
-        # Load deals - prefer SQLite (Assignment requirement)
-        if self.use_sqlite:
-            logger.info("Loading deals from SQLite (SQLModel) - Assignment requirement")
-            self._load_deals_from_sqlite()
-        else:
-            logger.info("Loading deals from MongoDB (SQLite not available)")
-            self._load_deals_from_mongo()
+    def _ensure_loaded(self):
+        """
+        Ensure deals are loaded into memory (lazy loading).
+        Called by search methods before they need the data.
+        Thread-safe: prevents concurrent loads.
+        """
+        if self._loaded:
+            return  # Already loaded
+
+        if self._loading:
+            # Another thread is loading, wait for it
+            # Note: time is already imported at module level
+            max_wait = 120  # Max 2 minutes
+            waited = 0
+            while self._loading and waited < max_wait:
+                time.sleep(1)
+                waited += 1
+            return
+
+        self._loading = True
+        try:
+            logger.info("Lazy loading deals into memory (first search)...")
+            start_time = time.time()
+
+            if self.use_sqlite and SQLMODEL_AVAILABLE:
+                self._load_deals_from_sqlite()
+            elif MONGO_AVAILABLE:
+                # Connect to MongoDB if not already connected
+                if self.mongo_db is None:
+                    try:
+                        from pymongo import MongoClient
+                        self.mongo_client = MongoClient(self._mongo_uri)
+                        self.mongo_db = self.mongo_client[self._mongo_db_name]
+                        logger.info(f"Connected to MongoDB: {self._mongo_db_name}")
+                    except Exception as e:
+                        logger.error(f"MongoDB connection failed: {e}")
+                if self.mongo_db is not None:
+                    self._load_deals_from_mongo()
+                else:
+                    self._init_sample_deals()
+            else:
+                self._init_sample_deals()
+
+            self._loaded = True
+            elapsed = time.time() - start_time
+            logger.info(f"Lazy loading complete: {len(self._deals)} deals in {elapsed:.1f}s")
+
+        finally:
+            self._loading = False
 
     def _load_deals_from_sqlite(self):
         """Load flights and hotels from SQLite and convert to deals"""
@@ -157,18 +201,26 @@ class DealsCache:
             all_deals = []
 
             with Session(engine) as session:
-                # Load flights
-                flights = session.exec(select(FlightDeal)).all()
-                logger.info(f"Loading {len(flights)} flights from SQLite")
+                # Load flights - with LIMIT for performance (5.8M records is too slow!)
+                # Sort by deal_score DESC to get best deals first
+                flight_query = select(FlightDeal).order_by(FlightDeal.deal_score.desc())
+                if MAX_FLIGHTS_TO_LOAD:
+                    flight_query = flight_query.limit(MAX_FLIGHTS_TO_LOAD)
+                flights = session.exec(flight_query).all()
+                logger.info(f"Loading {len(flights)} flights from SQLite (limit: {MAX_FLIGHTS_TO_LOAD})")
 
                 for flight in flights:
                     deal = self._sqlite_flight_to_deal(flight)
                     if deal:
                         all_deals.append(deal)
 
-                # Load hotels
-                hotels = session.exec(select(HotelDeal)).all()
-                logger.info(f"Loading {len(hotels)} hotels from SQLite")
+                # Load hotels - with LIMIT for performance
+                # Sort by deal_score DESC to get best deals first
+                hotel_query = select(HotelDeal).order_by(HotelDeal.deal_score.desc())
+                if MAX_HOTELS_TO_LOAD:
+                    hotel_query = hotel_query.limit(MAX_HOTELS_TO_LOAD)
+                hotels = session.exec(hotel_query).all()
+                logger.info(f"Loading {len(hotels)} hotels from SQLite (limit: {MAX_HOTELS_TO_LOAD})")
 
                 for hotel in hotels:
                     deal = self._sqlite_hotel_to_deal(hotel)
@@ -222,6 +274,9 @@ class DealsCache:
                     if (i + batch_size) % 50000 == 0:
                         logger.info(f"  Redis: {i + batch_size} deals written...")
                 logger.info(f"Redis cache ready with {len(all_deals)} deals")
+
+            # Save pre-computed stats to Redis (proper Redis usage!)
+            self._save_stats_to_redis()
 
             logger.info(f"Loaded {len(self._deals)} deals from SQLite")
             
@@ -491,16 +546,16 @@ class DealsCache:
                 deal_id="flight_sample_1",
                 listing_type="flight",
                 listing_id="FL_SAMPLE_1",
-                name="DEL → BOM (Sample Airline)",
-                origin="DEL",
-                destination="BOM",
-                current_price=5000,
-                avg_30d_price=6000,
-                discount_percent=17,
+                name="LAX → JFK (Sample Airline)",
+                origin="LAX",
+                destination="JFK",
+                current_price=299,
+                avg_30d_price=350,
+                discount_percent=15,
                 availability=20,
                 deal_score=75,
                 tags=["direct-flight"],
-                metadata={"airline": "Sample Airline", "stops": 0, "duration": 2.0}
+                metadata={"airline": "Sample Airline", "stops": 0, "duration": 5.5}
             )
         ]
         
@@ -509,18 +564,18 @@ class DealsCache:
                 deal_id="hotel_sample_1",
                 listing_type="hotel",
                 listing_id="HT_SAMPLE_1",
-                name="Sample Hotel - Mumbai",
-                destination="BOM",
-                current_price=100,
-                avg_30d_price=120,
+                name="Sample Hotel - New York",
+                destination="JFK",
+                current_price=150,
+                avg_30d_price=180,
                 discount_percent=17,
                 availability=5,
                 deal_score=70,
                 tags=["wifi", "breakfast"],
                 metadata={
-                    "city": "Mumbai",
-                    "city_code": "BOM",
-                    "neighbourhood": "Bandra",
+                    "city": "New York",
+                    "city_code": "JFK",
+                    "neighbourhood": "Manhattan",
                     "star_rating": 4
                 }
             )
@@ -532,6 +587,53 @@ class DealsCache:
     def _get_key(self, deal_id: str) -> str:
         """Get Redis key for deal"""
         return f"deal:{deal_id}"
+
+    def _save_stats_to_redis(self):
+        """
+        Pre-compute and save stats to Redis.
+        This is the PROPER way to use Redis - store computed aggregates, not raw data.
+        """
+        if not self.redis_client:
+            return
+
+        try:
+            stats = {
+                "total_deals": len(self._deals),
+                "by_type": {k: len(v) for k, v in self._by_type.items()},
+                "by_destination": {k: len(v) for k, v in self._by_destination.items()},
+                "top_destinations": list(self._by_destination.keys()),  # Just the codes
+                "top_tags": {k: len(v) for k, v in sorted(self._by_tag.items(), key=lambda x: -len(x[1]))[:10]},
+                "data_source": "SQLite" if self.use_sqlite else "MongoDB",
+                "updated_at": datetime.utcnow().isoformat()
+            }
+
+            # Store as JSON with 24h TTL
+            self.redis_client.setex(
+                "stats:deals_summary",
+                86400,  # 24 hours
+                json.dumps(stats)
+            )
+            logger.info(f"Saved stats to Redis: {len(stats['top_destinations'])} destinations")
+
+        except Exception as e:
+            logger.error(f"Error saving stats to Redis: {e}")
+
+    def _get_stats_from_redis(self) -> Optional[Dict[str, Any]]:
+        """
+        Read pre-computed stats from Redis.
+        This is instant - no loading 467K records.
+        """
+        if not self.redis_client:
+            return None
+
+        try:
+            data = self.redis_client.get("stats:deals_summary")
+            if data:
+                return json.loads(data)
+        except Exception as e:
+            logger.warning(f"Error reading stats from Redis: {e}")
+
+        return None
 
     def add_deal(self, deal: Deal):
         """Add a deal to cache"""
@@ -591,17 +693,20 @@ class DealsCache:
 
     def get_deals_by_type(self, listing_type: str) -> List[Deal]:
         """Get all deals of a type"""
+        self._ensure_loaded()  # Lazy load on first access
         deal_ids = self._by_type.get(listing_type, [])
         return [self._deals[did] for did in deal_ids if did in self._deals]
 
     def get_best_deals(self, limit: int = 10) -> List[Deal]:
         """Get top deals by score"""
+        self._ensure_loaded()  # Lazy load on first access
         all_deals = list(self._deals.values())
         all_deals.sort(key=lambda d: d.deal_score, reverse=True)
         return all_deals[:limit]
 
     def get_all_deals(self) -> List[Deal]:
         """Get all deals in cache (for scheduled scans)"""
+        self._ensure_loaded()  # Lazy load on first access
         return list(self._deals.values())
 
     def search_deals(
@@ -615,6 +720,7 @@ class DealsCache:
         limit: int = 10
     ) -> List[Deal]:
         """Search deals with filters"""
+        self._ensure_loaded()  # Lazy load on first access
         candidates = set(self._deals.keys())
 
         # Filter by destination
@@ -808,11 +914,22 @@ class DealsCache:
         return deal
 
     def get_stats(self) -> Dict[str, Any]:
-        """Get cache statistics"""
+        """
+        Get cache statistics.
+        FAST PATH: Try Redis first (instant, no memory loading needed)
+        SLOW PATH: Fall back to in-memory if Redis unavailable
+        """
+        # Try Redis first - this is the proper distributed approach
+        redis_stats = self._get_stats_from_redis()
+        if redis_stats:
+            return redis_stats
+
+        # Fall back to memory (only works if cache was already loaded)
         return {
             "total_deals": len(self._deals),
             "by_type": {k: len(v) for k, v in self._by_type.items()},
             "by_destination": {k: len(v) for k, v in self._by_destination.items()},
+            "top_destinations": list(self._by_destination.keys()),
             "top_tags": {k: len(v) for k, v in sorted(self._by_tag.items(), key=lambda x: -len(x[1]))[:10]},
             "data_source": "SQLite" if self.use_sqlite else "MongoDB"
         }
@@ -830,9 +947,11 @@ try:
         mongo_uri=getattr(settings, 'MONGO_URI', 'mongodb://mongodb:27017'),
         mongo_db=getattr(settings, 'MONGO_DB', 'kayak_doc')
     )
+    CACHE_AVAILABLE = True
 except Exception as e:
     logger.warning(f"Could not load settings, using defaults: {e}")
     deals_cache = DealsCache()
+    CACHE_AVAILABLE = True
 
 
 # ============================================

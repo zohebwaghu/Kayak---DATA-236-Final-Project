@@ -20,9 +20,14 @@ except ImportError:
         KAFKA_AVAILABLE = False
         print("❌ Kafka not available. Please install kafka-python.")
 
-# Configuration
-FLIGHTS_CSV = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data/Clean_Dataset.csv")
-HOTELS_CSV = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data/hotel_booking.csv")
+# Configuration - use US Flight Delay dataset (global routes)
+_base = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+FLIGHTS_CSV = os.path.join(_base, "data/data_set_kgl/flightdelay/flights.csv")
+if not os.path.exists(FLIGHTS_CSV):
+    FLIGHTS_CSV = os.path.join(_base, "data/Clean_Dataset.csv")
+HOTELS_CSV = os.path.join(_base, "data/hotel_booking.csv")
+if not os.path.exists(HOTELS_CSV):
+    HOTELS_CSV = os.path.join(_base, "data/data_set_kgl/hotelbooking/hotel_booking.csv")
 TOPIC = "raw_supplier_feeds"
 BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 

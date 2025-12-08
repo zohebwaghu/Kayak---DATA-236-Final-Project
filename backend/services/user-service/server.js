@@ -1,0 +1,891 @@
+/**
+ * USER SERVICE
+ * 
+ * Purpose: Manages user accounts, authentication, and profiles
+ * Responsibilities:
+ *  - User registration and authentication
+ *  - User profile CRUD operations
+ *  - JWT token generation
+ *  - Publishing user events to Kafka
+ *  - Password hashing and validation
+ * 
+ * Database: MySQL (transactional data)
+ * Message Queue: Kafka (event publishing)
+ */
+
+require('dotenv').config();
+const express = require('express');
+const mysql = require('mysql2/promise');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+const { randomUUID } = require('crypto');
+const redis = require('redis');
+
+const {
+  createKafkaClient,
+  createProducer,
+  createConsumer,
+  subscribeToTopics,
+  publishEvent,
+  disconnectKafka,
+  TOPICS,
+  EVENT_TYPES
+} = require('../../shared/kafka');
+
+const {
+  validateUserId,
+  validateZipCode,
+  validateState,
+  normalizeState,
+  validateEmail,
+  validatePassword,
+  requireValidUserId,
+  requireValidState,
+  requireValidZip
+} = require('../../shared/validators');
+
+const {
+  createErrorResponse,
+  ValidationError,
+  AuthenticationError,
+  NotFoundError,
+  ConflictError
+} = require('../../shared/errorHandler');
+
+const app = express();
+const PORT = process.env.USER_SERVICE_PORT || 3001;
+
+app.use(express.json());
+
+// ==================== DATABASE CONNECTION ====================
+
+// Use Tier 3's database structure
+// They created both 'kayak' (main) and 'kayak_users' (compatibility)
+const pool = mysql.createPool({
+  host: process.env.MYSQL_HOST || 'localhost',
+  port: process.env.MYSQL_PORT || 3306,
+  user: process.env.MYSQL_USER || 'root',
+  password: process.env.MYSQL_PASSWORD || '', // Empty password for Homebrew MySQL
+  database: process.env.MYSQL_DB_USERS || 'kayak_users', // Use 'kayak_users' (Tier 2 compatibility)
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 0
+});
+
+// Test database connection
+pool.getConnection()
+  .then(connection => {
+    console.log('✅ MySQL database connected');
+    connection.release();
+
+    // Ensure seed users have valid bcrypt hashes (avoids stale placeholder hashes from SQL seed)
+    (async () => {
+      try {
+        const seedUsers = [
+          { userId: '123-45-6789', password: process.env.ADMIN_SEED_PASSWORD || 'Admin123!' },
+          { userId: '987-65-4321', password: process.env.USER_SEED_PASSWORD || 'User123!' }
+        ];
+
+        for (const seed of seedUsers) {
+          const hash = await bcrypt.hash(seed.password, 10);
+          await pool.execute(
+            'UPDATE users SET password_hash = ? WHERE user_id = ?',
+            [hash, seed.userId]
+          );
+        }
+        console.log('✅ Seed user hashes refreshed');
+      } catch (seedErr) {
+        console.warn('⚠️  Could not refresh seed user hashes:', seedErr.message);
+      }
+    })();
+  })
+  .catch(err => {
+    console.error('❌ MySQL connection failed:', err);
+    process.exit(1);
+  });
+
+// ==================== REDIS CACHE SETUP ====================
+
+const redisClient = redis.createClient({
+  url: process.env.REDIS_URL || 'redis://localhost:6379'
+});
+
+redisClient.on('error', (err) => console.error('❌ Redis error:', err));
+redisClient.on('connect', () => console.log('✅ Redis connected'));
+
+// Connect Redis
+(async () => {
+  try {
+    await redisClient.connect();
+  } catch (error) {
+    console.error('❌ Failed to connect to Redis:', error);
+    // Don't exit - service can work without cache
+  }
+})();
+
+// Cache TTL in seconds (5 minutes for user data)
+const CACHE_TTL = 300;
+
+/**
+ * Get user from cache or null
+ */
+async function getCachedUser(userId) {
+  if (!redisClient.isOpen) return null;
+  try {
+    const cached = await redisClient.get(`user:${userId}`);
+    return cached ? JSON.parse(cached) : null;
+  } catch (error) {
+    console.warn('Cache read error:', error);
+    return null;
+  }
+}
+
+/**
+ * Cache user data
+ */
+async function cacheUser(userId, userData) {
+  if (!redisClient.isOpen) return;
+  try {
+    await redisClient.setEx(`user:${userId}`, CACHE_TTL, JSON.stringify(userData));
+  } catch (error) {
+    console.warn('Cache write error:', error);
+  }
+}
+
+/**
+ * Invalidate user cache
+ */
+async function invalidateUserCache(userId) {
+  if (!redisClient.isOpen) return;
+  try {
+    await redisClient.del(`user:${userId}`);
+  } catch (error) {
+    console.warn('Cache invalidation error:', error);
+  }
+}
+
+// ==================== KAFKA SETUP ====================
+
+let kafkaProducer;
+let kafkaUserConsumer;
+
+(async () => {
+  try {
+    const kafka = createKafkaClient('user-service');
+    kafkaProducer = await createProducer(kafka);
+  } catch (error) {
+    console.error('❌ Failed to initialize Kafka:', error);
+    // Don't exit - service can work without Kafka for basic operations
+  }
+})();
+
+// Consume user.create events (async from gateway)
+(async () => {
+  try {
+    const kafka = createKafkaClient('user-service');
+    kafkaUserConsumer = await createConsumer(kafka, 'user-create-group');
+    await subscribeToTopics(kafkaUserConsumer, [TOPICS.USER_CREATE], async (topic, event) => {
+      try {
+        await processUserCreate(event.data || {});
+      } catch (err) {
+        console.error('❌ user.create processing failed:', err);
+      }
+    });
+  } catch (error) {
+    console.error('❌ Failed to initialize user-create consumer:', error);
+  }
+})();
+
+// ==================== HEALTH CHECK ====================
+
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'UP',
+    service: 'User Service',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// ==================== AUTHENTICATION ENDPOINTS ====================
+
+/**
+ * Core user creation handler (reused by HTTP and Kafka)
+ */
+async function processUserCreate(payload) {
+  let { userId, firstName, lastName, address, phone, email, password } = payload;
+
+  if (!userId || !firstName || !lastName || !email || !password) {
+    throw new ValidationError('Missing required fields: userId, firstName, lastName, email, password');
+  }
+
+  requireValidUserId(userId);
+
+  if (!validateEmail(email)) {
+    throw new ValidationError('Invalid email format');
+  }
+
+  const passwordValidation = validatePassword(password);
+  if (!passwordValidation.valid) {
+    throw new ValidationError(passwordValidation.message);
+  }
+
+  if (!address || !address.line1 || !address.city || !address.state || !address.zipCode) {
+    throw new ValidationError('Complete address required: line1, city, state, zipCode');
+  } else {
+    requireValidState(address.state);
+    address.state = normalizeState(address.state);
+    requireValidZip(address.zipCode);
+  }
+
+  const [existingUsers] = await pool.execute(
+    'SELECT user_id, email FROM users WHERE user_id = ? OR email = ?',
+    [userId, email]
+  );
+
+  if (existingUsers.length > 0) {
+    if (existingUsers[0].user_id === userId) {
+      throw new ConflictError('User ID already exists');
+    }
+    if (existingUsers[0].email === email) {
+      throw new ConflictError('Email already registered');
+    }
+  }
+
+  const passwordHash = await bcrypt.hash(password, 10);
+
+  await pool.execute(
+    `INSERT INTO users (
+      user_id, first_name, last_name, 
+      address_line1, address_line2, city, state_code, zip_code,
+      phone_number, email, password_hash, role,
+      created_at_utc, updated_at_utc
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'user', NOW(), NOW())`,
+    [
+      userId,
+      firstName,
+      lastName,
+      address?.street || address?.line1 || '',
+      address?.line2 || null,
+      address?.city || '',
+      address?.state || '',
+      address?.zipCode || '',
+      phone || '',
+      email,
+      passwordHash
+    ]
+  );
+
+  if (kafkaProducer) {
+    await publishEvent(kafkaProducer, TOPICS.USER_EVENTS, userId, {
+      eventType: EVENT_TYPES.USER_CREATED,
+      data: { userId, email, firstName, lastName }
+    });
+  }
+
+  return {
+    userId,
+    firstName,
+    lastName,
+    address,
+    phone,
+    email,
+    role: 'user',
+    createdAt: new Date().toISOString(),
+    message: 'User registered successfully'
+  };
+}
+
+/**
+ * POST /api/v1/auth/register
+ * Register a new user account
+ */
+app.post('/api/v1/auth/register', async (req, res) => {
+  try {
+    const result = await processUserCreate(req.body);
+    res.status(201).json(result);
+
+  } catch (error) {
+    console.error('Error in user registration:', error);
+    console.error('Error stack:', error.stack);
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      sqlState: error.sqlState,
+      sqlMessage: error.sqlMessage
+    });
+
+    // Handle spec-required error codes (invalid_driver_id, malformed_state, malformed_zip)
+    if (error.code && ['invalid_driver_id', 'malformed_state', 'malformed_zip'].includes(error.code)) {
+      return res.status(error.status || 400).json({
+        status: error.status || 400,
+        error: error.code,
+        message: error.message,
+        path: req.path,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    if (error instanceof ValidationError || error instanceof ConflictError) {
+      return res.status(error.status).json(
+        createErrorResponse(error.status, error.error, error.message, req.path)
+      );
+    }
+
+    // Include more details in error response for debugging
+    const errorMessage = error.sqlMessage || error.message || 'Failed to register user';
+    res.status(500).json(
+      createErrorResponse(500, 'Internal Server Error', errorMessage, req.path)
+    );
+  }
+});
+
+/**
+ * POST /api/v1/auth/login
+ * Authenticate user and return JWT token
+ */
+app.post('/api/v1/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    // ===== VALIDATION =====
+
+    if (!email || !password) {
+      throw new ValidationError('Email and password are required');
+    }
+
+    // ===== FIND USER =====
+    // Use Tier 3's snake_case column names
+    const [users] = await pool.execute(
+      'SELECT user_id, email, password_hash, first_name, last_name, role FROM users WHERE email = ?',
+      [email]
+    );
+
+    if (users.length === 0) {
+      throw new AuthenticationError('Invalid email or password');
+    }
+
+    const user = users[0];
+
+    // ===== VERIFY PASSWORD =====
+
+    const passwordMatch = await bcrypt.compare(password, user.password_hash);
+
+    if (!passwordMatch) {
+      throw new AuthenticationError('Invalid email or password');
+    }
+
+    // ===== GENERATE JWT TOKEN =====
+
+    // Require JWT_SECRET from environment in production
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret && process.env.NODE_ENV === 'production') {
+      throw new Error('JWT_SECRET environment variable is required in production');
+    }
+
+    const token = jwt.sign(
+      {
+        userId: user.user_id,  // Use snake_case from DB
+        email: user.email,
+        role: user.role || 'user'
+      },
+      jwtSecret || 'dev-only-secret-key',
+      { expiresIn: process.env.JWT_EXPIRY || '24h' }
+    );
+
+    // ===== RETURN TOKEN =====
+
+    res.status(200).json({
+      accessToken: token,
+      tokenType: 'Bearer',
+      expiresIn: process.env.JWT_EXPIRY || '24h',
+      user: {
+        userId: user.user_id,  // Convert back to camelCase for API response
+        email: user.email,
+        firstName: user.first_name,
+        lastName: user.last_name,
+        role: user.role || 'user'
+      }
+    });
+
+  } catch (error) {
+    console.error('Error in user login:', error);
+
+    if (error instanceof ValidationError || error instanceof AuthenticationError) {
+      return res.status(error.status).json(
+        createErrorResponse(error.status, error.error, error.message, req.path)
+      );
+    }
+
+    res.status(500).json(
+      createErrorResponse(500, 'Internal Server Error', 'Login failed', req.path)
+    );
+  }
+});
+
+// ==================== USER CRUD ENDPOINTS ====================
+
+/**
+ * GET /:userId
+ * Retrieve user profile information (with Redis caching)
+ *
+ * NOTE: API Gateway rewrites /api/v1/users/:userId -> /:userId for this service.
+ */
+app.get('/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    // Check cache first
+    const cachedUser = await getCachedUser(userId);
+    if (cachedUser) {
+      return res.status(200).json({ ...cachedUser, cached: true });
+    }
+
+    // Use Tier 3's snake_case column names
+    const [users] = await pool.execute(
+      `SELECT user_id, first_name, last_name,
+              address_line1, address_line2, city, state_code, zip_code,
+              phone_number, email, role,
+              created_at_utc, updated_at_utc
+       FROM users WHERE user_id = ?`,
+      [userId]
+    );
+
+    if (users.length === 0) {
+      throw new NotFoundError('User not found');
+    }
+
+    const row = users[0];
+    // Convert snake_case to camelCase for API response
+    const user = {
+      userId: row.user_id,
+      firstName: row.first_name,
+      lastName: row.last_name,
+      address: {
+        street: row.address_line1,
+        line2: row.address_line2,
+        city: row.city,
+        state: row.state_code,
+        zipCode: row.zip_code
+      },
+      phone: row.phone_number,
+      email: row.email,
+      role: row.role || 'user',
+      createdAt: row.created_at_utc,
+      updatedAt: row.updated_at_utc
+    };
+
+    // Cache the user data
+    await cacheUser(userId, user);
+
+    res.status(200).json({ ...user, cached: false });
+
+  } catch (error) {
+    console.error('Error fetching user:', error);
+
+    if (error instanceof NotFoundError) {
+      return res.status(error.status).json(
+        createErrorResponse(error.status, error.error, error.message, req.path)
+      );
+    }
+
+    res.status(500).json(
+      createErrorResponse(500, 'Internal Server Error', 'Failed to fetch user', req.path)
+    );
+  }
+});
+
+/**
+ * PUT /:userId
+ * Update user profile information
+ *
+ * NOTE: API Gateway rewrites /api/v1/users/:userId -> /:userId for this service.
+ */
+app.put('/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const updates = req.body;
+
+    // ===== VALIDATE UPDATES =====
+
+    if (updates.address) {
+      if (updates.address.state) {
+        // SPEC REQUIREMENT: State validation with 'malformed_state' error code
+        requireValidState(updates.address.state);
+        // Normalize state to 2-letter code
+        updates.address.state = normalizeState(updates.address.state);
+      }
+      if (updates.address.zipCode) {
+        // SPEC REQUIREMENT: ZIP validation with 'malformed_zip' error code
+        requireValidZip(updates.address.zipCode);
+      }
+    }
+
+    if (updates.email && !validateEmail(updates.email)) {
+      throw new ValidationError('Invalid email format');
+    }
+
+    // ===== BUILD UPDATE QUERY =====
+    // Map camelCase to Tier 3's snake_case column names
+    const fieldMapping = {
+      'firstName': 'first_name',
+      'lastName': 'last_name',
+      'phone': 'phone_number',
+      'email': 'email'
+    };
+
+    const updateFields = [];
+    const updateValues = [];
+
+    // Handle regular fields
+    for (const [key, value] of Object.entries(updates)) {
+      if (key === 'address') {
+        // Address is separate columns in Tier 3 schema
+        if (value.street || value.line1) {
+          updateFields.push('address_line1 = ?');
+          updateValues.push(value.street || value.line1 || '');
+        }
+        if (value.line2 !== undefined) {
+          updateFields.push('address_line2 = ?');
+          updateValues.push(value.line2 || null);
+        }
+        if (value.city) {
+          updateFields.push('city = ?');
+          updateValues.push(value.city);
+        }
+        if (value.state) {
+          updateFields.push('state_code = ?');
+          updateValues.push(value.state);
+        }
+        if (value.zipCode) {
+          updateFields.push('zip_code = ?');
+          updateValues.push(value.zipCode);
+        }
+      } else if (fieldMapping[key] && value !== undefined) {
+        updateFields.push(`${fieldMapping[key]} = ?`);
+        updateValues.push(value);
+      }
+    }
+
+    if (updateFields.length === 0) {
+      throw new ValidationError('No valid fields to update');
+    }
+
+    updateFields.push('updated_at_utc = NOW()');
+    updateValues.push(userId);
+
+    // ===== UPDATE DATABASE =====
+    // Use Tier 3's snake_case column names
+    const [result] = await pool.execute(
+      `UPDATE users SET ${updateFields.join(', ')} WHERE user_id = ?`,
+      updateValues
+    );
+
+    if (result.affectedRows === 0) {
+      throw new NotFoundError('User not found');
+    }
+
+    // ===== PUBLISH EVENT TO KAFKA =====
+
+    if (kafkaProducer) {
+      await publishEvent(kafkaProducer, TOPICS.USER_EVENTS, userId, {
+        eventType: EVENT_TYPES.USER_UPDATED,
+        data: {
+          userId,
+          updatedFields: Object.keys(updates)
+        }
+      });
+    }
+
+    // ===== INVALIDATE CACHE =====
+    await invalidateUserCache(userId);
+
+    // ===== FETCH AND RETURN UPDATED USER =====
+    // Use Tier 3's snake_case, convert to camelCase for response
+    const [users] = await pool.execute(
+      `SELECT user_id, first_name, last_name, 
+              address_line1, address_line2, city, state_code, zip_code,
+              phone_number, email, role, updated_at_utc 
+       FROM users WHERE user_id = ?`,
+      [userId]
+    );
+
+    const row = users[0];
+    const user = {
+      userId: row.user_id,
+      firstName: row.first_name,
+      lastName: row.last_name,
+      address: {
+        street: row.address_line1,
+        line2: row.address_line2,
+        city: row.city,
+        state: row.state_code,
+        zipCode: row.zip_code
+      },
+      phone: row.phone_number,
+      email: row.email,
+      role: row.role || 'user',
+      updatedAt: row.updated_at_utc
+    };
+
+    res.status(200).json({
+      ...user,
+      message: 'User updated successfully'
+    });
+
+  } catch (error) {
+    console.error('Error updating user:', error);
+
+    // Handle spec-required error codes (malformed_state, malformed_zip)
+    if (error.code && ['invalid_driver_id', 'malformed_state', 'malformed_zip'].includes(error.code)) {
+      return res.status(error.status || 400).json({
+        status: error.status || 400,
+        error: error.code,
+        message: error.message,
+        path: req.path,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    if (error instanceof ValidationError || error instanceof NotFoundError) {
+      return res.status(error.status).json(
+        createErrorResponse(error.status, error.error, error.message, req.path)
+      );
+    }
+
+    res.status(500).json(
+      createErrorResponse(500, 'Internal Server Error', 'Failed to update user', req.path)
+    );
+  }
+});
+
+/**
+ * DELETE /:userId
+ * Delete user account
+ *
+ * NOTE: API Gateway rewrites /api/v1/users/:userId -> /:userId for this service.
+ */
+app.delete('/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    // Use Tier 3's snake_case column names
+    const [result] = await pool.execute(
+      'DELETE FROM users WHERE user_id = ?',
+      [userId]
+    );
+
+    if (result.affectedRows === 0) {
+      throw new NotFoundError('User not found');
+    }
+
+    // ===== PUBLISH EVENT TO KAFKA =====
+
+    if (kafkaProducer) {
+      await publishEvent(kafkaProducer, TOPICS.USER_EVENTS, userId, {
+        eventType: EVENT_TYPES.USER_DELETED,
+        data: { userId }
+      });
+    }
+
+    // ===== INVALIDATE CACHE =====
+    await invalidateUserCache(userId);
+
+    res.status(204).send();
+
+  } catch (error) {
+    console.error('Error deleting user:', error);
+
+    if (error instanceof NotFoundError) {
+      return res.status(error.status).json(
+        createErrorResponse(error.status, error.error, error.message, req.path)
+      );
+    }
+
+    res.status(500).json(
+      createErrorResponse(500, 'Internal Server Error', 'Failed to delete user', req.path)
+    );
+  }
+});
+
+// ==================== PAYMENT METHOD ENDPOINTS ====================
+
+/**
+ * GET /:userId/payment-methods
+ * Retrieve all payment methods for a user
+ */
+app.get('/:userId/payment-methods', async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const [methods] = await pool.execute(
+      `SELECT method_id, card_type, last_four, expiry_month, expiry_year, 
+              card_holder_name, is_default, created_at_utc
+       FROM payment_methods 
+       WHERE user_id = ?
+       ORDER BY is_default DESC, created_at_utc DESC`,
+      [userId]
+    );
+
+    // Map to camelCase
+    const paymentMethods = methods.map(row => ({
+      methodId: row.method_id,
+      cardType: row.card_type,
+      lastFour: row.last_four,
+      expiryMonth: row.expiry_month,
+      expiryYear: row.expiry_year,
+      cardHolderName: row.card_holder_name,
+      isDefault: !!row.is_default,
+      createdAt: row.created_at_utc
+    }));
+
+    res.status(200).json(paymentMethods);
+
+  } catch (error) {
+    console.error('Error fetching payment methods:', error);
+    res.status(500).json(
+      createErrorResponse(500, 'Internal Server Error', 'Failed to fetch payment methods', req.path)
+    );
+  }
+});
+
+/**
+ * POST /:userId/payment-methods
+ * Add a new payment method
+ */
+app.post('/:userId/payment-methods', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { cardType, cardNumber, expiryMonth, expiryYear, cardHolderName, isDefault } = req.body;
+
+    // Basic validation
+    if (!cardType || !cardNumber || !expiryMonth || !expiryYear || !cardHolderName) {
+      throw new ValidationError('Missing required payment fields');
+    }
+
+    // Simple card validation (luhn check would be better but keeping it simple)
+    if (cardNumber.length < 13) {
+      throw new ValidationError('Invalid card number');
+    }
+
+    const lastFour = cardNumber.slice(-4);
+    const methodId = randomUUID();
+
+    // If setting as default, unset other defaults first
+    if (isDefault) {
+      await pool.execute(
+        'UPDATE payment_methods SET is_default = FALSE WHERE user_id = ?',
+        [userId]
+      );
+    }
+
+    await pool.execute(
+      `INSERT INTO payment_methods (
+        method_id, user_id, card_type, last_four, 
+        expiry_month, expiry_year, card_holder_name, is_default
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [methodId, userId, cardType, lastFour, expiryMonth, expiryYear, cardHolderName, isDefault || false]
+    );
+
+    res.status(201).json({
+      methodId,
+      cardType,
+      lastFour,
+      expiryMonth,
+      expiryYear,
+      cardHolderName,
+      isDefault: !!isDefault,
+      message: 'Payment method added successfully'
+    });
+
+  } catch (error) {
+    console.error('Error adding payment method:', error);
+    if (error instanceof ValidationError) {
+      return res.status(error.status).json(
+        createErrorResponse(error.status, error.error, error.message, req.path)
+      );
+    }
+    res.status(500).json(
+      createErrorResponse(500, 'Internal Server Error', 'Failed to add payment method', req.path)
+    );
+  }
+});
+
+/**
+ * DELETE /:userId/payment-methods/:methodId
+ * Remove a payment method
+ */
+app.delete('/:userId/payment-methods/:methodId', async (req, res) => {
+  try {
+    const { userId, methodId } = req.params;
+
+    const [result] = await pool.execute(
+      'DELETE FROM payment_methods WHERE method_id = ? AND user_id = ?',
+      [methodId, userId]
+    );
+
+    if (result.affectedRows === 0) {
+      throw new NotFoundError('Payment method not found');
+    }
+
+    res.status(204).send();
+
+  } catch (error) {
+    console.error('Error deleting payment method:', error);
+    if (error instanceof NotFoundError) {
+      return res.status(error.status).json(
+        createErrorResponse(error.status, error.error, error.message, req.path)
+      );
+    }
+    res.status(500).json(
+      createErrorResponse(500, 'Internal Server Error', 'Failed to delete payment method', req.path)
+    );
+  }
+});
+
+// ==================== ERROR HANDLING ====================
+
+app.use((req, res) => {
+  res.status(404).json(
+    createErrorResponse(404, 'Not Found', `Endpoint ${req.method} ${req.path} not found`, req.path)
+  );
+});
+
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  res.status(500).json(
+    createErrorResponse(500, 'Internal Server Error', 'An unexpected error occurred', req.path)
+  );
+});
+
+// ==================== SERVER STARTUP ====================
+
+app.listen(PORT, () => {
+  console.log(`
+╔═══════════════════════════════════════════════════════╗
+║          👤 USER SERVICE STARTED                      ║
+╠═══════════════════════════════════════════════════════╣
+║  Port:         ${PORT}                                   ║
+║  Database:     MySQL (${process.env.MYSQL_DB_USERS || 'kayak_users'})          ║
+║  Kafka:        ${kafkaProducer ? '✅ Connected' : '❌ Not Connected'}                       ║
+║  Time:         ${new Date().toISOString()}  ║
+╚═══════════════════════════════════════════════════════╝
+  `);
+});
+
+// ==================== GRACEFUL SHUTDOWN ====================
+
+process.on('SIGTERM', async () => {
+  console.log('SIGTERM received. Shutting down gracefully...');
+  await disconnectKafka(kafkaProducer, null);
+  await pool.end();
+  process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+  console.log('SIGINT received. Shutting down gracefully...');
+  await disconnectKafka(kafkaProducer, null);
+  await pool.end();
+  process.exit(0);
+});

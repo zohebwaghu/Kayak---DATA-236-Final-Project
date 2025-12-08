@@ -121,12 +121,21 @@ class SuggestionRequest(BaseModel):
 # ============================================
 
 def get_available_destinations(count: int = 3) -> List[str]:
-    """Get available destinations from deals cache dynamically"""
+    """
+    Get available destinations from Redis (instant) or memory cache.
+
+    This is the PROPER way to use Redis - reading pre-computed stats.
+    No 467K record loading, no 90 second wait. Just 1 Redis GET.
+    """
     if CACHE_AVAILABLE and deals_cache:
         try:
             stats = deals_cache.get_stats()
-            dests = list(stats.get("by_destination", {}).keys())[:count]
-            return dests if dests else ["a destination"]
+            # Try top_destinations list first (from Redis)
+            dests = stats.get("top_destinations", [])
+            if not dests:
+                # Fallback to by_destination keys (memory)
+                dests = list(stats.get("by_destination", {}).keys())
+            return dests[:count] if dests else ["a destination"]
         except Exception:
             pass
     return ["a destination"]
@@ -381,11 +390,12 @@ async def get_suggestions(request: SuggestionRequest):
         if session:
             params = session.get("search_params", {})
             
-            # Destination-based suggestions
+            # Destination-based suggestions - dynamic from database
             if not params.get("destination"):
+                dests = get_available_destinations(2)
                 suggestions.extend([
-                    "Find me a trip to Miami",
-                    "Show me deals to New York",
+                    f"Find me a trip to {dests[0]}",
+                    f"Show me deals to {dests[1] if len(dests) > 1 else dests[0]}",
                     "Where can I go for under $500?"
                 ])
             else:

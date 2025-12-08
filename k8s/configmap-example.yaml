@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kayak-env
+  namespace: kayak
+data:
+  JWT_SECRET: super-secret-key-change-in-production
+  CORS_ORIGIN: "http://localhost:3000"
+  RATE_LIMIT_WINDOW_MS: "900000"
+  RATE_LIMIT_MAX_REQUESTS: "1000"
+  KAFKA_BROKER: kafka.kayak.svc.cluster.local:9093
+  MYSQL_HOST: mysql
+  MONGO_URI: mongodb://mongodb:27017
+  REDIS_URL: redis://redis:6379

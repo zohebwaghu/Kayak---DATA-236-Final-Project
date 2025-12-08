@@ -5,7 +5,7 @@ Imports flights, hotels, and airports data into:
 - SQLite via SQLModel (Assignment requirement)
 
 With Deal Score fields: avg_30d_price, discount_percent, has_promo, promo_end_date
-Added: neighbourhood, near-transit tag, Indian city mapping for hotels
+Added: neighbourhood, near-transit tag, dynamic US city mapping for hotels (matched to flight destinations)
 """
 
 import pandas as pd
@@ -75,56 +75,38 @@ def load_airport_lookup(data_dir: str) -> Dict[str, Dict[str, str]]:
     return lookup
 
 # ============================================
-# City/Country Mapping for Hotels
-# Hotels CSV has European countries, Flights CSV has Indian cities
-# We map European countries to Indian cities for matching
+# City Mappings for Hotels - DYNAMIC from flight destinations
+# Hotels are mapped to the SAME destinations as flights
 # ============================================
 
-COUNTRY_TO_INDIAN_CITY = {
-    "PRT": {"city": "Mumbai", "code": "BOM"},      # Portugal → Mumbai
-    "GBR": {"city": "Delhi", "code": "DEL"},       # UK → Delhi
-    "ESP": {"city": "Bangalore", "code": "BLR"},   # Spain → Bangalore
-    "FRA": {"city": "Chennai", "code": "MAA"},     # France → Chennai
-    "DEU": {"city": "Kolkata", "code": "CCU"},     # Germany → Kolkata
-    "ITA": {"city": "Hyderabad", "code": "HYD"},   # Italy → Hyderabad
-    "NLD": {"city": "Mumbai", "code": "BOM"},      # Netherlands → Mumbai
-    "IRL": {"city": "Delhi", "code": "DEL"},       # Ireland → Delhi
-    "BEL": {"city": "Bangalore", "code": "BLR"},   # Belgium → Bangalore
-    "BRA": {"city": "Chennai", "code": "MAA"},     # Brazil → Chennai
-    "USA": {"city": "Mumbai", "code": "BOM"},      # USA → Mumbai
-    "CHE": {"city": "Delhi", "code": "DEL"},       # Switzerland → Delhi
-    "CN": {"city": "Kolkata", "code": "CCU"},      # China → Kolkata
-    "AUT": {"city": "Hyderabad", "code": "HYD"},   # Austria → Hyderabad
+# Global list of flight destinations - populated dynamically from MongoDB
+FLIGHT_DESTINATIONS = []
+
+# Airport code to city name mapping
+AIRPORT_TO_CITY = {
+    "BOS": "Boston", "CLT": "Charlotte", "DEN": "Denver", "DFW": "Dallas",
+    "DTW": "Detroit", "EWR": "Newark", "IAD": "Washington", "JFK": "New York",
+    "LAX": "Los Angeles", "SFO": "San Francisco", "ORD": "Chicago", "ATL": "Atlanta",
+    "MIA": "Miami", "SEA": "Seattle", "PHX": "Phoenix", "MCO": "Orlando",
 }
 
-# Default mapping for unknown countries
-DEFAULT_CITIES = [
-    {"city": "Mumbai", "code": "BOM"},
-    {"city": "Delhi", "code": "DEL"},
-    {"city": "Bangalore", "code": "BLR"},
-    {"city": "Chennai", "code": "MAA"},
-    {"city": "Kolkata", "code": "CCU"},
-    {"city": "Hyderabad", "code": "HYD"},
-]
-
-# Neighbourhoods for Indian cities (simulated)
+# Neighbourhoods for cities
 CITY_NEIGHBOURHOODS = {
-    "Mumbai": ["Bandra", "Andheri", "Juhu", "Colaba", "Worli", "Powai", "Lower Parel"],
-    "Delhi": ["Connaught Place", "Karol Bagh", "Paharganj", "Aerocity", "Dwarka", "Saket"],
-    "Bangalore": ["MG Road", "Koramangala", "Whitefield", "Indiranagar", "Electronic City"],
-    "Chennai": ["T Nagar", "Anna Nagar", "Adyar", "Egmore", "Mylapore", "OMR"],
-    "Kolkata": ["Park Street", "Salt Lake", "New Town", "Howrah", "Esplanade"],
-    "Hyderabad": ["Banjara Hills", "Jubilee Hills", "Hitech City", "Gachibowli", "Secunderabad"],
-}
-
-# City to airport code mapping (for flights)
-CITY_TO_AIRPORT = {
-    "Delhi": "DEL",
-    "Mumbai": "BOM",
-    "Bangalore": "BLR",
-    "Kolkata": "CCU",
-    "Hyderabad": "HYD",
-    "Chennai": "MAA"
+    "Boston": ["Back Bay", "Beacon Hill", "South End", "Downtown", "Cambridge"],
+    "Charlotte": ["Uptown", "South End", "NoDa", "Plaza Midwood", "Dilworth"],
+    "Denver": ["LoDo", "Capitol Hill", "Cherry Creek", "RiNo", "Highlands"],
+    "Dallas": ["Downtown", "Uptown", "Deep Ellum", "Bishop Arts", "Oak Lawn"],
+    "Detroit": ["Downtown", "Midtown", "Corktown", "Greektown", "New Center"],
+    "Newark": ["Downtown", "Ironbound", "University Heights", "North Ward"],
+    "Washington": ["Georgetown", "Dupont Circle", "Capitol Hill", "Adams Morgan"],
+    "New York": ["Manhattan", "Brooklyn", "SoHo", "Tribeca", "Chelsea", "Midtown"],
+    "Los Angeles": ["Hollywood", "Downtown", "Santa Monica", "Venice", "Beverly Hills"],
+    "San Francisco": ["Downtown", "SOMA", "Marina", "Mission", "Nob Hill"],
+    "Chicago": ["Loop", "River North", "Magnificent Mile", "Lincoln Park"],
+    "Atlanta": ["Downtown", "Midtown", "Buckhead", "Virginia Highland"],
+    "Miami": ["South Beach", "Downtown", "Brickell", "Coconut Grove", "Wynwood"],
+    "Seattle": ["Downtown", "Capitol Hill", "Pike Place", "Belltown", "Fremont"],
+    "Default": ["Downtown", "City Center", "Business District", "Old Town"],
 }
 
 
@@ -153,12 +135,38 @@ def connect_mysql():
         return None
 
 
-def get_indian_city(country_code: str, index: int) -> dict:
-    """Map country code to Indian city for hotel location"""
-    if country_code in COUNTRY_TO_INDIAN_CITY:
-        return COUNTRY_TO_INDIAN_CITY[country_code]
-    # Use index to distribute unknown countries across cities
-    return DEFAULT_CITIES[index % len(DEFAULT_CITIES)]
+def get_flight_destinations_from_db(db) -> list:
+    """
+    Get unique destination airport codes from imported flights.
+    This ensures hotels are mapped to the SAME destinations as flights.
+    """
+    try:
+        destinations = db["flights"].distinct("destination")
+        # Filter to only codes we have mappings for
+        valid_dests = [d for d in destinations if d in AIRPORT_TO_CITY]
+        print(f"Found {len(valid_dests)} flight destinations: {valid_dests[:10]}...")
+        return valid_dests if valid_dests else list(AIRPORT_TO_CITY.keys())
+    except Exception as e:
+        print(f"Error getting flight destinations: {e}")
+        return list(AIRPORT_TO_CITY.keys())
+
+
+def get_hotel_destination(index: int) -> dict:
+    """
+    Map hotel to a flight destination.
+    Uses FLIGHT_DESTINATIONS (populated from MongoDB after flights import).
+    Returns dict with city name and airport code.
+    """
+    if not FLIGHT_DESTINATIONS:
+        # Fallback to all known airports if not populated
+        codes = list(AIRPORT_TO_CITY.keys())
+    else:
+        codes = FLIGHT_DESTINATIONS
+
+    # Distribute hotels across destinations
+    code = codes[index % len(codes)]
+    city = AIRPORT_TO_CITY.get(code, code)
+    return {"city": city, "code": code}
 
 
 def get_neighbourhood(city: str, index: int) -> str:
@@ -526,8 +534,8 @@ def import_hotels(db, filepath, limit=None):
         hotel_idx = len(hotels)
         hash_val = hash(f"HT{hotel_idx:06d}") % 100
         
-        # Map to Indian city (Assignment: make hotels match flights)
-        city_info = get_indian_city(country_code, hotel_idx)
+        # Map to flight destination (dynamic from imported flights)
+        city_info = get_hotel_destination(hotel_idx)
         city = city_info["city"]
         city_code = city_info["code"]
         
@@ -591,9 +599,9 @@ def import_hotels(db, filepath, limit=None):
             "hotel_id": f"HT{hotel_idx:06d}",
             "name": f"{hotel_type} - {city} {neighbourhood}",
             "hotel_type": hotel_type,
-            "city": city,  # Indian city
+            "city": city,  # US city (from flight destinations)
             "city_code": city_code,
-            "country": "India",  # Mapped to India
+            "country": "USA",  # Mapped to US (same as flights)
             "original_country": country_code,  # Keep original for reference
             "neighbourhood": neighbourhood,  # Assignment requirement!
             "star_rating": star_rating,
@@ -628,7 +636,7 @@ def import_hotels(db, filepath, limit=None):
                 hotel_type=hotel_type,
                 city=city,
                 city_code=city_code,
-                country="India",
+                country="USA",
                 neighbourhood=neighbourhood,
                 price_per_night=round(adr, 2),
                 avg_30d_price=round(avg_30d_price, 2),
@@ -787,9 +795,14 @@ def main():
     
     if os.path.exists(flights_file):
         total += import_flights(mongo_db, flights_file, data_dir=DATA_DIR, chunk_size=50000, limit=None)
+        # IMPORTANT: Populate FLIGHT_DESTINATIONS from imported flights
+        # Hotels will be mapped to these same destinations
+        global FLIGHT_DESTINATIONS
+        FLIGHT_DESTINATIONS = get_flight_destinations_from_db(mongo_db)
+        print(f"Loaded {len(FLIGHT_DESTINATIONS)} flight destinations for hotel mapping")
     else:
         print(f"Warning: {flights_file} not found")
-    
+
     if os.path.exists(hotels_file):
         total += import_hotels(mongo_db, hotels_file, limit=None)
         total += import_users(mysql_conn, hotels_file, limit=10000)

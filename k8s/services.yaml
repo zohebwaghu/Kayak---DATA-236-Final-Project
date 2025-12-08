@@ -1,0 +1,309 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: kayak
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gateway
+  template:
+    metadata:
+      labels:
+        app: gateway
+    spec:
+      containers:
+        - name: gateway
+          image: gateway:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+          env:
+            - name: API_GATEWAY_PORT
+              value: "3000"
+            - name: KAFKA_BROKER
+              value: kafka.kayak.svc.cluster.local:9093
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: kayak
+spec:
+  type: ClusterIP
+  ports:
+    - port: 3000
+      targetPort: 3000
+  selector:
+    app: gateway
+---
+# User Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user-service
+  namespace: kayak
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: user-service
+  template:
+    metadata:
+      labels:
+        app: user-service
+    spec:
+      containers:
+        - name: user-service
+          image: user-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3001
+          env:
+            - name: MYSQL_HOST
+              value: mysql
+            - name: MYSQL_PORT
+              value: "3306"
+            - name: MYSQL_DB_USERS
+              value: kayak_users
+            - name: REDIS_URL
+              value: redis://redis:6379
+            - name: KAFKA_BROKER
+              value: kafka.kayak.svc.cluster.local:9093
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-service
+  namespace: kayak
+spec:
+  ports:
+    - port: 3001
+      targetPort: 3001
+  selector:
+    app: user-service
+---
+# Booking Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: booking-service
+  namespace: kayak
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: booking-service
+  template:
+    metadata:
+      labels:
+        app: booking-service
+    spec:
+      containers:
+        - name: booking-service
+          image: booking-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3004
+          env:
+            - name: MYSQL_HOST
+              value: mysql
+            - name: MYSQL_PORT
+              value: "3306"
+            - name: MYSQL_DB_BOOKINGS
+              value: kayak_bookings
+            - name: REDIS_URL
+              value: redis://redis:6379
+            - name: KAFKA_BROKER
+              value: kafka.kayak.svc.cluster.local:9093
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: booking-service
+  namespace: kayak
+spec:
+  ports:
+    - port: 3004
+      targetPort: 3004
+  selector:
+    app: booking-service
+---
+# Billing Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: billing-service
+  namespace: kayak
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: billing-service
+  template:
+    metadata:
+      labels:
+        app: billing-service
+    spec:
+      containers:
+        - name: billing-service
+          image: billing-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3005
+          env:
+            - name: MYSQL_HOST
+              value: mysql
+            - name: MYSQL_DB_BILLING
+              value: kayak_billing
+            - name: KAFKA_BROKER
+              value: kafka.kayak.svc.cluster.local:9093
+            - name: REDIS_URL
+              value: redis://redis:6379
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: billing-service
+  namespace: kayak
+spec:
+  ports:
+    - port: 3005
+      targetPort: 3005
+  selector:
+    app: billing-service
+---
+# Search Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: search-service
+  namespace: kayak
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: search-service
+  template:
+    metadata:
+      labels:
+        app: search-service
+    spec:
+      containers:
+        - name: search-service
+          image: search-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3003
+          env:
+            - name: MONGO_URI
+              value: mongodb://mongodb:27017
+            - name: MONGO_DB_SEARCH
+              value: kayak_doc
+            - name: REDIS_HOST
+              value: redis
+            - name: REDIS_PORT
+              value: "6379"
+            - name: KAFKA_BROKER
+              value: kafka.kayak.svc.cluster.local:9093
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: search-service
+  namespace: kayak
+spec:
+  ports:
+    - port: 3003
+      targetPort: 3003
+  selector:
+    app: search-service
+---
+# Admin Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: admin-service
+  namespace: kayak
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: admin-service
+  template:
+    metadata:
+      labels:
+        app: admin-service
+    spec:
+      containers:
+        - name: admin-service
+          image: admin-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3006
+          env:
+            - name: MYSQL_HOST
+              value: mysql
+            - name: MONGO_URI
+              value: mongodb://mongodb:27017
+            - name: MONGO_DB_SEARCH
+              value: kayak_doc
+            - name: KAFKA_BROKER
+              value: kafka.kayak.svc.cluster.local:9093
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: admin-service
+  namespace: kayak
+spec:
+  ports:
+    - port: 3006
+      targetPort: 3006
+  selector:
+    app: admin-service
+---
+# AI Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-service
+  namespace: kayak
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ai-service
+  template:
+    metadata:
+      labels:
+        app: ai-service
+    spec:
+      containers:
+        - name: ai-service
+          image: ai-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          env:
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: kafka.kayak.svc.cluster.local:9093
+            - name: REDIS_HOST
+              value: redis
+            - name: DB_HOST
+              value: mysql
+            - name: MONGO_URI
+              value: mongodb://mongodb:27017
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-service
+  namespace: kayak
+spec:
+  ports:
+    - port: 8000
+      targetPort: 8000
+  selector:
+    app: ai-service

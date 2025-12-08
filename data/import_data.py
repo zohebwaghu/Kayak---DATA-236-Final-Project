@@ -160,42 +160,114 @@ def import_airports(db, filepath):
 
 
 def import_flights(db, filepath, limit=10000):
-    """Import flights data to MongoDB and SQLite with Deal Score fields"""
+    """
+    Import flights data to MongoDB and SQLite with Deal Score fields.
+    Supports both US Flight Delay format (ORIGIN_AIRPORT, DISTANCE) and 
+    legacy Indian format (source_city, price) for backwards compatibility.
+    """
     print(f"\n=== Importing Flights from {filepath} ===")
     
     df = pd.read_csv(filepath, nrows=limit)
     print(f"Loaded {len(df)} flights")
     
+    # Detect dataset format
+    is_us_format = "ORIGIN_AIRPORT" in df.columns
+    print(f"Dataset format: {'US Flight Delay' if is_us_format else 'Legacy (Indian)'}")
+    
     # Set random seed for reproducibility
     random.seed(42)
     
+    # Airline code to name mapping for US dataset
+    AIRLINE_NAMES = {
+        "AA": "American Airlines", "DL": "Delta", "UA": "United Airlines",
+        "WN": "Southwest", "AS": "Alaska Airlines", "B6": "JetBlue",
+        "NK": "Spirit Airlines", "F9": "Frontier", "HA": "Hawaiian Airlines",
+        "VX": "Virgin America", "OO": "SkyWest", "MQ": "Envoy Air",
+        "EV": "ExpressJet", "US": "US Airways"
+    }
+    
     flights = []
     sqlite_flights = []
+    seen_routes = set()  # Deduplicate routes for variety
     
     for idx, row in df.iterrows():
-        source = row.get("source_city", "")
-        dest = row.get("destination_city", "")
-        price = float(row.get("price", 0)) if pd.notna(row.get("price")) else 0
+        # Read based on format
+        if is_us_format:
+            origin_code = str(row.get("ORIGIN_AIRPORT", "")).strip()
+            dest_code = str(row.get("DESTINATION_AIRPORT", "")).strip()
+            airline_code = str(row.get("AIRLINE", "")).strip()
+            airline = AIRLINE_NAMES.get(airline_code, airline_code)
+            flight_number = f"{airline_code}{row.get('FLIGHT_NUMBER', idx)}"
+            distance = float(row.get("DISTANCE", 500)) if pd.notna(row.get("DISTANCE")) else 500
+            
+            # Simulate price based on distance (Assignment: no price in delay dataset)
+            # Base fare $50 + $0.12/mile + random variance ±15%
+            base_price = 50 + (distance * 0.12)
+            variance = random.uniform(0.85, 1.15)
+            price = round(base_price * variance, 2)
+            
+            # Duration from scheduled time (minutes)
+            duration_mins = float(row.get("SCHEDULED_TIME", 0)) if pd.notna(row.get("SCHEDULED_TIME")) else 0
+            duration = round(duration_mins / 60, 2)  # Convert to hours
+            
+            # Format times
+            sched_dep = row.get("SCHEDULED_DEPARTURE", "")
+            sched_arr = row.get("SCHEDULED_ARRIVAL", "")
+            departure_time = f"{int(sched_dep):04d}" if pd.notna(sched_dep) and sched_dep else ""
+            arrival_time = f"{int(sched_arr):04d}" if pd.notna(sched_arr) and sched_arr else ""
+            
+            # All flights in delay dataset are direct (no connecting data)
+            stops = 0
+            flight_class = "Economy"
+            days_left = 30
+            
+            # Origin/dest city names from IATA (we'll keep code as city for now)
+            origin_city = origin_code
+            dest_city = dest_code
+        else:
+            # Legacy Indian format
+            source = row.get("source_city", "")
+            dest = row.get("destination_city", "")
+            origin_code = CITY_TO_AIRPORT.get(str(source).lower(), str(source)[:3].upper() if source else "")
+            dest_code = CITY_TO_AIRPORT.get(str(dest).lower(), str(dest)[:3].upper() if dest else "")
+            airline = row.get("airline", "Unknown")
+            flight_number = row.get("flight", "")
+            price = float(row.get("price", 0)) if pd.notna(row.get("price")) else 0
+            duration = float(row.get("duration", 0)) if pd.notna(row.get("duration")) else 0
+            departure_time = row.get("departure_time", "")
+            arrival_time = row.get("arrival_time", "")
+            stops = 0 if row.get("stops") == "zero" else (1 if row.get("stops") == "one" else 2)
+            flight_class = row.get("class", "Economy")
+            days_left = int(row.get("days_left", 30)) if pd.notna(row.get("days_left")) else 30
+            origin_city = source
+            dest_city = dest
+            distance = 500  # Default for legacy
         
-        # Generate Deal Score fields based on flight_id hash for consistency
+        # Skip invalid rows
+        if not origin_code or not dest_code or len(origin_code) < 3 or len(dest_code) < 3:
+            continue
+        
+        # Skip cancelled flights (US format)
+        if is_us_format and row.get("CANCELLED", 0) == 1:
+            continue
+        
+        # Deduplicate - keep max 3 flights per route for variety
+        route_key = f"{origin_code}-{dest_code}"
+        route_count = sum(1 for r in seen_routes if r == route_key)
+        if route_count >= 3:
+            continue
+        seen_routes.add(route_key)
+        
+        # Generate Deal Score fields
         hash_val = hash(f"FL{idx:06d}") % 100
-        
-        # 1. Discount: 5% to 30% (Assignment: >=15% below 30-day avg)
         discount_percent = 5 + (hash_val % 26)
         avg_30d_price = price / (1 - discount_percent / 100) if discount_percent < 100 else price * 1.2
-        
-        # 2. Inventory scarcity (Assignment: limited inventory)
         available_seats = 3 + (hash_val % 50)
-        
-        # 3. Promo (Assignment: promo end date, -10% to -25% dips)
         has_promo = hash_val % 3 == 0
         promo_end_date = None
         if has_promo:
             days_until_end = 1 + (hash_val % 14)
             promo_end_date = (datetime.now() + timedelta(days=days_until_end)).isoformat()
-        
-        # Parse stops
-        stops = 0 if row.get("stops") == "zero" else (1 if row.get("stops") == "one" else 2)
         
         # Build tags
         tags = []
@@ -203,39 +275,32 @@ def import_flights(db, filepath, limit=10000):
             tags.append("direct-flight")
         if has_promo:
             tags.append("promo")
-        if row.get("class", "").lower() == "business":
+        if flight_class.lower() == "business":
             tags.append("business-class")
         
-        # Calculate Deal Score (0-100)
+        # Calculate Deal Score
         discount_score = min(30, discount_percent)
         scarcity_score = 20 if available_seats < 10 else (10 if available_seats < 20 else 0)
         promo_score = 15 if has_promo else 0
         direct_score = 10 if stops == 0 else 0
         deal_score = min(95, max(30, 25 + discount_score + scarcity_score + promo_score + direct_score))
         
-        origin_code = CITY_TO_AIRPORT.get(source, str(source)[:3].upper() if source else "")
-        dest_code = CITY_TO_AIRPORT.get(dest, str(dest)[:3].upper() if dest else "")
-
-        # Skip rows without usable route codes
-        if not origin_code or not dest_code or len(origin_code) < 3 or len(dest_code) < 3:
-            continue
-        
         flight = {
             "flight_id": f"FL{idx:06d}",
-            "airline": row.get("airline", "Unknown"),
-            "flight_number": row.get("flight", ""),
+            "airline": airline,
+            "flight_number": flight_number,
             "origin": origin_code,
-            "origin_city": source,
+            "origin_city": origin_city,
             "destination": dest_code,
-            "destination_city": dest,
-            "departure_time": row.get("departure_time", ""),
-            "arrival_time": row.get("arrival_time", ""),
-            "duration": float(row.get("duration", 0)) if pd.notna(row.get("duration")) else 0,
+            "destination_city": dest_city,
+            "departure_time": departure_time,
+            "arrival_time": arrival_time,
+            "duration": duration,
             "stops": stops,
-            "class": row.get("class", "Economy"),
+            "class": flight_class,
             "price": price,
-            "days_left": int(row.get("days_left", 30)) if pd.notna(row.get("days_left")) else 30,
-            # Deal Score fields
+            "distance": distance if is_us_format else 0,
+            "days_left": days_left,
             "avg_30d_price": round(avg_30d_price, 2),
             "discount_percent": discount_percent,
             "available_seats": available_seats,
@@ -252,16 +317,16 @@ def import_flights(db, filepath, limit=10000):
             sqlite_flights.append(FlightDeal(
                 flight_id=f"FL{idx:06d}",
                 origin=origin_code,
-                origin_city=source,
+                origin_city=origin_city,
                 destination=dest_code,
-                destination_city=dest,
-                airline=row.get("airline", "Unknown"),
-                flight_number=row.get("flight", "") or None,
-                departure_time=row.get("departure_time", "") or None,
-                arrival_time=row.get("arrival_time", "") or None,
-                duration=float(row.get("duration", 0)) if pd.notna(row.get("duration")) else 0,
+                destination_city=dest_city,
+                airline=airline,
+                flight_number=flight_number or None,
+                departure_time=str(departure_time) if departure_time else None,
+                arrival_time=str(arrival_time) if arrival_time else None,
+                duration=duration,
                 stops=stops,
-                flight_class=row.get("class", "Economy"),
+                flight_class=flight_class,
                 price=price,
                 avg_30d_price=round(avg_30d_price, 2),
                 discount_percent=discount_percent,
@@ -271,7 +336,7 @@ def import_flights(db, filepath, limit=10000):
                 deal_score=deal_score,
                 tags=json.dumps(tags),
                 rating=4.0,
-                days_left=int(row.get("days_left", 30)) if pd.notna(row.get("days_left")) else 30
+                days_left=days_left
             ))
     
     # Insert to MongoDB
@@ -408,9 +473,9 @@ def import_hotels(db, filepath, limit=10000):
             "hotel_id": f"HT{hotel_idx:06d}",
             "name": f"{hotel_type} - {city} {neighbourhood}",
             "hotel_type": hotel_type,
-            "city": city,  # Indian city
+            "city": city,  # Country code from dataset
             "city_code": city_code,
-            "country": "India",  # Mapped to India
+            "country": country_code,  # Actual country from dataset
             "original_country": country_code,  # Keep original for reference
             "neighbourhood": neighbourhood,  # Assignment requirement!
             "star_rating": star_rating,
@@ -445,7 +510,7 @@ def import_hotels(db, filepath, limit=10000):
                 hotel_type=hotel_type,
                 city=city,
                 city_code=city_code,
-                country="India",
+                country=country_code,
                 neighbourhood=neighbourhood,
                 price_per_night=round(adr, 2),
                 avg_30d_price=round(avg_30d_price, 2),
@@ -593,10 +658,15 @@ def main():
     mongo_db = connect_mongo()
     mysql_conn = connect_mysql()
     
-    # File paths
+    # File paths - use US Flight Delay dataset (global routes, no Indian cities)
     airports_file = os.path.join(DATA_DIR, "airports.csv")
-    flights_file = os.path.join(DATA_DIR, "Clean_Dataset.csv")
+    # Primary: US flight delay dataset, Fallback: legacy dataset
+    flights_file = os.path.join(DATA_DIR, "data_set_kgl", "flightdelay", "flights.csv")
+    if not os.path.exists(flights_file):
+        flights_file = os.path.join(DATA_DIR, "Clean_Dataset.csv")
     hotels_file = os.path.join(DATA_DIR, "hotel_booking.csv")
+    if not os.path.exists(hotels_file):
+        hotels_file = os.path.join(DATA_DIR, "data_set_kgl", "hotelbooking", "hotel_booking.csv")
     
     # Import data
     total = 0

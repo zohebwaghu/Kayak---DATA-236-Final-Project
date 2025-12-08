@@ -349,7 +349,7 @@ async def get_bundles(
         flight = flights[i] if i < len(flights) else (flights[0] if flights else None)
         hotel = hotels[i] if i < len(hotels) else (hotels[0] if hotels else None)
         
-        if flight or hotel:
+        if flight and hotel:  # Both flight AND hotel required for valid bundle
             bundle = build_bundle_response(flight, hotel, params, i + 1)
             bundles.append(bundle)
     
@@ -432,7 +432,7 @@ async def search_bundles(request: BundleSearchRequest):
         flight = flights[i] if i < len(flights) else (flights[0] if flights else None)
         hotel = hotels[i] if i < len(hotels) else (hotels[0] if hotels else None)
         
-        if flight or hotel:
+        if flight and hotel:  # Both flight AND hotel required for valid bundle
             bundle = build_bundle_response(flight, hotel, params, i + 1)
             bundles.append(bundle)
     
@@ -549,8 +549,35 @@ async def search_bundles(request: BundleSearchRequest):
 @router.get("/{bundle_id}", response_model=BundleResponse)
 async def get_bundle(bundle_id: str):
     """Get a specific bundle by ID"""
-    # In production, would look up from cache/database
-    # For now, return 404
+    # Try to get from deals_cache
+    if deals_cache:
+        deal = deals_cache.get_deal(bundle_id)
+        if deal:
+            # Convert deal to BundleResponse
+            return BundleResponse(
+                bundle_id=deal.get("deal_id", bundle_id),
+                name=deal.get("name", "Travel Package"),
+                destination=deal.get("destination", ""),
+                total_price=deal.get("price", 0),
+                deal_score=deal.get("deal_score", 70),
+                flight=None,  # Would need to fetch from flight data
+                hotel=None,   # Would need to fetch from hotel data
+                explanation=Explanation(
+                    why_this=deal.get("why_this", "Good value"),
+                    what_to_watch=deal.get("what_to_watch", "Book soon"),
+                    confidence=0.85
+                ),
+                tags=deal.get("tags", []),
+                listing_date=deal.get("listing_date", datetime.utcnow().strftime("%Y-%m-%d"))
+            )
+
+    # Try session store for recently created bundles
+    if session_store:
+        # Check all sessions for this bundle
+        bundle_data = session_store.get_bundle(bundle_id)
+        if bundle_data:
+            return BundleResponse(**bundle_data)
+
     raise HTTPException(status_code=404, detail=f"Bundle {bundle_id} not found")
 
 
