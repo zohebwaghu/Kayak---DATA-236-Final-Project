@@ -29,6 +29,13 @@ import { selectIsAuthenticated, selectUser } from '../../store/slices/authSlice'
 import AiPriceAnalysis from '../../components/ai/AiPriceAnalysis';
 import AiQuoteModal from '../../components/ai/AiQuoteModal';
 
+const HERO_PHOTOS = [
+  'https://images.unsplash.com/photo-1502920917128-1aa500764b1c?auto=format&fit=crop&w=800&q=80',
+  'https://images.unsplash.com/photo-1469474968028-56623f02e42e?auto=format&fit=crop&w=800&q=80',
+  'https://images.unsplash.com/photo-1523906834658-6e24ef2386f9?auto=format&fit=crop&w=800&q=80',
+  'https://images.unsplash.com/photo-1505761671935-60b3a7427bad?auto=format&fit=crop&w=800&q=80',
+];
+
 const HomeSearchPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -484,7 +491,32 @@ const HomeSearchPage = () => {
         {/* HERO */}
         <section className="home-hero">
           <div className="home-hero-left">
+            <div className="home-hero-badges">
+              <span className="badge-pill">Flights</span>
+              <span className="badge-pill">Stays</span>
+              <span className="badge-pill">Cars</span>
+              <span className="badge-pill badge-pill-ai">AI Mode</span>
+            </div>
+
             <h1 className="home-hero-title">{getHeading()}</h1>
+            <p className="home-hero-subtitle">
+              One search compares prices across 100s of sites. AI highlights deals, tags promos, and keeps you on-budget.
+            </p>
+
+            <div className="home-hero-stats">
+              <div className="hero-stat-card">
+                <span className="hero-stat-value">41M+</span>
+                <span className="hero-stat-label">searches this week</span>
+              </div>
+              <div className="hero-stat-card">
+                <span className="hero-stat-value">4.8★</span>
+                <span className="hero-stat-label">traveler rating</span>
+              </div>
+              <div className="hero-stat-card">
+                <span className="hero-stat-value">Top routes</span>
+                <span className="hero-stat-label">SJC ↔ LAS • SFO ↔ NYC</span>
+              </div>
+            </div>
 
             {/* Tabs row */}
             <div className="home-tabs-row">
@@ -576,6 +608,25 @@ const HomeSearchPage = () => {
                   conversationHistory={aiConversation}
                 />
               )}
+            </div>
+
+            <div className="home-hero-meta">
+              <span>Compare vs. KAYAK</span>
+              <label className="compare-checkbox">
+                <input type="checkbox" defaultChecked /> Southwest
+              </label>
+              <label className="compare-checkbox">
+                <input type="checkbox" /> Direct flights only
+              </label>
+            </div>
+          </div>
+
+          <div className="home-hero-right">
+            <div className="hero-collage">
+              <div className="hero-photo hero-photo-lg" style={{ backgroundImage: `url(${HERO_PHOTOS[0]})` }} />
+              <div className="hero-photo hero-photo-sm" style={{ backgroundImage: `url(${HERO_PHOTOS[1]})` }} />
+              <div className="hero-photo hero-photo-sm" style={{ backgroundImage: `url(${HERO_PHOTOS[2]})` }} />
+              <div className="hero-photo hero-photo-lg" style={{ backgroundImage: `url(${HERO_PHOTOS[3]})` }} />
             </div>
           </div>
         </section>
